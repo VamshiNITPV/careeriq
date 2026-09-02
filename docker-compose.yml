@@ -1,0 +1,86 @@
+# CareerIQ — local development stack.
+#
+# Usage:
+#   docker compose up -d          start postgres + redis
+#   docker compose up             start everything including the API
+#   docker compose down           stop (data survives)
+#   docker compose down -v        stop and DELETE the database volume
+#
+# See docs/architecture.md ADR-016 for why this exists.
+
+name: careeriq
+
+services:
+  postgres:
+    # pgvector's own image = postgres 16 with the vector extension preinstalled.
+    # Using plain `postgres:16` would require building the extension ourselves (ADR-002).
+    image: pgvector/pgvector:pg16
+    container_name: careeriq-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: careeriq
+      POSTGRES_PASSWORD: careeriq_dev_password
+      POSTGRES_DB: careeriq
+      # Deterministic collation so index ordering matches across machines.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infrastructure/docker/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # Depended-on services must wait for readiness, not just container start.
+      # Postgres briefly accepts connections during init before it is truly ready.
+      test: ["CMD-SHELL", "pg_isready -U careeriq -d careeriq"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: careeriq-redis
+    restart: unless-stopped
+    # appendonly makes Redis durable across restarts. Cache is never authoritative
+    # (ADR-008), but losing background task state on every restart is needless pain.
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    container_name: careeriq-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Inside the compose network, reach services by name — not localhost.
+      DATABASE_URL: postgresql+asyncpg://careeriq:careeriq_dev_password@postgres:5432/careeriq
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    volumes:
+      # Bind mount so --reload picks up edits without a rebuild.
+      # Dependencies live in the image's system site-packages, not under /app,
+      # so this mount does not shadow them.
+      - ./backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+volumes:
+  pgdata:
+  redisdata:

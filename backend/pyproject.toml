@@ -1,0 +1,72 @@
+# Tool configuration only. Dependencies live in requirements*.txt so that Docker
+# can cache the dependency layer independently of this file.
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["app", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort — import ordering
+    "B",    # flake8-bugbear — likely bugs
+    "C4",   # flake8-comprehensions
+    "UP",   # pyupgrade — modern syntax
+    "ASYNC",# flake8-async — blocking calls inside async functions
+    "S",    # bandit — security issues
+    "T20",  # flake8-print — no stray print()
+    "SIM",  # flake8-simplify
+    "RUF",  # ruff-specific
+]
+ignore = [
+    "B008",  # FastAPI's Depends() in defaults is the documented pattern
+    "S101",  # assert is how pytest works
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests legitimately use hardcoded credentials and assert.
+"tests/*" = ["S105", "S106", "S311"]
+# Alembic generates its own style.
+"alembic/versions/*" = ["E501", "I001"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# asyncio_mode = auto means async test functions need no decorator.
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "-ra",
+]
+markers = [
+    "integration: requires a live database or redis",
+]
+
+[tool.coverage.run]
+source = ["app"]
+omit = ["app/main.py", "*/alembic/*"]
+
+[tool.coverage.report]
+# NFR-9 targets 80% on services/ and repositories/. Enforced in CI (Phase 11).
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
+
+[tool.mypy]
+python_version = "3.13"
+plugins = ["pydantic.mypy"]
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false

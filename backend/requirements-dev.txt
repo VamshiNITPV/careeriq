@@ -1,0 +1,16 @@
+# CareerIQ backend — development and test dependencies.
+# Never installed into the production image (see Dockerfile stages).
+
+# --- testing ---
+pytest>=8.3
+pytest-asyncio>=0.24
+pytest-cov>=6.0
+# httpx powers FastAPI's ASGI test transport — requests never touch the network.
+httpx>=0.28
+
+# --- quality ---
+ruff>=0.8
+mypy>=1.13
+
+# --- typing stubs ---
+types-redis>=4.6

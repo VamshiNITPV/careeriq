@@ -1,0 +1,35 @@
+# CareerIQ backend — runtime dependencies.
+#
+# Lower bounds only. Exact resolved versions are captured in requirements.lock,
+# which is what CI installs (Phase 11). Keep this file readable; keep the lock
+# reproducible.
+
+# --- web framework ---
+fastapi>=0.115
+uvicorn[standard]>=0.32
+
+# --- validation & settings ---
+pydantic>=2.10
+pydantic-settings>=2.7
+email-validator>=2.2
+
+# --- database ---
+sqlalchemy[asyncio]>=2.0.36
+asyncpg>=0.30
+alembic>=1.14
+
+# --- cache / queue ---
+redis>=5.2
+
+# --- security ---
+# PyJWT rather than python-jose: actively maintained, smaller surface, and the
+# only thing we need is HS256 sign/verify.
+pyjwt>=2.10
+# bcrypt directly rather than passlib: passlib is effectively unmaintained and
+# its bcrypt backend misdetects the version of bcrypt 4.x, emitting warnings and
+# in some versions failing outright.
+bcrypt>=4.2
+
+# --- misc ---
+structlog>=24.4
+python-multipart>=0.0.20
