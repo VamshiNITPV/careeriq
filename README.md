@@ -97,8 +97,8 @@ Read these in order:
 
 | Phase | Scope | Status |
 |---|---|---|
-| 1 | Architecture, requirements, schema, API design | 🟡 In progress |
-| 2 | Backend foundation — FastAPI, Postgres, SQLAlchemy, Alembic, auth | ⬜ |
+| 1 | Architecture, requirements, schema, API design | ✅ Done |
+| 2 | Backend foundation — FastAPI, Postgres, SQLAlchemy, Alembic, auth | ✅ Done |
 | 3 | Frontend foundation — React, TypeScript, auth, dashboard shell | ⬜ |
 | 4 | Resume intelligence — upload, parsing, NLP, structured profile | ⬜ |
 | 5 | Job intelligence — ingestion, JD parsing, skill extraction, dedup | ⬜ |
@@ -114,7 +114,66 @@ Read these in order:
 
 ## Getting started
 
-> Local development requires Docker Desktop. Setup instructions land in Phase 2.
+**Prerequisite:** Docker Desktop (WSL2 backend on Windows).
+
+```bash
+# 1. Configure
+cp .env.example .env
+
+# 2. Generate a real JWT secret and paste it into .env as JWT_SECRET_KEY.
+#    Startup fails loudly if it is left as the placeholder.
+python -c "import secrets; print(secrets.token_urlsafe(64))"
+
+# 3. Start Postgres (with pgvector) and Redis
+docker compose up -d postgres redis
+
+# 4. Create the schema
+docker compose run --rm backend alembic upgrade head
+
+# 5. Start the API
+docker compose up -d backend
+```
+
+The API is then at **http://localhost:8000**, with interactive docs at
+[`/docs`](http://localhost:8000/docs) and the OpenAPI schema at `/openapi.json`.
+
+> **Port already in use?** `8000` is a common default and may be taken by other
+> software. Set `BACKEND_PORT=8080` in `.env` and restart — the container port is
+> unchanged, so nothing else needs adjusting. Find the culprit with
+> `netstat -ano | findstr :8000`.
+
+### Common commands
+
+```bash
+docker compose run --rm backend pytest                  # full test suite
+docker compose run --rm backend pytest tests/unit -q    # unit tests only
+docker compose run --rm backend ruff check app tests    # lint
+docker compose run --rm backend ruff format app tests   # format
+docker compose run --rm backend alembic check           # detect model/schema drift
+docker compose run --rm backend alembic revision --autogenerate -m "message"
+docker compose logs -f backend                          # tail logs
+docker compose down                                     # stop (data survives)
+docker compose down -v                                  # stop and DELETE the database
+```
+
+### Verifying it works
+
+```bash
+curl http://localhost:8000/api/v1/health
+curl http://localhost:8000/api/v1/health/ready
+
+curl -X POST http://localhost:8000/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"you@example.com","password":"correct-horse-9"}'
+```
+
+### Notes for this repository
+
+This repository lives inside a OneDrive-synced folder. OneDrive converts empty
+files into cloud-only placeholders that Docker's build cannot read, and it will
+try to sync `node_modules/` and virtualenvs. If a build fails with
+`invalid file request`, or `npm install` hits file-lock errors, that is the
+cause — see ADR-016 in [docs/architecture.md](docs/architecture.md).
 
 ---
 
