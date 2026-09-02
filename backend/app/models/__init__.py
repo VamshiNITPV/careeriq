@@ -18,23 +18,33 @@ from app.models.enums import (
     EducationLevel,
     EmploymentType,
     ExperienceLevel,
+    ProcessingStatus,
+    ProficiencyLevel,
     UserRole,
     VerificationPurpose,
     WorkMode,
 )
 from app.models.profile import Profile
+from app.models.resume import Resume, ResumeVersion
+from app.models.skill import CandidateSkill, Skill
 from app.models.user import RefreshToken, User
 from app.models.verification import VerificationToken
 
 __all__ = [
     "AuthProvider",
     "Base",
+    "CandidateSkill",
     "CreatedAtMixin",
     "EducationLevel",
     "EmploymentType",
     "ExperienceLevel",
+    "ProcessingStatus",
+    "ProficiencyLevel",
     "Profile",
     "RefreshToken",
+    "Resume",
+    "ResumeVersion",
+    "Skill",
     "SoftDeleteMixin",
     "TimestampMixin",
     "UUIDPrimaryKeyMixin",

@@ -47,6 +47,29 @@ class VerificationPurpose(StrEnum):
     EMAIL_VERIFICATION = "EMAIL_VERIFICATION"
 
 
+class ProcessingStatus(StrEnum):
+    """Stages of the resume pipeline (ADR-009).
+
+    Ordered as the pipeline runs. FAILED is terminal and always carries a
+    reason — a task that simply stops with no explanation is unusable to both
+    the user and whoever debugs it (US-2.2 AC2).
+    """
+
+    PENDING = "PENDING"
+    EXTRACTING = "EXTRACTING"
+    PARSING = "PARSING"
+    EMBEDDING = "EMBEDDING"
+    COMPLETE = "COMPLETE"
+    FAILED = "FAILED"
+
+
+class ProficiencyLevel(StrEnum):
+    BEGINNER = "BEGINNER"
+    INTERMEDIATE = "INTERMEDIATE"
+    ADVANCED = "ADVANCED"
+    EXPERT = "EXPERT"
+
+
 class ExperienceLevel(StrEnum):
     INTERN = "INTERN"
     ENTRY = "ENTRY"
