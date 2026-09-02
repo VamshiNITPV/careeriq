@@ -241,4 +241,5 @@ class TestUuidNotConfusedWithSubject:
     def test_uuid4_subject_also_roundtrips(self) -> None:
         # Guards against accidentally coupling token handling to uuid7.
         subject = uuid.uuid4()
-        assert decode_access_token(create_access_token(subject=subject, role="USER")).subject == subject
+        token = create_access_token(subject=subject, role="USER")
+        assert decode_access_token(token).subject == subject

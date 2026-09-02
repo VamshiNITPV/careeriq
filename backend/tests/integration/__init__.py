@@ -1,1 +1,1 @@
-﻿"""Integration tests. Require a live database."""
+"""Integration tests. Require a live database."""

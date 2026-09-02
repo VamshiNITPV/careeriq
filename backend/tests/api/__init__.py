@@ -1,1 +1,1 @@
-﻿"""API tests exercising routers through the ASGI transport."""
+"""API tests exercising routers through the ASGI transport."""

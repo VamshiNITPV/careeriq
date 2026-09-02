@@ -1,1 +1,1 @@
-﻿"""Unit tests. No database, no network."""
+"""Unit tests. No database, no network."""
