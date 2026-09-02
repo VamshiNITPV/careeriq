@@ -16,7 +16,8 @@ from __future__ import annotations
 
 import asyncio
 import os
-from collections.abc import AsyncGenerator
+import uuid
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -49,11 +50,20 @@ from sqlalchemy import text  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine  # noqa: E402
 from sqlalchemy.pool import NullPool  # noqa: E402
 
-from app.api.deps import get_notification_service  # noqa: E402
-from app.core.database import get_db_session  # noqa: E402
+from app.api.deps import (  # noqa: E402
+    get_notification_service,
+    get_pipeline_runner,
+    get_storage,
+)
+from app.core.database import dispose_engine, get_db_session  # noqa: E402
 from app.integrations.email import CapturingEmailProvider  # noqa: E402
+from app.integrations.storage import LocalObjectStorage  # noqa: E402
 from app.main import create_app  # noqa: E402
 from app.services.notifications import NotificationService  # noqa: E402
+from app.services.resume.pipeline import (  # noqa: E402
+    process_resume_version,
+    seed_skill_taxonomy,
+)
 
 TEST_DATABASE_URL = os.environ["DATABASE_URL"]
 API = "/api/v1"
@@ -117,6 +127,56 @@ async def db_session() -> AsyncGenerator[AsyncSession]:
         await engine.dispose()
 
 
+@pytest.fixture(autouse=True)
+async def _dispose_global_engine() -> AsyncGenerator[None]:
+    """Drop the process-wide engine after each test.
+
+    Anything reaching for it — the readiness probe, for instance — would
+    otherwise bind it to the first test's event loop and then fail in every
+    later test with "attached to a different loop". Disposing means each test
+    gets an engine on its own loop.
+    """
+    yield
+    await dispose_engine()
+
+
+@pytest.fixture
+def storage(tmp_path: Path) -> LocalObjectStorage:
+    """Object storage rooted in a per-test temporary directory.
+
+    Never the configured upload path: a test run must not write into, or delete
+    from, a real storage location.
+    """
+    return LocalObjectStorage(tmp_path / "uploads")
+
+
+@pytest.fixture
+async def seeded_skills(db_session: AsyncSession) -> int:
+    """Load the skill taxonomy into the test transaction.
+
+    Opt-in rather than autouse — most tests do not need ~150 rows inserted, and
+    the ones that do say so.
+    """
+    return await seed_skill_taxonomy(db_session)
+
+
+@pytest.fixture
+def run_pipeline(
+    db_session: AsyncSession, storage: LocalObjectStorage
+) -> Callable[[uuid.UUID], Awaitable[object]]:
+    """Run the resume pipeline against this test's session and storage.
+
+    Injected rather than left to the process-wide defaults: the rows under test
+    live in an uncommitted transaction that a separate connection cannot see,
+    and the uploaded file is in a temporary directory, not the configured store.
+    """
+
+    async def _run(version_id: uuid.UUID) -> object:
+        return await process_resume_version(version_id, session=db_session, storage=storage)
+
+    return _run
+
+
 @pytest.fixture
 def emails() -> CapturingEmailProvider:
     """Captures every email the app tries to send.
@@ -130,7 +190,9 @@ def emails() -> CapturingEmailProvider:
 
 @pytest.fixture
 async def client(
-    db_session: AsyncSession, emails: CapturingEmailProvider
+    db_session: AsyncSession,
+    emails: CapturingEmailProvider,
+    storage: LocalObjectStorage,
 ) -> AsyncGenerator[AsyncClient]:
     """HTTP client wired to the app, sharing the test's rolled-back session.
 
@@ -158,6 +220,16 @@ async def client(
 
     app.dependency_overrides[get_db_session] = override_session
     app.dependency_overrides[get_notification_service] = lambda: NotificationService(emails)
+    app.dependency_overrides[get_storage] = lambda: storage
+
+    # Tests drive the pipeline explicitly via the run_pipeline fixture, which
+    # injects this test's session and storage. Left in place, the real
+    # background task would run on the global engine, fail to find rows that
+    # live in an uncommitted transaction, and log an ERROR on every upload.
+    async def no_background_pipeline(_version_id: uuid.UUID) -> None:
+        return None
+
+    app.dependency_overrides[get_pipeline_runner] = lambda: no_background_pipeline
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http_client:
         yield http_client

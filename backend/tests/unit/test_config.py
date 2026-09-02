@@ -126,6 +126,7 @@ class TestProductionHardening:
             "cors_origins": "https://app.example.com",
             "email_provider": "smtp",
             "frontend_base_url": "https://app.example.com",
+            "storage_provider": "gcs",
         }
         build(**{**defaults, **overrides})._check_production_hardening()
 
@@ -137,6 +138,12 @@ class TestProductionHardening:
         # arrives — users locked out with no error logged anywhere.
         with pytest.raises(ValueError, match="EMAIL_PROVIDER"):
             self._check(email_provider="console")
+
+    def test_local_storage_is_rejected(self) -> None:
+        # Cloud Run has no persistent disk and scales to zero, so local storage
+        # means uploaded resumes disappear when an instance is recycled.
+        with pytest.raises(ValueError, match="STORAGE_PROVIDER"):
+            self._check(storage_provider="local")
 
     def test_insecure_frontend_url_is_rejected(self) -> None:
         # Links in emails are built from this value, so http would send every
