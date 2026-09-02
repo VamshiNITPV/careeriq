@@ -49,8 +49,11 @@ from sqlalchemy import text  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine  # noqa: E402
 from sqlalchemy.pool import NullPool  # noqa: E402
 
+from app.api.deps import get_notification_service  # noqa: E402
 from app.core.database import get_db_session  # noqa: E402
+from app.integrations.email import CapturingEmailProvider  # noqa: E402
 from app.main import create_app  # noqa: E402
+from app.services.notifications import NotificationService  # noqa: E402
 
 TEST_DATABASE_URL = os.environ["DATABASE_URL"]
 API = "/api/v1"
@@ -115,7 +118,20 @@ async def db_session() -> AsyncGenerator[AsyncSession]:
 
 
 @pytest.fixture
-async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient]:
+def emails() -> CapturingEmailProvider:
+    """Captures every email the app tries to send.
+
+    Asserting on real message content — that a reset link is present, that a
+    security notice went to the right address — is far more useful than
+    asserting an SMTP call happened. It also keeps the suite offline.
+    """
+    return CapturingEmailProvider()
+
+
+@pytest.fixture
+async def client(
+    db_session: AsyncSession, emails: CapturingEmailProvider
+) -> AsyncGenerator[AsyncClient]:
     """HTTP client wired to the app, sharing the test's rolled-back session.
 
     ASGITransport dispatches in-process: no port is bound and no network call is
@@ -141,6 +157,7 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient]:
             raise
 
     app.dependency_overrides[get_db_session] = override_session
+    app.dependency_overrides[get_notification_service] = lambda: NotificationService(emails)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http_client:
         yield http_client

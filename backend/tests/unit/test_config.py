@@ -116,10 +116,33 @@ class TestProductionHardening:
     """Settings that are merely unwise locally must be fatal in production."""
 
     def _check(self, **overrides: object) -> None:
-        build(environment="production", log_json=True, **overrides)._check_production_hardening()
+        # A baseline that satisfies every rule, so each test can break exactly
+        # one thing and see only that failure reported.
+        defaults: dict[str, object] = {
+            "environment": "production",
+            "log_json": True,
+            "debug": False,
+            "bcrypt_rounds": 12,
+            "cors_origins": "https://app.example.com",
+            "email_provider": "smtp",
+            "frontend_base_url": "https://app.example.com",
+        }
+        build(**{**defaults, **overrides})._check_production_hardening()
 
     def test_valid_production_config_passes(self) -> None:
-        self._check(debug=False, bcrypt_rounds=12, cors_origins="https://app.example.com")
+        self._check()
+
+    def test_console_email_provider_is_rejected(self) -> None:
+        # Console delivery in production means password reset silently never
+        # arrives — users locked out with no error logged anywhere.
+        with pytest.raises(ValueError, match="EMAIL_PROVIDER"):
+            self._check(email_provider="console")
+
+    def test_insecure_frontend_url_is_rejected(self) -> None:
+        # Links in emails are built from this value, so http would send every
+        # password reset over plaintext.
+        with pytest.raises(ValueError, match="FRONTEND_BASE_URL"):
+            self._check(frontend_base_url="http://app.example.com")
 
     def test_debug_true_is_rejected(self) -> None:
         with pytest.raises(ValueError, match="DEBUG must be false"):
