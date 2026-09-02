@@ -36,6 +36,10 @@ known-first-party = ["app", "tests"]
 "tests/*" = ["S105", "S106", "S311"]
 # Alembic generates its own style.
 "alembic/versions/*" = ["E501", "I001"]
+# Email templates are inline HTML with mandatory inline styles — mail clients
+# strip <style> blocks. Wrapping the attribute strings to 100 columns would make
+# them markedly harder to read for no benefit.
+"app/integrations/email/templates.py" = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

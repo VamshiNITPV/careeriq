@@ -30,6 +30,11 @@ pyjwt>=2.10
 # in some versions failing outright.
 bcrypt>=4.2
 
+# --- email ---
+# Async SMTP. stdlib smtplib is blocking and would stall the event loop for the
+# duration of every send (ADR-004).
+aiosmtplib>=3.0
+
 # --- misc ---
 structlog>=24.4
 python-multipart>=0.0.20
