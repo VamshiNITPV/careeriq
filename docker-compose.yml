@@ -89,6 +89,31 @@ services:
         condition: service_healthy
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: development
+    container_name: careeriq-frontend
+    restart: unless-stopped
+    environment:
+      # Inside the compose network the API is reachable by service name. The
+      # browser only ever calls /api on the dev server's own origin, which Vite
+      # proxies here — so development runs same-origin.
+      VITE_API_PROXY_TARGET: http://backend:8000
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    volumes:
+      - ./frontend:/app
+      # Anonymous volume. Two jobs: it stops the host bind mount from shadowing
+      # the image's installed packages, and it keeps ~200 MB and tens of
+      # thousands of files OFF the host entirely — which matters because this
+      # repository lives in a OneDrive-synced folder that would try to upload
+      # every one of them (ADR-016).
+      - /app/node_modules
+    depends_on:
+      - backend
+
 volumes:
   pgdata:
   redisdata:
