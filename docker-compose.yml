@@ -59,6 +59,27 @@ services:
       timeout: 3s
       retries: 10
 
+  mailpit:
+    # Catches every outgoing email locally and shows it in a web inbox. Nothing
+    # is delivered to a real address, so development cannot accidentally email a
+    # real person, and no provider account or API key is needed to work on the
+    # signup and password-reset flows (ADR-017).
+    image: axllent/mailpit:latest
+    container_name: careeriq-mailpit
+    restart: unless-stopped
+    environment:
+      MP_MAX_MESSAGES: 500
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+    ports:
+      - "${MAILPIT_UI_PORT:-8025}:8025"   # web inbox
+      - "${MAILPIT_SMTP_PORT:-1025}:1025" # smtp
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   backend:
     build:
       context: ./backend
@@ -72,6 +93,14 @@ services:
       # Inside the compose network, reach services by name — not localhost.
       DATABASE_URL: postgresql+asyncpg://careeriq:careeriq_dev_password@postgres:5432/careeriq
       REDIS_URL: redis://redis:6379/0
+      # Real SMTP locally, pointed at Mailpit — so the signup and reset flows are
+      # exercised end to end rather than short-circuited by a console stub.
+      EMAIL_PROVIDER: smtp
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+      # Links in emails point at the browser-visible frontend, which is not the
+      # compose service name.
+      FRONTEND_BASE_URL: http://localhost:${FRONTEND_PORT:-5173}
     ports:
       # Host port is configurable because 8000 is a popular default and is often
       # already taken by unrelated software. The container port never changes,
@@ -86,6 +115,8 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      mailpit:
         condition: service_healthy
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 

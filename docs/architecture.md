@@ -533,6 +533,77 @@ environment matches production closely enough that "works on my machine" is a mu
 
 ---
 
+### ADR-017 — Transactional email and account recovery
+
+**Context.** Phases 1–3 shipped authentication with no email of any kind. That
+left a functional hole rather than a missing nicety: `change-password` requires
+the *current* password, so a user who forgot theirs was **permanently locked
+out** with no recovery path. Separately, the refresh-token reuse detection from
+ADR-014 signs a user out of every device with no explanation, which makes the
+project's strongest security feature indistinguishable from a bug.
+
+**Decision.** Add transactional email behind a provider interface, plus password
+reset and email verification.
+
+*Delivery*
+- `EmailProvider` protocol with `console`, `smtp` and a capturing test double.
+- **Mailpit** in `docker-compose` for local development: every message is caught
+  and readable at `localhost:8025`, so the flows are exercised end to end
+  without a provider account and without any risk of emailing a real person.
+- Production uses SMTP against a real relay. `console` is **refused** by the
+  production config check — silently not sending password resets would lock
+  users out with no error recorded anywhere.
+
+*Tokens* — one `verification_tokens` table with a `purpose` column, because the
+rows share a shape and a lifecycle and differ only in behaviour:
+
+| Property | Rationale |
+|---|---|
+| Stored as SHA-256 hash | A database leak must not yield live reset links |
+| Single use (`used_at`) | Links are forwarded, scanned by mail servers, and left in browser history |
+| Short TTL (30 min reset, 24 h verify) | A reset link in an inbox is a standing key to the account |
+| Issuing invalidates outstanding ones | Otherwise "resend" three times leaves three working keys |
+| Purposes are not interchangeable | A 24-hour verification link must not perform a 30-minute-grade action |
+| Reset revokes every session | A reset usually follows losing control of the account |
+
+*Enumeration.* `forgot-password` returns the identical 200 response whether or
+not the address has an account — no exception, no distinguishing delay, no hint
+in the body. Registration and login were built to avoid being account-existence
+oracles; a helpful "no account found here" would undo that in one endpoint. The
+frontend wording is conditional for the same reason: *"if an account exists…"*.
+
+*Security notifications.* Password changed, and sessions revoked on reuse
+detection. The second is what turns the reuse defence from an inexplicable
+logout into an explained one.
+
+**Alternatives rejected.**
+- *Gating sign-in on verification.* Strands anyone whose mail is delayed or
+  filtered, and buys nothing here — an unverified address grants no privilege in
+  this system. Verification confirms the address; it does not guard access.
+- *A real provider (Resend/Brevo) in development.* Needs an account and an API
+  key before anyone can run the signup flow, and risks emailing real addresses
+  from test data.
+- *Two tables, one per token purpose.* Duplicates issue/consume/expire logic to
+  express a difference that is behavioural, not structural.
+- *Deriving email links from the request `Host` header.* `Host` and
+  `X-Forwarded-Host` are attacker-controlled. Trusting them turns every password
+  reset into a phishing link pointed at a domain of the attacker's choosing.
+  `FRONTEND_BASE_URL` is explicit configuration, and must be https in production.
+
+**Consequences.** Email is sent **synchronously inside the request** for now.
+ADR-009 says this work belongs on a queue, and it does — but the queue arrives in
+Phase 10, and waiting would mean shipping no recovery path at all. The interim is
+bounded: a 5-second SMTP timeout, and `send` never raises, so the worst case is a
+slightly slower signup and a logged, unsent email. Phase 10 replaces the call
+site, not the `NotificationService` interface.
+
+Rate limiting is **not yet in place** (NFR-8, Phase 10). Until it is,
+`forgot-password` can be used to send repeated mail to a known address. Issuing a
+new token invalidates the previous one, so this is a nuisance rather than an
+account risk, but it is a real gap and is tracked as such.
+
+---
+
 ## 4. Cross-cutting conventions
 
 **Errors.** A single error envelope across the API:
@@ -583,3 +654,4 @@ production value. Missing required config fails loudly at startup, not at first 
 | Date | Change |
 |---|---|
 | 2026-09-01 | Initial record — ADR-001 through ADR-016. |
+| 2026-09-02 | ADR-017 added. Transactional email, password reset and email verification, after review found that a forgotten password left a user permanently locked out. |

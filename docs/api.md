@@ -125,6 +125,10 @@ A repeat within 24 hours returns the original response instead of re-running the
 | 🔓 `GET` | `/auth/google/callback` | Complete OAuth; validates `state` (US-1.2 AC2) |
 | `GET` | `/auth/me` | Current user + role |
 | `POST` | `/auth/change-password` | Requires current password; revokes all refresh families |
+| 🔓 `POST` | `/auth/forgot-password` | Request a reset link. **Always 200**, identical response whether or not the account exists (US-1.6 AC1) |
+| 🔓 `POST` | `/auth/reset-password` | Set a new password from a link. Single-use token; revokes all sessions |
+| 🔓 `POST` | `/auth/verify-email` | Confirm an address. Unauthenticated — the link is often opened on another device |
+| `POST` | `/auth/resend-verification` | Send the confirmation email again. Requires a session, so nothing is enumerable |
 
 <details>
 <summary><code>POST /auth/register</code></summary>

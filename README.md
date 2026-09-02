@@ -100,6 +100,7 @@ Read these in order:
 | 1 | Architecture, requirements, schema, API design | ✅ Done |
 | 2 | Backend foundation — FastAPI, Postgres, SQLAlchemy, Alembic, auth | ✅ Done |
 | 3 | Frontend foundation — React, TypeScript, auth, dashboard shell | ✅ Done |
+| 3.5 | Transactional email — password reset, email verification, security notices | ✅ Done |
 | 4 | Resume intelligence — upload, parsing, NLP, structured profile | ⬜ |
 | 5 | Job intelligence — ingestion, JD parsing, skill extraction, dedup | ⬜ |
 | 6 | AI matching — embeddings, pgvector, semantic search, hybrid ranking | ⬜ |
@@ -140,6 +141,13 @@ docker compose up -d
 | API | **http://localhost:8000** |
 | API docs (Swagger) | http://localhost:8000/docs |
 | OpenAPI schema | http://localhost:8000/openapi.json |
+| **Mail inbox (Mailpit)** | **http://localhost:8025** |
+
+> **Emails go to Mailpit, not to real addresses.** Registration, password reset
+> and security notices are all sent locally and readable at
+> [localhost:8025](http://localhost:8025) — so the flows can be exercised end to
+> end without a provider account and without any risk of emailing a real person
+> from test data (ADR-017).
 
 The browser only ever calls `/api` on the web app's own origin; Vite proxies
 that to the backend, so local development is same-origin and CORS is never

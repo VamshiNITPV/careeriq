@@ -105,6 +105,25 @@ Each story carries acceptance criteria (AC) that become test cases.
 - AC1: I can set target roles, preferred locations, remote preference, experience level, minimum salary, and currency.
 - AC2: Changing preferences invalidates cached recommendations and triggers a re-rank.
 
+**US-1.6** As a user who forgot my password, I want to reset it by email, so that I am not permanently locked out.
+- AC1: `forgot-password` returns an identical response for a registered and an unregistered address — it must not be an account-existence oracle.
+- AC2: The reset link is single-use and expires in 30 minutes.
+- AC3: Requesting a new link invalidates any outstanding one.
+- AC4: Completing a reset revokes every existing session.
+- AC5: The token is stored only as a hash; a database leak yields no usable links.
+- AC6: A verification token cannot be used to reset a password, or vice versa.
+
+**US-1.7** As a user, I want to confirm my email address, so that account notices reach me.
+- AC1: A confirmation email is sent on registration.
+- AC2: The account is fully usable before confirming — verification proves the address, it does not gate access.
+- AC3: The link is single-use and expires in 24 hours; confirming twice is not an error.
+- AC4: An authenticated user can request a new confirmation email, which invalidates the previous link.
+- AC5: Completing a password reset also marks the address confirmed, since receiving the link proves control of the mailbox.
+
+**US-1.8** As a user, I want to be told when my account's security changes, so that I can react if it was not me.
+- AC1: A notification is sent when the password is changed or reset.
+- AC2: A notification is sent when sessions are revoked by reuse detection, explaining why the user was signed out.
+
 **US-1.5** As a user, I want to access only my own data, so that my resume and applications stay private.
 - AC1: Requesting another user's resume, application, or interview returns `404`, not `403` — we do not leak existence.
 - AC2: Every owned-resource endpoint has an authorization test covering the cross-user case.
