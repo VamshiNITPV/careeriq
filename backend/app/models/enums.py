@@ -32,6 +32,21 @@ class AuthProvider(StrEnum):
     GOOGLE = "GOOGLE"
 
 
+class VerificationPurpose(StrEnum):
+    """What a one-time token is for.
+
+    One table with a purpose column rather than two near-identical tables. The
+    rows have the same shape and the same lifecycle; the only differences are
+    lifetime and what consuming one does, both of which are behaviour, not
+    storage. Splitting them would duplicate the issue/consume/expire logic.
+    """
+
+    # noqa: the linter flags any assignment to a name containing "password" as
+    # a hardcoded credential. These are enum labels, not secrets.
+    PASSWORD_RESET = "PASSWORD_RESET"  # noqa: S105
+    EMAIL_VERIFICATION = "EMAIL_VERIFICATION"
+
+
 class ExperienceLevel(StrEnum):
     INTERN = "INTERN"
     ENTRY = "ENTRY"

@@ -19,10 +19,12 @@ from app.models.enums import (
     EmploymentType,
     ExperienceLevel,
     UserRole,
+    VerificationPurpose,
     WorkMode,
 )
 from app.models.profile import Profile
 from app.models.user import RefreshToken, User
+from app.models.verification import VerificationToken
 
 __all__ = [
     "AuthProvider",
@@ -38,5 +40,7 @@ __all__ = [
     "UUIDPrimaryKeyMixin",
     "User",
     "UserRole",
+    "VerificationPurpose",
+    "VerificationToken",
     "WorkMode",
 ]
