@@ -5,6 +5,8 @@ Wiring only. Anything here that starts making decisions belongs in a service.
 
 from __future__ import annotations
 
+import uuid
+from collections.abc import Awaitable, Callable
 from typing import Annotated
 
 from fastapi import Depends, Request
@@ -19,12 +21,17 @@ from app.core.exceptions import (
 )
 from app.core.security import decode_access_token
 from app.integrations.email import get_email_provider
+from app.integrations.storage import ObjectStorage, get_object_storage
 from app.models.user import User
 from app.repositories.refresh_token import RefreshTokenRepository
+from app.repositories.resume import ResumeRepository, ResumeVersionRepository
+from app.repositories.skill import CandidateSkillRepository, SkillRepository
 from app.repositories.user import ProfileRepository, UserRepository
 from app.repositories.verification import VerificationTokenRepository
 from app.services.auth import AuthService
 from app.services.notifications import NotificationService
+from app.services.resume.pipeline import process_resume_version
+from app.services.resume.service import ResumeService
 
 # auto_error=False so a missing header raises our own AuthenticationError and
 # produces the standard error envelope, rather than FastAPI's default 403 body
@@ -77,6 +84,64 @@ def get_auth_service(
 
 
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
+
+
+# ---------------------------------------------------------------- resumes
+def get_resume_repository(session: DbSession) -> ResumeRepository:
+    return ResumeRepository(session)
+
+
+def get_resume_version_repository(session: DbSession) -> ResumeVersionRepository:
+    return ResumeVersionRepository(session)
+
+
+def get_skill_repository(session: DbSession) -> SkillRepository:
+    return SkillRepository(session)
+
+
+def get_candidate_skill_repository(session: DbSession) -> CandidateSkillRepository:
+    return CandidateSkillRepository(session)
+
+
+def get_storage() -> ObjectStorage:
+    # Overridden in tests with a temporary directory, so the suite never writes
+    # into a real upload location.
+    return get_object_storage()
+
+
+def get_resume_service(
+    resumes: Annotated[ResumeRepository, Depends(get_resume_repository)],
+    versions: Annotated[ResumeVersionRepository, Depends(get_resume_version_repository)],
+    storage: Annotated[ObjectStorage, Depends(get_storage)],
+) -> ResumeService:
+    return ResumeService(resumes=resumes, versions=versions, storage=storage)
+
+
+ResumeServiceDep = Annotated[ResumeService, Depends(get_resume_service)]
+
+
+async def run_resume_pipeline(version_id: uuid.UUID) -> None:
+    """Background entry point for parsing an uploaded resume.
+
+    A dependency rather than a direct call so tests can replace it. Otherwise
+    every upload test schedules a real background task that runs on the global
+    engine, cannot see the test's uncommitted rows, and logs an ERROR — noise
+    that would eventually hide a genuine failure.
+    """
+    await process_resume_version(version_id)
+
+
+def get_pipeline_runner() -> Callable[[uuid.UUID], Awaitable[None]]:
+    return run_resume_pipeline
+
+
+PipelineRunnerDep = Annotated[
+    Callable[[uuid.UUID], Awaitable[None]], Depends(get_pipeline_runner)
+]
+SkillRepositoryDep = Annotated[SkillRepository, Depends(get_skill_repository)]
+CandidateSkillRepositoryDep = Annotated[
+    CandidateSkillRepository, Depends(get_candidate_skill_repository)
+]
 
 
 # ---------------------------------------------------------------- current user

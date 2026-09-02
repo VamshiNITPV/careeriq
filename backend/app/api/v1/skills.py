@@ -1,0 +1,146 @@
+"""Skill taxonomy search and candidate skill management (api.md section 2.6)."""
+
+from __future__ import annotations
+
+import uuid
+from typing import Annotated
+
+from fastapi import APIRouter, Query
+
+from app.api.deps import CandidateSkillRepositoryDep, CurrentUser, SkillRepositoryDep
+from app.core.exceptions import DuplicateResourceError, ResourceNotFoundError
+from app.core.ids import uuid7
+from app.models.skill import CandidateSkill
+from app.schemas.common import ErrorResponse, MessageResponse
+from app.schemas.resume import (
+    CandidateSkillCreate,
+    CandidateSkillRead,
+    CandidateSkillUpdate,
+    SkillRead,
+)
+
+skills_router = APIRouter(prefix="/skills", tags=["skills"])
+profile_skills_router = APIRouter(prefix="/profile/skills", tags=["profile"])
+
+
+@skills_router.get(
+    "/search",
+    response_model=list[SkillRead],
+    summary="Search the skill taxonomy",
+)
+async def search_skills(
+    skills: SkillRepositoryDep,
+    q: Annotated[str, Query(min_length=1, max_length=100, description="Search term")],
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+) -> list[SkillRead]:
+    """Alias-aware autocomplete.
+
+    Searching aliases as well as names is the point: typing "postgres" must find
+    PostgreSQL, or the taxonomy's alias resolution is invisible to the user
+    adding a skill by hand.
+    """
+    results = await skills.search(q, limit=limit)
+    return [SkillRead.model_validate(s) for s in results]
+
+
+@profile_skills_router.get(
+    "",
+    response_model=list[CandidateSkillRead],
+    summary="Your skills",
+)
+async def list_my_skills(
+    user: CurrentUser, candidate_skills: CandidateSkillRepositoryDep
+) -> list[CandidateSkillRead]:
+    rows = await candidate_skills.list_for_user(user.id)
+    return [CandidateSkillRead.model_validate(row) for row in rows]
+
+
+@profile_skills_router.post(
+    "",
+    response_model=CandidateSkillRead,
+    status_code=201,
+    summary="Add a skill manually",
+    responses={
+        404: {"model": ErrorResponse, "description": "Unknown skill"},
+        409: {"model": ErrorResponse, "description": "Already on your profile"},
+    },
+)
+async def add_skill(
+    payload: CandidateSkillCreate,
+    user: CurrentUser,
+    skills: SkillRepositoryDep,
+    candidate_skills: CandidateSkillRepositoryDep,
+) -> CandidateSkillRead:
+    skill = await skills.get(payload.skill_id)
+    if skill is None:
+        raise ResourceNotFoundError("Skill")
+
+    if await candidate_skills.get_for_skill(user.id, skill.id) is not None:
+        raise DuplicateResourceError("That skill is already on your profile.")
+
+    row = CandidateSkill(
+        id=uuid7(),
+        user_id=user.id,
+        skill_id=skill.id,
+        proficiency=payload.proficiency,
+        years_of_experience=payload.years_of_experience,
+        last_used_year=payload.last_used_year,
+        # A skill the user added by hand is verified by definition, which also
+        # protects it from being overwritten by a later re-parse (US-2.4 AC2).
+        is_user_verified=True,
+    )
+    candidate_skills.add(row)
+    await candidate_skills.flush()
+    return CandidateSkillRead.model_validate(row)
+
+
+@profile_skills_router.patch(
+    "/{candidate_skill_id}",
+    response_model=CandidateSkillRead,
+    summary="Correct an extracted skill",
+    responses={404: {"model": ErrorResponse}},
+)
+async def update_skill(
+    candidate_skill_id: uuid.UUID,
+    payload: CandidateSkillUpdate,
+    user: CurrentUser,
+    candidate_skills: CandidateSkillRepositoryDep,
+) -> CandidateSkillRead:
+    """Edit proficiency or experience on one of your skills (US-2.4).
+
+    Any edit marks the row user-verified, which is what stops a subsequent
+    re-parse of the resume from silently reverting the correction.
+    """
+    row = await candidate_skills.get_owned(candidate_skill_id, user.id)
+    if row is None:
+        raise ResourceNotFoundError("Skill")
+
+    if payload.proficiency is not None:
+        row.proficiency = payload.proficiency
+    if payload.years_of_experience is not None:
+        row.years_of_experience = payload.years_of_experience
+    if payload.last_used_year is not None:
+        row.last_used_year = payload.last_used_year
+
+    row.is_user_verified = True
+    await candidate_skills.flush()
+    return CandidateSkillRead.model_validate(row)
+
+
+@profile_skills_router.delete(
+    "/{candidate_skill_id}",
+    response_model=MessageResponse,
+    summary="Remove a skill",
+    responses={404: {"model": ErrorResponse}},
+)
+async def delete_skill(
+    candidate_skill_id: uuid.UUID,
+    user: CurrentUser,
+    candidate_skills: CandidateSkillRepositoryDep,
+) -> MessageResponse:
+    row = await candidate_skills.get_owned(candidate_skill_id, user.id)
+    if row is None:
+        raise ResourceNotFoundError("Skill")
+
+    await candidate_skills.delete(row)
+    return MessageResponse(message="Skill removed.")

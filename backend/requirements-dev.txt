@@ -12,5 +12,10 @@ httpx>=0.28
 ruff>=0.8
 mypy>=1.13
 
+# --- test fixtures ---
+# Generates real PDFs for the parser tests. Hand-crafted PDF bytes would test
+# our own byte-writing rather than the extraction path a real file exercises.
+fpdf2>=2.8
+
 # --- typing stubs ---
 types-redis>=4.6

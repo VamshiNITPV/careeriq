@@ -40,6 +40,10 @@ known-first-party = ["app", "tests"]
 # strip <style> blocks. Wrapping the attribute strings to 100 columns would make
 # them markedly harder to read for no benefit.
 "app/integrations/email/templates.py" = ["E501"]
+# This module normalises ambiguous Unicode out of extracted text — bullet
+# glyphs, non-breaking and thin spaces. It therefore has to contain those exact
+# characters, which is precisely what RUF001 flags.
+"app/services/resume/extraction.py" = ["RUF001"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -34,6 +34,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         debug=settings.debug,
     )
 
+    # Seed the skill taxonomy. Idempotent (ON CONFLICT DO NOTHING), so running
+    # it on every start is safe and means a fresh database is usable without a
+    # separate manual step. Failure is logged, not fatal: the API still serves
+    # everything that does not depend on the taxonomy.
+    try:
+        from app.core.database import get_session_factory
+        from app.services.resume.pipeline import seed_skill_taxonomy
+
+        async with get_session_factory()() as session:
+            await seed_skill_taxonomy(session)
+    except Exception as exc:
+        log.error("skill taxonomy seeding failed", error=str(exc))
+
     yield
 
     # Return pooled connections deliberately instead of letting the process exit

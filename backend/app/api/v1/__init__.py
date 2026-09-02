@@ -7,12 +7,15 @@ versioning makes it obvious in every access log which contract was used.
 
 from fastapi import APIRouter
 
-from app.api.v1 import auth, health
+from app.api.v1 import auth, health, resumes, skills
 
 api_router = APIRouter()
 
 # Health is registered without a prefix so it sits at /api/v1/health.
 api_router.include_router(health.router)
 api_router.include_router(auth.router)
+api_router.include_router(resumes.router)
+api_router.include_router(skills.skills_router)
+api_router.include_router(skills.profile_skills_router)
 
 __all__ = ["api_router"]
