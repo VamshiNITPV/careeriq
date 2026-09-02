@@ -111,6 +111,10 @@ services:
       # Dependencies live in the image's system site-packages, not under /app,
       # so this mount does not shadow them.
       - ./backend:/app
+      # Uploaded resumes. A named volume, not the bind mount: ADR-014 requires
+      # uploads to live outside the application filesystem, and keeping binary
+      # files off the host also keeps them out of OneDrive's sync (ADR-016).
+      - uploads:/var/lib/careeriq/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -148,3 +152,4 @@ services:
 volumes:
   pgdata:
   redisdata:
+  uploads:

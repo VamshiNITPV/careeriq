@@ -101,7 +101,7 @@ Read these in order:
 | 2 | Backend foundation — FastAPI, Postgres, SQLAlchemy, Alembic, auth | ✅ Done |
 | 3 | Frontend foundation — React, TypeScript, auth, dashboard shell | ✅ Done |
 | 3.5 | Transactional email — password reset, email verification, security notices | ✅ Done |
-| 4 | Resume intelligence — upload, parsing, NLP, structured profile | ⬜ |
+| 4 | Resume intelligence — upload, parsing, NLP, structured profile | ✅ Done |
 | 5 | Job intelligence — ingestion, JD parsing, skill extraction, dedup | ⬜ |
 | 6 | AI matching — embeddings, pgvector, semantic search, hybrid ranking | ⬜ |
 | 7 | Career intelligence — skill gaps, learning paths, resume optimization | ⬜ |

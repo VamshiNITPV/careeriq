@@ -604,6 +604,85 @@ account risk, but it is a real gap and is tracked as such.
 
 ---
 
+### ADR-018 — Resume ingestion, storage, and the interim task runner
+
+**Context.** Phase 4 accepts uploaded documents — untrusted binary files from
+the internet — stores them, and parses them into structured profile data. Three
+decisions had to be made: where files live, how parsing runs outside the
+request, and how skills are identified.
+
+**Decision.**
+
+*Storage behind an interface.* `ObjectStorage` with a local filesystem adapter
+now and Cloud Storage in Phase 11. Files never touch the application directory:
+Cloud Run containers have no persistent disk, and ADR-014 requires uploads to be
+stored outside the app's filesystem regardless. Keys are generated
+(`resumes/{user_id}/{uuidv7}.pdf`), never derived from the client filename, so
+path traversal is **structurally impossible rather than filtered**. Production
+refuses `STORAGE_PROVIDER=local`.
+
+*Type detection from bytes.* The filename and the client-supplied Content-Type
+are both attacker-controlled and are never consulted. A PDF is identified by its
+header; a DOCX must be a ZIP that also contains `[Content_Types].xml` and
+`word/document.xml` — the ZIP magic alone would accept any archive, including a
+zip bomb.
+
+*Extraction.* pdfplumber with `layout=True`, because without it a two-column
+resume interleaves its columns into nonsense. DOCX extraction reads table cells
+as well as paragraphs, since resumes routinely put skills in a table and
+`python-docx`'s `paragraphs` omits them. A document yielding under 100 characters
+is rejected as `UNEXTRACTABLE_DOCUMENT` rather than producing a silently empty
+profile — a scan typically extracts a few stray characters, so `== 0` would let
+it through.
+
+*Skill extraction is the baseline, deliberately.* ml.md §9 requires the trivial
+baseline first, measured, before the sophisticated version. This is gazetteer
+matching against the taxonomy with alias resolution and section-aware
+confidence. spaCy is the candidate replacement and ships only if it beats these
+numbers on the labelled set — building it first would mean never learning
+whether it earned its cost. Precision is weighted above recall: a falsely
+extracted skill enters a user's profile, inflates match scores, and may be asked
+about in an interview; a missed one is one click to add.
+
+**Alternatives rejected.**
+- *`python-magic` for type detection.* Needs the libmagic system library in the
+  image to replace nine lines of byte checking.
+- *Storing files in the database.* Bloats backups, makes streaming awkward, and
+  Cloud SQL storage costs far more than object storage.
+- *Hard-deleting a resume's files.* Applications reference the version they were
+  submitted with; destroying it would quietly corrupt the analytics that depend
+  on it (database.md §3.7).
+- *One table per token/skill source.* Rejected in favour of provenance columns
+  (`source_version_id`, `extraction_confidence`, `is_user_verified`) so a user
+  asking why a skill appears gets a better answer than "the parser decided".
+
+**Consequences and known limitations.**
+
+Parsing runs on FastAPI `BackgroundTasks` — **an interim mechanism**. ADR-009
+specifies a real queue; that arrives in Phase 10. Tasks die with the process, so
+a container restart mid-parse strands a version in a non-terminal state. The
+pipeline is idempotent and re-runnable, so recovery is possible; automatic
+recovery is not implemented.
+
+Two consequences were found by running the system rather than by reasoning:
+
+1. **The upload must commit before scheduling the worker.** The background task
+   runs on its own connection, and until the request's transaction commits, the
+   version row does not exist as far as that connection is concerned. The worker
+   started, logged "version not found", and the upload silently never parsed.
+   Handing work to something outside the transaction requires the work to be
+   visible outside the transaction.
+2. **`resumes.current_version_id` creates a second foreign-key path** between
+   `resumes` and `resume_versions`, so both relationships must declare
+   `foreign_keys` explicitly or SQLAlchemy refuses to configure the mapper.
+
+Re-parsing never overwrites a user correction: `is_user_verified` gates the
+upsert in SQL, not in application logic that could race. Without it,
+re-processing a resume would silently revert every manual fix — worse than not
+re-processing at all.
+
+---
+
 ## 4. Cross-cutting conventions
 
 **Errors.** A single error envelope across the API:
@@ -655,3 +734,4 @@ production value. Missing required config fails loudly at startup, not at first 
 |---|---|
 | 2026-09-01 | Initial record — ADR-001 through ADR-016. |
 | 2026-09-02 | ADR-017 added. Transactional email, password reset and email verification, after review found that a forgotten password left a user permanently locked out. |
+| 2026-09-02 | ADR-018 added. Resume ingestion, object storage, and the interim background task runner. |
