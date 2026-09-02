@@ -1,0 +1,138 @@
+# CareerIQ — AI Career Intelligence & Job Optimization Platform
+
+A full-stack AI/ML platform that builds a structured career profile from a resume, ingests and
+parses job descriptions, ranks jobs by personalized fit using hybrid semantic + rule-based scoring,
+identifies skill gaps, suggests grounded resume improvements, tracks application outcomes, and
+conducts adaptive AI mock interviews.
+
+> **Status:** Phase 1 (Architecture) — in progress.
+
+---
+
+## Why this project exists
+
+Job searching is fragmented. A candidate manually reads hundreds of job descriptions, guesses
+whether they qualify, compares their resume against requirements, identifies missing skills,
+rewrites their resume, prepares for interviews, tracks applications, and never learns *why*
+applications succeed or fail.
+
+CareerIQ turns that into one instrumented, measurable system.
+
+---
+
+## Technology stack
+
+| Layer | Technology |
+|---|---|
+| Frontend | React 18, TypeScript, Vite, Tailwind CSS, React Query, React Router, Recharts |
+| Backend | Python 3.13, FastAPI, Pydantic v2, SQLAlchemy 2.0 (async), Alembic |
+| Database | PostgreSQL 16 + `pgvector` |
+| Cache / Queue | Redis 7 |
+| AI / ML | spaCy, Sentence Transformers, Google Gemini (behind a provider abstraction) |
+| Infrastructure | Docker Compose (local), GCP Cloud Run + Cloud SQL + Cloud Storage + Pub/Sub |
+| CI/CD | GitHub Actions |
+| Testing | Pytest, Vitest, React Testing Library |
+
+---
+
+## Repository layout
+
+```
+careeriq/
+├── frontend/            React + TypeScript SPA
+│   └── src/
+│       ├── components/  Reusable presentational components
+│       ├── pages/       Route-level views
+│       ├── hooks/       Custom React hooks (data fetching, auth, websockets)
+│       ├── services/    API client layer
+│       ├── types/       Shared TypeScript types (mirrors backend schemas)
+│       └── utils/       Pure helpers
+│
+├── backend/             FastAPI application
+│   ├── app/
+│   │   ├── api/         HTTP routers — request/response only, no business logic
+│   │   ├── core/        Config, security, logging, dependencies
+│   │   ├── models/      SQLAlchemy ORM models
+│   │   ├── schemas/     Pydantic request/response schemas
+│   │   ├── services/    Business logic — the layer that owns the rules
+│   │   ├── repositories/Data access — the only layer that touches the ORM session
+│   │   └── workers/     Background task handlers
+│   └── tests/           unit / integration / api
+│
+├── ml/                  Offline ML work, kept out of the request path
+│   ├── embeddings/      Embedding model wrappers and batching
+│   ├── ranking/         Hybrid ranking, later a learned ranker
+│   ├── classification/  Skill / seniority classifiers
+│   ├── evaluation/      Metrics: Precision@K, NDCG@K, F1
+│   └── datasets/        Labelled evaluation sets
+│
+├── infrastructure/
+│   ├── docker/          Dockerfiles
+│   ├── gcp/             Deployment configs
+│   └── github-actions/  Reusable workflow fragments
+│
+└── docs/
+    ├── architecture.md  Every significant decision + its rationale
+    ├── requirements.md  Scope, personas, user stories, acceptance criteria
+    ├── database.md      Full schema, relationships, indexes
+    ├── api.md           REST contract
+    └── ml.md            Models, ranking formula, evaluation methodology
+```
+
+---
+
+## Documentation
+
+Read these in order:
+
+1. [docs/requirements.md](docs/requirements.md) — what we are building and for whom
+2. [docs/architecture.md](docs/architecture.md) — how it is structured and **why**
+3. [docs/database.md](docs/database.md) — the data model
+4. [docs/api.md](docs/api.md) — the REST contract
+5. [docs/ml.md](docs/ml.md) — the AI/ML design and how it is measured
+
+---
+
+## Development roadmap
+
+| Phase | Scope | Status |
+|---|---|---|
+| 1 | Architecture, requirements, schema, API design | 🟡 In progress |
+| 2 | Backend foundation — FastAPI, Postgres, SQLAlchemy, Alembic, auth | ⬜ |
+| 3 | Frontend foundation — React, TypeScript, auth, dashboard shell | ⬜ |
+| 4 | Resume intelligence — upload, parsing, NLP, structured profile | ⬜ |
+| 5 | Job intelligence — ingestion, JD parsing, skill extraction, dedup | ⬜ |
+| 6 | AI matching — embeddings, pgvector, semantic search, hybrid ranking | ⬜ |
+| 7 | Career intelligence — skill gaps, learning paths, resume optimization | ⬜ |
+| 8 | Application system — tracking, analytics, outcome analysis | ⬜ |
+| 9 | AI interview — question generation, adaptive engine, evaluation | ⬜ |
+| 10 | Production engineering — Redis, background jobs, WebSockets, security | ⬜ |
+| 11 | Cloud — Docker, GCP, CI/CD, monitoring | ⬜ |
+| 12 | Final polish — testing, documentation, diagrams, demo | ⬜ |
+
+---
+
+## Getting started
+
+> Local development requires Docker Desktop. Setup instructions land in Phase 2.
+
+---
+
+## Engineering principles
+
+1. **Never invent candidate data.** The AI may rephrase, restructure, and highlight what exists in
+   a resume. It must never fabricate experience, skills, metrics, or achievements.
+2. **Measure the AI.** Every AI component ships with an evaluation dataset and reported metrics.
+   "It seems to work" is not a result.
+3. **Layered backend.** `api → services → repositories → models`. Routers never touch the ORM
+   session directly; repositories never contain business rules.
+4. **Providers behind abstractions.** LLM and embedding providers sit behind interfaces so they can
+   be swapped without touching business logic.
+5. **Every decision is documented.** If a choice had a real alternative, it belongs in
+   `docs/architecture.md` with the reasoning.
+
+---
+
+## Licence
+
+Personal portfolio project.
