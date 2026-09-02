@@ -62,4 +62,37 @@ export const authService = {
       new_password: newPassword,
     })
   },
+
+  /**
+   * Request a reset link.
+   *
+   * Always resolves for a well-formed address, whether or not an account
+   * exists — the server deliberately gives the same answer either way, so the
+   * UI must not imply an email was sent to a specific address.
+   */
+  forgotPassword(email: string): Promise<MessageResponse> {
+    return api.post<MessageResponse>('/auth/forgot-password', { email }, { skipAuth: true })
+  },
+
+  async resetPassword(token: string, newPassword: string): Promise<MessageResponse> {
+    const response = await api.post<MessageResponse>(
+      '/auth/reset-password',
+      { token, new_password: newPassword },
+      { skipAuth: true },
+    )
+    // The server revokes every session on reset, so whatever this browser holds
+    // is already dead. Clearing locally avoids a pointless refresh attempt that
+    // would fail and look like an error.
+    clearTokens()
+    return response
+  },
+
+  /** Unauthenticated: the link is often opened on a different device. */
+  verifyEmail(token: string): Promise<User> {
+    return api.post<User>('/auth/verify-email', { token }, { skipAuth: true })
+  },
+
+  resendVerification(): Promise<MessageResponse> {
+    return api.post<MessageResponse>('/auth/resend-verification')
+  },
 }

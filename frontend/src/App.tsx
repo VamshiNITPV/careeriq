@@ -4,9 +4,12 @@ import { AppLayout } from '@/components/layout/AppLayout'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { AuthProvider } from '@/providers/AuthProvider'
 import { DashboardPage } from '@/pages/DashboardPage'
+import { ForgotPasswordPage } from '@/pages/ForgotPasswordPage'
 import { LoginPage } from '@/pages/LoginPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { RegisterPage } from '@/pages/RegisterPage'
+import { ResetPasswordPage } from '@/pages/ResetPasswordPage'
+import { VerifyEmailPage } from '@/pages/VerifyEmailPage'
 import { ApiError } from '@/services/apiClient'
 
 const queryClient = new QueryClient({
@@ -37,6 +40,11 @@ export function App() {
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
+            {/* Public: these are reached from a link in an email, often on a
+                different device where no session exists. */}
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/reset-password" element={<ResetPasswordPage />} />
+            <Route path="/verify-email" element={<VerifyEmailPage />} />
 
             <Route element={<ProtectedRoute />}>
               <Route element={<AppLayout />}>

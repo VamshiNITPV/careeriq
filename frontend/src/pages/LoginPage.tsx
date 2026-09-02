@@ -85,6 +85,15 @@ export function LoginPage() {
             error={error?.fieldError('password')}
           />
 
+          <div className="text-right">
+            <Link
+              to="/forgot-password"
+              className="text-sm font-medium text-indigo-600 hover:text-indigo-500"
+            >
+              Forgot password?
+            </Link>
+          </div>
+
           <Button type="submit" isLoading={isSubmitting} className="w-full">
             {isSubmitting ? 'Signing in…' : 'Sign in'}
           </Button>

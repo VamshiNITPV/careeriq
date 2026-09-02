@@ -1,5 +1,8 @@
+import { useState } from 'react'
 import { useAuth } from '@/hooks/useAuth'
 import { Alert } from '@/components/ui/Alert'
+import { Button } from '@/components/ui/Button'
+import { authService } from '@/services/authService'
 
 /**
  * Dashboard shell.
@@ -34,6 +37,44 @@ function StatTile({ label, value, caption, available }: StatTileProps) {
   )
 }
 
+function VerifyEmailBanner() {
+  const [state, setState] = useState<'idle' | 'sending' | 'sent' | 'failed'>('idle')
+
+  async function resend() {
+    setState('sending')
+    try {
+      await authService.resendVerification()
+      setState('sent')
+    } catch {
+      setState('failed')
+    }
+  }
+
+  return (
+    <Alert tone="warning" title="Confirm your email address">
+      <div className="flex flex-wrap items-center gap-3">
+        <span>
+          {state === 'sent'
+            ? 'Sent. Check your inbox for the confirmation link.'
+            : state === 'failed'
+              ? 'Could not send the email just now. Please try again shortly.'
+              : 'We sent a confirmation link when you registered. Not received?'}
+        </span>
+        {state !== 'sent' && (
+          <Button
+            variant="secondary"
+            size="sm"
+            isLoading={state === 'sending'}
+            onClick={() => void resend()}
+          >
+            Resend email
+          </Button>
+        )}
+      </div>
+    </Alert>
+  )
+}
+
 export function DashboardPage() {
   const { user } = useAuth()
 
@@ -43,6 +84,11 @@ export function DashboardPage() {
         <h1 className="text-2xl font-bold tracking-tight text-slate-900">Dashboard</h1>
         <p className="mt-1 text-sm text-slate-600">Signed in as {user?.email}</p>
       </div>
+
+      {/* Shown until confirmed. Access is not gated on it — an unverified
+          address grants nothing here, and blocking would strand users whose
+          mail is delayed or filtered. */}
+      {user !== null && user.email_verified_at === null && <VerifyEmailBanner />}
 
       <Alert tone="info" title="Phase 3 of 12">
         Authentication and the application shell are in place. Resume intelligence, job matching and
