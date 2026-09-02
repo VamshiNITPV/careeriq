@@ -1,4 +1,12 @@
 # Keep the build context small and never ship secrets or local state into an image.
+
+# Zero-byte placeholder files. This repository lives in a OneDrive-synced folder,
+# and OneDrive converts empty files into cloud-only ReparsePoints that BuildKit
+# cannot read, failing the build with "invalid file request". They carry no
+# content, so excluding them costs nothing (docs/architecture.md ADR-016).
+.gitkeep
+**/.gitkeep
+
 __pycache__/
 *.py[cod]
 .venv/
@@ -13,7 +21,8 @@ coverage.xml
 .env
 .env.*
 !.env.example
-tests/
+# tests/ is intentionally NOT excluded: CI runs pytest inside the built image,
+# and a few KB of test files is cheaper than a second build context.
 .git/
 .gitignore
 README.md
