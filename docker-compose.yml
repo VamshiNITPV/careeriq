@@ -68,7 +68,10 @@ services:
       DATABASE_URL: postgresql+asyncpg://careeriq:careeriq_dev_password@postgres:5432/careeriq
       REDIS_URL: redis://redis:6379/0
     ports:
-      - "8000:8000"
+      # Host port is configurable because 8000 is a popular default and is often
+      # already taken by unrelated software. The container port never changes,
+      # so nothing inside the compose network is affected by this.
+      - "${BACKEND_PORT:-8000}:8000"
     volumes:
       # Bind mount so --reload picks up edits without a rebuild.
       # Dependencies live in the image's system site-packages, not under /app,
