@@ -99,7 +99,7 @@ Read these in order:
 |---|---|---|
 | 1 | Architecture, requirements, schema, API design | ✅ Done |
 | 2 | Backend foundation — FastAPI, Postgres, SQLAlchemy, Alembic, auth | ✅ Done |
-| 3 | Frontend foundation — React, TypeScript, auth, dashboard shell | ⬜ |
+| 3 | Frontend foundation — React, TypeScript, auth, dashboard shell | ✅ Done |
 | 4 | Resume intelligence — upload, parsing, NLP, structured profile | ⬜ |
 | 5 | Job intelligence — ingestion, JD parsing, skill extraction, dedup | ⬜ |
 | 6 | AI matching — embeddings, pgvector, semantic search, hybrid ranking | ⬜ |
@@ -130,12 +130,20 @@ docker compose up -d postgres redis
 # 4. Create the schema
 docker compose run --rm backend alembic upgrade head
 
-# 5. Start the API
-docker compose up -d backend
+# 5. Start the API and the web app
+docker compose up -d
 ```
 
-The API is then at **http://localhost:8000**, with interactive docs at
-[`/docs`](http://localhost:8000/docs) and the OpenAPI schema at `/openapi.json`.
+| | URL |
+|---|---|
+| Web app | **http://localhost:5173** |
+| API | **http://localhost:8000** |
+| API docs (Swagger) | http://localhost:8000/docs |
+| OpenAPI schema | http://localhost:8000/openapi.json |
+
+The browser only ever calls `/api` on the web app's own origin; Vite proxies
+that to the backend, so local development is same-origin and CORS is never
+exercised — a CORS misconfiguration cannot hide until deployment.
 
 > **Port already in use?** All three host ports are configurable in `.env` —
 > `BACKEND_PORT`, `POSTGRES_PORT`, `REDIS_PORT`. Container ports never change, and
@@ -166,6 +174,19 @@ docker compose logs -f backend                          # tail logs
 docker compose down                                     # stop (data survives)
 docker compose down -v                                  # stop and DELETE the database
 ```
+
+Frontend:
+
+```bash
+docker compose run --rm frontend npm test               # vitest
+docker compose run --rm frontend npm run typecheck      # tsc
+docker compose run --rm frontend npm run lint           # eslint
+docker compose run --rm frontend npm run build          # production bundle
+```
+
+> `node_modules` deliberately lives in a container volume, not on the host — it
+> is 165 MB across 350 packages, and this repository sits in a OneDrive folder.
+> Run npm through `docker compose` as above rather than installing locally.
 
 ### Verifying it works
 
