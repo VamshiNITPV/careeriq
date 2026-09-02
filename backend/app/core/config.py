@@ -54,6 +54,14 @@ class Settings(BaseSettings):
     # enforced in _check_production_hardening below.
     bcrypt_rounds: int = Field(default=12, ge=4, le=18)
 
+    # ---------------------------------------------------------------- storage
+    # local -> filesystem (development). gcs -> Cloud Storage (Phase 11).
+    storage_provider: str = "local"
+    # Inside the container, and on a volume — never the application directory
+    # (ADR-014). Cloud Run has no persistent disk, so production must not be
+    # local (enforced in the production check below).
+    storage_local_path: str = "/var/lib/careeriq/uploads"
+
     # ---------------------------------------------------------------- email
     # console  -> render to the log, send nothing (default; no setup required)
     # smtp     -> a real SMTP server (Mailpit locally, a provider in production)
@@ -165,6 +173,10 @@ class Settings(BaseSettings):
             problems.append("EMAIL_PROVIDER must not be 'console' in production.")
         if self.frontend_base_url.startswith("http://"):
             problems.append("FRONTEND_BASE_URL must use https in production.")
+        if self.storage_provider == "local":
+            # Cloud Run containers have ephemeral disks and scale to zero, so
+            # local storage means uploaded resumes vanish without warning.
+            problems.append("STORAGE_PROVIDER must not be 'local' in production.")
         if problems:
             raise ValueError("Invalid production configuration:\n  - " + "\n  - ".join(problems))
 
