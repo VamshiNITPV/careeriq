@@ -9,6 +9,7 @@ import { LoginPage } from '@/pages/LoginPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { RegisterPage } from '@/pages/RegisterPage'
 import { ResetPasswordPage } from '@/pages/ResetPasswordPage'
+import { ResumePage } from '@/pages/ResumePage'
 import { VerifyEmailPage } from '@/pages/VerifyEmailPage'
 import { ApiError } from '@/services/apiClient'
 
@@ -49,6 +50,7 @@ export function App() {
             <Route element={<ProtectedRoute />}>
               <Route element={<AppLayout />}>
                 <Route path="/dashboard" element={<DashboardPage />} />
+                <Route path="/resume" element={<ResumePage />} />
               </Route>
             </Route>
 

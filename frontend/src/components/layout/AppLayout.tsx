@@ -5,9 +5,7 @@ import { cn } from '@/utils/cn'
 
 const NAV_ITEMS = [
   { to: '/dashboard', label: 'Dashboard' },
-  { to: '/profile', label: 'Profile' },
-  { to: '/jobs', label: 'Jobs' },
-  { to: '/applications', label: 'Applications' },
+  { to: '/resume', label: 'Resume' },
 ] as const
 
 export function AppLayout() {
