@@ -8,7 +8,7 @@ from the application hierarchy and translated to responses at the API boundary.
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 
 from sqlalchemy.exc import IntegrityError
@@ -31,12 +31,15 @@ from app.core.security import (
     refresh_token_expiry,
     verify_password,
 )
-from app.models.enums import AuthProvider
+from app.models.enums import AuthProvider, VerificationPurpose
 from app.models.profile import Profile
 from app.models.user import RefreshToken, User
+from app.models.verification import VerificationToken
 from app.repositories.refresh_token import RefreshTokenRepository
 from app.repositories.user import ProfileRepository, UserRepository
+from app.repositories.verification import VerificationTokenRepository
 from app.schemas.auth import TokenPair
+from app.services.notifications import NotificationService
 
 log = get_logger(__name__)
 
@@ -63,10 +66,90 @@ class AuthService:
         users: UserRepository,
         profiles: ProfileRepository,
         refresh_tokens: RefreshTokenRepository,
+        verification_tokens: VerificationTokenRepository,
+        notifications: NotificationService,
     ) -> None:
         self.users = users
         self.profiles = profiles
         self.refresh_tokens = refresh_tokens
+        self.verification_tokens = verification_tokens
+        self.notifications = notifications
+
+    async def _display_name(self, user_id: uuid.UUID) -> str | None:
+        """First name for email greetings. Absence is fine — templates handle it."""
+        profile = await self.profiles.get_by_user_id(user_id)
+        full_name = profile.full_name if profile else None
+        return full_name.split()[0] if full_name else None
+
+    async def _issue_verification_token(
+        self,
+        *,
+        user: User,
+        purpose: VerificationPurpose,
+        ttl: timedelta,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> str:
+        """Create a single-use token and return the plaintext.
+
+        Any outstanding token of the same purpose is consumed first, so a user
+        who clicks "resend" three times ends up with one working link rather
+        than three live keys to their account sitting in an inbox.
+        """
+        await self.verification_tokens.invalidate_outstanding(user.id, purpose)
+
+        plaintext, token_hash = generate_refresh_token()
+        self.verification_tokens.add(
+            VerificationToken(
+                id=uuid7(),
+                user_id=user.id,
+                token_hash=token_hash,
+                purpose=purpose,
+                expires_at=datetime.now(UTC) + ttl,
+                requested_ip=ip_address,
+                requested_user_agent=user_agent[:500] if user_agent else None,
+            )
+        )
+        await self.verification_tokens.flush()
+        return plaintext
+
+    async def _consume_verification_token(
+        self, *, token: str, purpose: VerificationPurpose
+    ) -> VerificationToken:
+        """Validate and mark a token used, or raise InvalidTokenError.
+
+        Every rejection reason produces the same error. A caller learns only
+        that the link did not work — not whether it was expired, already used,
+        for a different purpose, or never existed.
+        """
+        stored = await self.verification_tokens.get_by_hash(hash_token(token))
+
+        if stored is None:
+            raise InvalidTokenError("This link is invalid or has expired.")
+
+        if stored.purpose is not purpose:
+            # A verification link must not be usable to reset a password: the
+            # two have very different lifetimes and consequences.
+            log.warning(
+                "verification token used for the wrong purpose",
+                expected=purpose.value,
+                actual=stored.purpose.value,
+                user_id=str(stored.user_id),
+            )
+            raise InvalidTokenError("This link is invalid or has expired.")
+
+        if not stored.is_usable():
+            log.info(
+                "verification token rejected",
+                user_id=str(stored.user_id),
+                purpose=purpose.value,
+                used=stored.is_used,
+                expired=stored.is_expired(),
+            )
+            raise InvalidTokenError("This link is invalid or has expired.")
+
+        await self.verification_tokens.mark_used(stored)
+        return stored
 
     # ---------------------------------------------------------------- register
     async def register(
@@ -107,6 +190,22 @@ class AuthService:
         tokens = await self._issue_token_pair(
             user, family_id=uuid7(), user_agent=user_agent, ip_address=ip_address
         )
+
+        # The account is usable immediately; verification confirms the address
+        # rather than gating access. Blocking sign-in until a link is clicked
+        # would strand anyone whose email is delayed or filtered, and this is
+        # not a system where an unverified address grants anything.
+        verification_token = await self._issue_verification_token(
+            user=user,
+            purpose=VerificationPurpose.EMAIL_VERIFICATION,
+            ttl=timedelta(hours=get_settings().email_verification_ttl_hours),
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        await self.notifications.send_email_verification(
+            user=user, name=full_name.split()[0] if full_name else None, token=verification_token
+        )
+
         log.info("user registered", user_id=str(user.id))
         return user, tokens
 
@@ -186,6 +285,16 @@ class AuthService:
                 family_id=str(stored.family_id),
                 tokens_revoked=revoked,
             )
+
+            # Tell the user why they were signed out. Without this the defence
+            # is indistinguishable from a bug, and the one person who might
+            # recognise the activity as suspicious never hears about it.
+            owner = await self.users.get(stored.user_id)
+            if owner is not None:
+                await self.notifications.send_sessions_revoked(
+                    user=owner, name=await self._display_name(owner.id)
+                )
+
             raise TokenReuseError()
 
         if stored.is_expired():
@@ -232,7 +341,129 @@ class AuthService:
         # Every existing session dies. If the password was changed because it
         # was compromised, leaving other sessions alive defeats the point.
         revoked = await self.refresh_tokens.revoke_all_for_user(user.id)
+
+        # If an attacker changed this password, the notification is the owner's
+        # only chance to notice while they can still act.
+        await self.notifications.send_password_changed(
+            user=user, name=await self._display_name(user.id)
+        )
+
         log.info("password changed", user_id=str(user.id), sessions_revoked=revoked)
+
+    # ---------------------------------------------------------------- recovery
+    async def request_password_reset(
+        self,
+        *,
+        email: str,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> None:
+        """Send a reset link, if the address belongs to an account.
+
+        Returns None in every case. The endpoint must behave identically for a
+        registered and an unregistered address, or it becomes the account
+        enumeration oracle that registration and login are carefully built to
+        avoid (US-1.1 AC3). No exception, no distinguishing delay, no hint in
+        the response.
+        """
+        user = await self.users.get_by_email(email)
+
+        if user is None:
+            log.info("password reset requested for unknown address", email=email)
+            return
+
+        if not user.is_active:
+            log.info("password reset requested for inactive account", user_id=str(user.id))
+            return
+
+        if user.password_hash is None:
+            # OAuth-only account: there is no password to reset, and creating
+            # one here would silently add a second way into the account.
+            log.info("password reset requested for oauth-only account", user_id=str(user.id))
+            return
+
+        token = await self._issue_verification_token(
+            user=user,
+            purpose=VerificationPurpose.PASSWORD_RESET,
+            ttl=timedelta(minutes=get_settings().password_reset_ttl_minutes),
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        await self.notifications.send_password_reset(
+            user=user, name=await self._display_name(user.id), token=token
+        )
+        log.info("password reset email sent", user_id=str(user.id))
+
+    async def reset_password(self, *, token: str, new_password: str) -> None:
+        stored = await self._consume_verification_token(
+            token=token, purpose=VerificationPurpose.PASSWORD_RESET
+        )
+
+        user = await self.users.get(stored.user_id)
+        if user is None or not user.is_active:
+            raise InvalidTokenError("This link is invalid or has expired.")
+
+        await self.users.update_password_hash(user.id, hash_password(new_password))
+
+        # Every session dies. A reset is usually a response to losing control of
+        # the account, so leaving existing sessions alive would defeat it.
+        revoked = await self.refresh_tokens.revoke_all_for_user(user.id)
+
+        # Completing a reset proves control of the mailbox, which is exactly
+        # what verification asks for — so there is no reason to ask again.
+        if user.email_verified_at is None:
+            user.email_verified_at = datetime.now(UTC)
+
+        await self.notifications.send_password_changed(
+            user=user, name=await self._display_name(user.id)
+        )
+        log.info("password reset completed", user_id=str(user.id), sessions_revoked=revoked)
+
+    # ---------------------------------------------------------------- verification
+    async def verify_email(self, *, token: str) -> User:
+        stored = await self._consume_verification_token(
+            token=token, purpose=VerificationPurpose.EMAIL_VERIFICATION
+        )
+
+        user = await self.users.get(stored.user_id)
+        if user is None:
+            raise InvalidTokenError("This link is invalid or has expired.")
+
+        # Idempotent: clicking a link twice, or having a mail scanner prefetch
+        # it, should not look like a failure to the user.
+        if user.email_verified_at is None:
+            user.email_verified_at = datetime.now(UTC)
+            log.info("email verified", user_id=str(user.id))
+
+        return user
+
+    async def resend_verification(
+        self,
+        *,
+        user: User,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> None:
+        """Re-send the confirmation link to an authenticated user.
+
+        Requires a session, unlike password reset, so there is nothing to
+        enumerate — the caller already proved who they are.
+        """
+        if user.email_verified_at is not None:
+            log.info("verification resend skipped; already verified", user_id=str(user.id))
+            return
+
+        token = await self._issue_verification_token(
+            user=user,
+            purpose=VerificationPurpose.EMAIL_VERIFICATION,
+            ttl=timedelta(hours=get_settings().email_verification_ttl_hours),
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        await self.notifications.send_email_verification(
+            user=user, name=await self._display_name(user.id), token=token
+        )
+        log.info("verification email resent", user_id=str(user.id))
 
     # ---------------------------------------------------------------- internals
     async def _issue_token_pair(

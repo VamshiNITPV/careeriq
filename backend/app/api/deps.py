@@ -18,10 +18,13 @@ from app.core.exceptions import (
     PermissionDeniedError,
 )
 from app.core.security import decode_access_token
+from app.integrations.email import get_email_provider
 from app.models.user import User
 from app.repositories.refresh_token import RefreshTokenRepository
 from app.repositories.user import ProfileRepository, UserRepository
+from app.repositories.verification import VerificationTokenRepository
 from app.services.auth import AuthService
+from app.services.notifications import NotificationService
 
 # auto_error=False so a missing header raises our own AuthenticationError and
 # produces the standard error envelope, rather than FastAPI's default 403 body
@@ -44,13 +47,33 @@ def get_refresh_token_repository(session: DbSession) -> RefreshTokenRepository:
     return RefreshTokenRepository(session)
 
 
+def get_verification_token_repository(session: DbSession) -> VerificationTokenRepository:
+    return VerificationTokenRepository(session)
+
+
 # ---------------------------------------------------------------- services
+def get_notification_service() -> NotificationService:
+    # The provider is chosen by configuration and cached per process; tests
+    # override this dependency with a capturing provider.
+    return NotificationService(get_email_provider())
+
+
 def get_auth_service(
     users: Annotated[UserRepository, Depends(get_user_repository)],
     profiles: Annotated[ProfileRepository, Depends(get_profile_repository)],
     refresh_tokens: Annotated[RefreshTokenRepository, Depends(get_refresh_token_repository)],
+    verification_tokens: Annotated[
+        VerificationTokenRepository, Depends(get_verification_token_repository)
+    ],
+    notifications: Annotated[NotificationService, Depends(get_notification_service)],
 ) -> AuthService:
-    return AuthService(users=users, profiles=profiles, refresh_tokens=refresh_tokens)
+    return AuthService(
+        users=users,
+        profiles=profiles,
+        refresh_tokens=refresh_tokens,
+        verification_tokens=verification_tokens,
+        notifications=notifications,
+    )
 
 
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]

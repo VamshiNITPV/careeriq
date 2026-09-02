@@ -54,6 +54,35 @@ class Settings(BaseSettings):
     # enforced in _check_production_hardening below.
     bcrypt_rounds: int = Field(default=12, ge=4, le=18)
 
+    # ---------------------------------------------------------------- email
+    # console  -> render to the log, send nothing (default; no setup required)
+    # smtp     -> a real SMTP server (Mailpit locally, a provider in production)
+    email_provider: str = "console"
+    email_from_address: str = "no-reply@careeriq.local"
+    email_from_name: str = "CareerIQ"
+
+    smtp_host: str = "mailpit"
+    smtp_port: int = 1025
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_use_tls: bool = False
+    # Short by design. Email is sent inside the request until Phase 10 moves it
+    # to the queue, so a hanging SMTP server must not hold a user's signup open.
+    smtp_timeout_seconds: int = 5
+
+    # Base URL used to build links inside emails. Cannot be derived from the
+    # request: Host and X-Forwarded-Host are attacker-controlled, and trusting
+    # them turns every password reset email into a phishing link pointed at a
+    # domain of the attacker's choosing.
+    frontend_base_url: str = "http://localhost:5173"
+
+    # Short-lived: a reset link sitting in an inbox is a standing key to the
+    # account (ADR-017).
+    password_reset_ttl_minutes: int = Field(default=30, ge=5, le=1440)
+    # Longer, because verification is not a credential — the worst case for an
+    # expired link is that the user requests another.
+    email_verification_ttl_hours: int = Field(default=24, ge=1, le=168)
+
     # ---------------------------------------------------------------- cors
     # Kept as a raw string rather than list[str]: pydantic-settings parses list
     # fields from the environment as JSON, so a comma-separated value raises a
@@ -130,6 +159,12 @@ class Settings(BaseSettings):
             problems.append("CORS_ORIGINS must be an explicit allow-list, never '*' (ADR-014).")
         if not self.log_json:
             problems.append("LOG_JSON must be true in production for structured logging.")
+        if self.email_provider == "console":
+            # Console delivery in production means password reset silently never
+            # arrives, locking users out with no error anywhere.
+            problems.append("EMAIL_PROVIDER must not be 'console' in production.")
+        if self.frontend_base_url.startswith("http://"):
+            problems.append("FRONTEND_BASE_URL must use https in production.")
         if problems:
             raise ValueError("Invalid production configuration:\n  - " + "\n  - ".join(problems))
 

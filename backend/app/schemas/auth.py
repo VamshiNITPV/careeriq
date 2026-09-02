@@ -75,6 +75,24 @@ class ChangePasswordRequest(BaseModel):
         return _validate_password_strength(v)
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=1)
+    new_password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_LENGTH)
+
+    @field_validator("new_password")
+    @classmethod
+    def _strength(cls, v: str) -> str:
+        return _validate_password_strength(v)
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str = Field(min_length=1)
+
+
 class TokenPair(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={

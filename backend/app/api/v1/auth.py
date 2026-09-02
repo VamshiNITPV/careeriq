@@ -18,12 +18,15 @@ from app.api.deps import (
 from app.schemas.auth import (
     AuthResponse,
     ChangePasswordRequest,
+    ForgotPasswordRequest,
     LoginRequest,
     LogoutRequest,
     RefreshRequest,
     RegisterRequest,
+    ResetPasswordRequest,
     TokenPair,
     UserRead,
+    VerifyEmailRequest,
 )
 from app.schemas.common import ErrorResponse, MessageResponse
 
@@ -158,3 +161,78 @@ async def change_password(
         new_password=payload.new_password,
     )
     return MessageResponse(message="Password changed. All other sessions have been signed out.")
+
+
+# ---------------------------------------------------------------- recovery
+@router.post(
+    "/forgot-password",
+    response_model=MessageResponse,
+    summary="Request a password reset link",
+)
+async def forgot_password(
+    payload: ForgotPasswordRequest,
+    service: AuthServiceDep,
+    ip: ClientIp,
+    agent: UserAgent,
+) -> MessageResponse:
+    """Always returns 200 with the same message.
+
+    A different response for a registered address would make this endpoint an
+    account-existence oracle, undoing the care taken in register and login to
+    avoid exactly that. The caller cannot tell whether an email was sent.
+    """
+    await service.request_password_reset(email=payload.email, ip_address=ip, user_agent=agent)
+    return MessageResponse(
+        message="If an account exists for that address, a reset link is on its way."
+    )
+
+
+@router.post(
+    "/reset-password",
+    response_model=MessageResponse,
+    summary="Set a new password using a reset link",
+    responses={
+        401: {
+            "model": ErrorResponse,
+            "description": "The link is invalid, expired, or already used",
+        },
+        422: {"model": ErrorResponse, "description": "Password does not meet policy"},
+    },
+)
+async def reset_password(payload: ResetPasswordRequest, service: AuthServiceDep) -> MessageResponse:
+    await service.reset_password(token=payload.token, new_password=payload.new_password)
+    return MessageResponse(
+        message="Password updated. You have been signed out of all devices — please sign in again."
+    )
+
+
+# ---------------------------------------------------------------- verification
+@router.post(
+    "/verify-email",
+    response_model=UserRead,
+    summary="Confirm an email address",
+    responses={401: {"model": ErrorResponse, "description": "The link is invalid or expired"}},
+)
+async def verify_email(payload: VerifyEmailRequest, service: AuthServiceDep) -> UserRead:
+    # Unauthenticated on purpose: the link is often opened in a different
+    # browser from the one that registered, or on a phone.
+    user = await service.verify_email(token=payload.token)
+    return UserRead.model_validate(user)
+
+
+@router.post(
+    "/resend-verification",
+    response_model=MessageResponse,
+    summary="Send the confirmation email again",
+    responses=_AUTH_ERRORS,
+)
+async def resend_verification(
+    user: CurrentUser,
+    service: AuthServiceDep,
+    ip: ClientIp,
+    agent: UserAgent,
+) -> MessageResponse:
+    # Requires a session, so unlike forgot-password there is nothing to
+    # enumerate — the caller has already proved who they are.
+    await service.resend_verification(user=user, ip_address=ip, user_agent=agent)
+    return MessageResponse(message="Confirmation email sent.")
