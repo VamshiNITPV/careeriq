@@ -15,14 +15,17 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
-    Enum as SAEnum,
     ForeignKey,
     Numeric,
     String,
     Text,
     text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, UUID as PGUUID
+from sqlalchemy import (
+    Enum as SAEnum,
+)
+from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -70,9 +73,7 @@ class Profile(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # ---------------------------------------------------------------- career state
     # Derived from the resume during parsing, but user-overridable: an extraction
     # error must not permanently distort every match score (US-2.4).
-    years_of_experience: Mapped[Decimal | None] = mapped_column(
-        Numeric(4, 1), nullable=True
-    )
+    years_of_experience: Mapped[Decimal | None] = mapped_column(Numeric(4, 1), nullable=True)
     current_experience_level: Mapped[ExperienceLevel | None] = mapped_column(
         _pg_enum(ExperienceLevel, "experience_level"), nullable=True
     )
@@ -101,9 +102,7 @@ class Profile(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         server_default=text("'{}'::employment_type[]"),
     )
 
-    min_salary_expectation: Mapped[Decimal | None] = mapped_column(
-        Numeric(12, 2), nullable=True
-    )
+    min_salary_expectation: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     salary_currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
     open_to_relocation: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")

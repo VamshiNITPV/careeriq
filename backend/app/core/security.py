@@ -97,9 +97,7 @@ def create_access_token(
     """Mint a signed access token (30 min default, US-1.3 AC1)."""
     settings = get_settings()
     now = datetime.now(UTC)
-    expire = now + (
-        expires_delta or timedelta(minutes=settings.access_token_expire_minutes)
-    )
+    expire = now + (expires_delta or timedelta(minutes=settings.access_token_expire_minutes))
 
     claims: dict[str, Any] = {
         "sub": str(subject),

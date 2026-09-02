@@ -38,4 +38,5 @@ __all__ = [
     "UUIDPrimaryKeyMixin",
     "User",
     "UserRole",
+    "WorkMode",
 ]

@@ -143,7 +143,7 @@ def get_settings() -> Settings:
     """
     try:
         settings = Settings()  # type: ignore[call-arg]  # values come from the environment
-    except Exception as exc:  # noqa: BLE001 - we re-raise after reporting
+    except Exception as exc:  # re-raised below; caught only to report clearly
         # Pydantic's default traceback buries the cause. Configuration failure is
         # the single most common first-run problem, so make it unmissable.
         print(f"\n[config] Failed to load settings:\n{exc}\n", file=sys.stderr)  # noqa: T201

@@ -1,1 +1,1 @@
-﻿"""Cross-cutting concerns: configuration, logging, database, security."""
+"""Cross-cutting concerns: configuration, logging, database, security."""

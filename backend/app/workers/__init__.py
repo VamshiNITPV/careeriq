@@ -1,1 +1,1 @@
-﻿"""Background task handlers (ADR-009)."""
+"""Background task handlers (ADR-009)."""

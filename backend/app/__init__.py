@@ -1,1 +1,1 @@
-﻿"""CareerIQ backend application package."""
+"""CareerIQ backend application package."""

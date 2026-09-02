@@ -96,7 +96,7 @@ async def check_database_health() -> dict[str, Any]:
         async with get_engine().connect() as conn:
             await conn.execute(text("SELECT 1"))
         return {"status": "ok"}
-    except Exception as exc:  # noqa: BLE001 - health checks report, never propagate
+    except Exception as exc:  # health checks report failure as data, never raise
         log.warning("database health check failed", error=str(exc))
         return {"status": "error", "detail": type(exc).__name__}
 
