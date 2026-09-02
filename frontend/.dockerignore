@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.vite/
+coverage/
+.env
+.env.*
+!.env.example
+.git/
+*.log
+
+# Zero-byte placeholders: OneDrive turns them into cloud-only ReparsePoints
+# that BuildKit cannot read (docs/architecture.md ADR-016).
+.gitkeep
+**/.gitkeep
