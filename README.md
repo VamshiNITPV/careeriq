@@ -137,10 +137,21 @@ docker compose up -d backend
 The API is then at **http://localhost:8000**, with interactive docs at
 [`/docs`](http://localhost:8000/docs) and the OpenAPI schema at `/openapi.json`.
 
-> **Port already in use?** `8000` is a common default and may be taken by other
-> software. Set `BACKEND_PORT=8080` in `.env` and restart — the container port is
-> unchanged, so nothing else needs adjusting. Find the culprit with
-> `netstat -ano | findstr :8000`.
+> **Port already in use?** All three host ports are configurable in `.env` —
+> `BACKEND_PORT`, `POSTGRES_PORT`, `REDIS_PORT`. Container ports never change, and
+> services inside the compose network always reach `postgres:5432` / `redis:6379`
+> regardless. Check with `netstat -ano | findstr :5432`.
+>
+> ⚠️ **A native PostgreSQL install is the dangerous case.** On Windows a second
+> process can bind an already-used port *instead of failing*, so both your native
+> server and Docker end up listening on `5432` and the native one answers. The
+> containers look healthy, the app works (it uses the internal network), but
+> pgAdmin/DBeaver or any host-side script silently talks to the wrong database.
+> Set `POSTGRES_PORT=5433` and confirm with:
+>
+> ```bash
+> docker exec careeriq-postgres psql -U careeriq -d careeriq -tAc "SELECT version();"
+> ```
 
 ### Common commands
 
