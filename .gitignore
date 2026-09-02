@@ -1,0 +1,71 @@
+# ---------- Python / backend ----------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+ENV/
+*.egg-info/
+.eggs/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+
+# ---------- Node / frontend ----------
+node_modules/
+.pnp
+.pnp.js
+frontend/dist/
+frontend/build/
+frontend/.vite/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---------- Secrets & environment ----------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+service-account*.json
+gcp-credentials*.json
+
+# ---------- Data / uploads / models ----------
+uploads/
+storage/
+*.db
+*.sqlite3
+ml/datasets/raw/
+ml/models/
+*.pkl
+*.joblib
+*.onnx
+
+# ---------- Editor / OS ----------
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------- Docker / local infra ----------
+pgdata/
+redisdata/
+
+# ---------- Logs ----------
+logs/
+*.log
