@@ -2,11 +2,14 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { AuthContext, type AuthContextValue, type AuthStatus } from '@/hooks/authContext'
 import { setUnauthenticatedHandler } from '@/services/apiClient'
 import { authService } from '@/services/authService'
+import { profileService } from '@/services/profileService'
 import { clearTokens, hasStoredSession } from '@/services/tokenStorage'
 import type { LoginRequest, RegisterRequest, User } from '@/types/auth'
+import type { Profile } from '@/types/profile'
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
+  const [profile, setProfile] = useState<Profile | null>(null)
   // Lazy initial state: with no stored refresh token there is nothing to
   // restore, so we know the answer synchronously on the first render. Starting
   // at 'loading' unconditionally would show a spinner to every first-time
@@ -15,6 +18,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>(() =>
     hasStoredSession() ? 'loading' : 'unauthenticated',
   )
+
+  const loadProfile = useCallback(async () => {
+    // Never allowed to fail the caller. In restore() a rejection here would
+    // land in the catch below and sign the user out over a profile fetch.
+    try {
+      setProfile(await profileService.get())
+    } catch {
+      setProfile(null)
+    }
+  }, [])
 
   /**
    * Restore the session on boot.
@@ -32,7 +45,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     async function restore() {
       try {
-        const currentUser = await authService.me()
+        // The profile is fetched with its own error handling inside
+        // loadProfile, so it can never reject this Promise.all and take the
+        // session down with it.
+        const [currentUser] = await Promise.all([authService.me(), loadProfile()])
         if (cancelled) return
         setUser(currentUser)
         setStatus('authenticated')
@@ -40,6 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (cancelled) return
         clearTokens()
         setUser(null)
+        setProfile(null)
         setStatus('unauthenticated')
       }
     }
@@ -50,7 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // unmount sets state on a dead component.
       cancelled = true
     }
-  }, [])
+  }, [loadProfile])
 
   /**
    * React to a session the client could not recover — a revoked or reused
@@ -59,26 +76,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setUnauthenticatedHandler(() => {
       setUser(null)
+      setProfile(null)
       setStatus('unauthenticated')
     })
     return () => setUnauthenticatedHandler(() => {})
   }, [])
 
-  const login = useCallback(async (payload: LoginRequest) => {
-    const response = await authService.login(payload)
-    setUser(response.user)
-    setStatus('authenticated')
-  }, [])
+  const login = useCallback(
+    async (payload: LoginRequest) => {
+      const response = await authService.login(payload)
+      setUser(response.user)
+      setStatus('authenticated')
+      // Not awaited: the redirect should not wait on the profile. The header
+      // falls back to email-derived initials for one paint.
+      void loadProfile()
+    },
+    [loadProfile],
+  )
 
-  const register = useCallback(async (payload: RegisterRequest) => {
-    const response = await authService.register(payload)
-    setUser(response.user)
-    setStatus('authenticated')
-  }, [])
+  const register = useCallback(
+    async (payload: RegisterRequest) => {
+      const response = await authService.register(payload)
+      setUser(response.user)
+      setStatus('authenticated')
+      void loadProfile()
+    },
+    [loadProfile],
+  )
 
   const logout = useCallback(async () => {
     await authService.logout()
     setUser(null)
+    setProfile(null)
     setStatus('unauthenticated')
   }, [])
 
@@ -87,13 +116,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AuthContextValue>(
     () => ({
       user,
+      profile,
       status,
       isAuthenticated: status === 'authenticated',
       login,
       register,
       logout,
+      setUser,
+      setProfile,
+      refreshProfile: loadProfile,
     }),
-    [user, status, login, register, logout],
+    [user, profile, status, login, register, logout, loadProfile],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
