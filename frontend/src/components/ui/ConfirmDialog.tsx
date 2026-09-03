@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react'
+import { cn } from '@/utils/cn'
 import { Button } from './Button'
 
 /**
@@ -57,7 +58,19 @@ export function ConfirmDialog({
       onClick={(event) => {
         if (event.target === ref.current && !isBusy) onCancel()
       }}
-      className="max-w-md rounded-lg p-0 shadow-xl backdrop:bg-slate-900/40"
+      // `m-auto` is load-bearing, not decoration. A modal <dialog> is centred
+      // by the browser's own `margin: auto`, and Tailwind's preflight resets
+      // margin to 0 on every element — which silently pins the dialog to the
+      // top of the viewport. Restoring it is what puts the modal back in the
+      // middle.
+      //
+      // The width and max-height keep it inside small viewports rather than
+      // overflowing off-screen where the buttons cannot be reached.
+      className={cn(
+        'm-auto w-[calc(100%-2rem)] max-w-md rounded-lg p-0 shadow-xl',
+        'max-h-[85vh] overflow-auto',
+        'backdrop:bg-slate-900/40 backdrop:backdrop-blur-[1px]',
+      )}
       aria-labelledby="confirm-title"
     >
       <div className="p-6">
