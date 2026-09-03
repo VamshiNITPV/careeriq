@@ -70,15 +70,28 @@ class SkillRepository(BaseRepository[Skill]):
         return {name: [normalized, *(aliases or [])] for name, normalized, aliases in rows}
 
     async def upsert_many(self, rows: list[dict[str, object]]) -> int:
-        """Insert seed skills, leaving any that already exist untouched.
+        """Insert seed skills, refreshing `aliases` and `category` on existing ones.
 
-        ON CONFLICT DO NOTHING makes seeding idempotent, so it can run on every
-        startup and in every test without duplicating rows or failing.
+        This was ON CONFLICT DO NOTHING, which was idempotent but silently
+        useless for improvements: adding "oops" as an alias of Object-Oriented
+        Programming, or "ms excel" to Excel, changed nothing because those
+        skills already existed. The taxonomy could gain new rows but never get
+        better at matching the ones it had — and the failure was invisible,
+        because seeding still reported success.
+
+        Only aliases and category are refreshed. `demand_score` is computed from
+        the job corpus and `is_verified` may have been curated by an admin, so
+        neither belongs to the seed file.
         """
         if not rows:
             return 0
-        statement = (
-            pg_insert(Skill).values(rows).on_conflict_do_nothing(index_elements=["normalized_name"])
+        statement = pg_insert(Skill).values(rows)
+        statement = statement.on_conflict_do_update(
+            index_elements=["normalized_name"],
+            set_={
+                "aliases": statement.excluded.aliases,
+                "category": statement.excluded.category,
+            },
         )
         result = await self.session.execute(statement)
         return result.rowcount or 0

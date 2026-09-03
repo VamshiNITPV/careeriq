@@ -185,19 +185,91 @@ def extract_skills(
     return sorted(candidates, key=lambda c: (-c.confidence, c.canonical_name))
 
 
+# Labels that introduce a list rather than being a skill themselves. A resume
+# writes "Programming Languages: C, C++, Python", and without stripping the
+# label the first value is reported as "programming languages c".
+#
+# The separator class accepts – (en dash) as well as a colon and hyphen,
+# because "Tech Stack - Docker" is written with all three in the wild. It is an
+# escape rather than the literal character: an en dash is visually
+# indistinguishable from a hyphen in source, so the escape is what makes the
+# intent readable.
+_CATEGORY_LABEL = re.compile(
+    r"""^[\s•\-*>•●▪]*(
+        programming\s+languages? | languages? | web\s+development\s+tools? |
+        development\s+tools? | developer\s+tools? | technical\s+skills? |
+        frontend | front-end | backend | back-end | full\s*stack |
+        databases? | frameworks?\s*(and\s*libraries)? | libraries |
+        tools?(\s*and\s*technologies)? | technologies | tech\s+stack |
+        cloud(\s*(and|&)\s*tools?)? | devops | platforms? |
+        office\s+tools? | productivity\s+tools? | operating\s+systems? |
+        coursework | relevant\s+coursework | subjects? | core\s+subjects? |
+        soft\s+skills? | other | miscellaneous | misc |
+        coding\s+profiles? | certifications? | concepts?
+    )\s*[:\-–]\s*""",
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def _is_bare_category_label(term: str) -> bool:
+    """True when the term is only a heading, with no values after it.
+
+    "Coding Profiles" alone on a line has no separator, so label stripping
+    leaves it untouched and it would otherwise be reported as an unrecognised
+    skill. Matching against the same vocabulary keeps the two definitions from
+    drifting apart.
+    """
+    return _CATEGORY_LABEL.match(f"{term}: x") is not None
+
+
+def strip_category_label(line: str) -> str:
+    """Remove a leading "Category:" prefix from a skills line.
+
+    Applied per line before splitting, because the label attaches only to the
+    first value on its line.
+
+    The pattern tolerates leading bullets and indentation. Anchoring on `^`
+    alone failed on every real resume, because extracted lines arrive as
+    "• Programming Languages: C, C++" — the bullet meant the label was never
+    recognised and stayed fused to the first value.
+    """
+    return _CATEGORY_LABEL.sub("", line, count=1)
+
+
 def parse_skills_list(text: str) -> list[str]:
     """Split an explicit skills block into individual terms.
 
     Used to catch entries the taxonomy does not know yet. These are reported for
     review, never written straight to a profile — auto-creating a skill for
     every comma-separated fragment would fill the taxonomy with parser noise.
+
+    Splitting on ':' matters as much as on ',': the overwhelmingly common resume
+    layout is "Databases: MySQL, MongoDB", and without it the first value of
+    every line comes back glued to its heading.
     """
-    parts = re.split(r"[,;|•\n]|\s{3,}", text)
     terms: list[str] = []
-    for part in parts:
-        cleaned = normalize_skill_text(part.strip(" .-:\t"))
-        # Two characters excludes stray initials; six words excludes sentences
-        # that happen to sit in a skills block.
-        if 2 <= len(cleaned) <= 60 and len(cleaned.split()) <= 6:
-            terms.append(cleaned)
+
+    for line in text.splitlines():
+        # Strip the label first, then split. Doing it after would leave the
+        # label fused to the first value.
+        without_label = strip_category_label(line)
+
+        for part in re.split(r"[,;|•/]|\s{3,}", without_label):
+            cleaned = normalize_skill_text(part.strip(" .-:\t"))
+
+            # Single characters are allowed: C and R are real languages, and a
+            # minimum of two silently discarded them. The alphanumeric check
+            # still rejects leftover punctuation from a split, and six words
+            # excludes sentences that happen to sit in a skills block.
+            if (
+                1 <= len(cleaned) <= 60
+                and len(cleaned.split()) <= 6
+                and any(ch.isalnum() for ch in cleaned)
+                # A heading with no separator after it — "Coding Profiles" on
+                # its own line — reaches here intact and would be reported as
+                # an unrecognised skill.
+                and not _is_bare_category_label(cleaned)
+            ):
+                terms.append(cleaned)
+
     return list(dict.fromkeys(terms))

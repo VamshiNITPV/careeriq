@@ -44,6 +44,10 @@ known-first-party = ["app", "tests"]
 # glyphs, non-breaking and thin spaces. It therefore has to contain those exact
 # characters, which is precisely what RUF001 flags.
 "app/services/resume/extraction.py" = ["RUF001"]
+# Matches the punctuation resumes actually use, including the en dash in
+# "Tech Stack – Docker". The "ambiguous" characters are the input this module
+# exists to handle, so it necessarily contains them.
+"app/services/resume/skill_extraction.py" = ["RUF001", "RUF003"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

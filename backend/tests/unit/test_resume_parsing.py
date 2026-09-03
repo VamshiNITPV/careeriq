@@ -275,6 +275,101 @@ class TestSkillsListParsing:
     def test_deduplicates(self) -> None:
         assert parse_skills_list("Python, python, PYTHON") == ["python"]
 
+    def test_strips_the_category_label_from_the_first_value(self) -> None:
+        """The overwhelmingly common resume layout, and previously broken.
+
+        Splitting on commas alone left the heading fused to the first item, so
+        "Programming Languages: C, C++" reported a term literally called
+        "programming languages c".
+        """
+        terms = parse_skills_list("Programming Languages: C, C++, Python")
+
+        assert "c" in terms
+        assert "programming languages c" not in terms
+
+    @pytest.mark.parametrize(
+        ("line", "expected_first"),
+        [
+            ("Web Development Tools: HTML, CSS", "html"),
+            ("Databases: MySQL, MongoDB", "mysql"),
+            ("Developer Tools: Google Colab, Git", "google colab"),
+            ("Office Tools: MS PowerPoint, MS Word", "ms powerpoint"),
+            ("Coursework: DBMS, OS, OOPs", "dbms"),
+            ("Frameworks and Libraries: React, Next.js", "react"),
+            ("Tech Stack - Docker, Kubernetes", "docker"),
+        ],
+    )
+    def test_handles_the_labels_real_resumes_use(
+        self, line: str, expected_first: str
+    ) -> None:
+        assert parse_skills_list(line)[0] == expected_first
+
+    def test_a_label_only_affects_its_own_line(self) -> None:
+        # The heading attaches to the first value on its line, so stripping must
+        # be per line rather than once for the whole block.
+        terms = parse_skills_list("Languages: C, Python\nDatabases: MySQL, Redis")
+
+        assert "c" in terms
+        assert "mysql" in terms
+        assert not any(t.startswith("databases") for t in terms)
+
+
+class TestNewlyCoveredSkills:
+    """Regression cases from a real resume that previously matched nothing."""
+
+    def _names(self, text: str) -> set[str]:
+        matcher = build_matcher(taxonomy())
+        return {
+            c.canonical_name
+            for c in extract_skills(
+                matcher=matcher,
+                sections=section_map(detect_sections(text)),
+                full_text=text,
+            )
+        }
+
+    def test_hosted_services(self) -> None:
+        names = self._names("SKILLS\nClerk, Inngest, Cloudinary, Vercel\n")
+        assert {"Clerk", "Inngest", "Cloudinary", "Vercel"} <= names
+
+    def test_developer_tools(self) -> None:
+        names = self._names("SKILLS\nGoogle Colab, Jupyter Notebook, VS Code, Kaggle\n")
+        assert {"Google Colab", "Jupyter Notebook", "VS Code", "Kaggle"} <= names
+
+    def test_github_is_distinct_from_git(self) -> None:
+        # Previously "github" was an alias of Git, so a resume listing both
+        # collapsed to one entry and lost a real signal.
+        names = self._names("SKILLS\nGit, GitHub\n")
+        assert {"Git", "GitHub"} <= names
+
+    def test_coursework_abbreviations(self) -> None:
+        names = self._names("SKILLS\nCoursework: DBMS, OS, OOPs, Data Structures\n")
+        assert {"DBMS", "Operating Systems", "Object-Oriented Programming"} <= names
+
+    def test_ml_architectures(self) -> None:
+        names = self._names("SKILLS\nCNN, LSTM, Bi-directional ConvLSTM, TensorFlow\n")
+        assert {"CNN", "LSTM", "ConvLSTM", "TensorFlow"} <= names
+
+    def test_office_tools(self) -> None:
+        names = self._names("SKILLS\nMS Word, MS PowerPoint, MS Excel\n")
+        assert {"Microsoft Word", "Microsoft PowerPoint", "Excel"} <= names
+
+    def test_a_full_category_line_extracts_every_value(self) -> None:
+        # End to end on the exact shape that failed: label plus values.
+        names = self._names(
+            "TECHNICAL SKILLS\n"
+            "Programming Languages: C, C++, Python\n"
+            "Web Development Tools: HTML, CSS, JavaScript, Next.js, FastAPI, Cloudinary\n"
+            "Developer Tools: Google Colab, Jupyter Notebook, Git, GitHub, VS Code\n"
+            "Databases: MySQL, MongoDB\n"
+        )
+        expected = {
+            "C", "C++", "Python", "HTML", "CSS", "JavaScript", "Next.js", "FastAPI",
+            "Cloudinary", "Google Colab", "Jupyter Notebook", "Git", "GitHub",
+            "VS Code", "MySQL", "MongoDB",
+        }
+        assert expected <= names, f"missing: {expected - names}"
+
 
 class TestTaxonomyData:
     def test_normalization_keeps_meaningful_punctuation(self) -> None:
