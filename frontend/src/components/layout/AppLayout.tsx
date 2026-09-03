@@ -6,6 +6,7 @@ import { cn } from '@/utils/cn'
 const NAV_ITEMS = [
   { to: '/dashboard', label: 'Dashboard' },
   { to: '/resume', label: 'Resume' },
+  { to: '/jobs', label: 'Jobs' },
 ] as const
 
 function MenuIcon({ open }: { open: boolean }) {

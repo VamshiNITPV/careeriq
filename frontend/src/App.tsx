@@ -3,8 +3,11 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AppLayout } from '@/components/layout/AppLayout'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { AuthProvider } from '@/providers/AuthProvider'
+import { AddJobPage } from '@/pages/AddJobPage'
 import { DashboardPage } from '@/pages/DashboardPage'
 import { ForgotPasswordPage } from '@/pages/ForgotPasswordPage'
+import { JobDetailPage } from '@/pages/JobDetailPage'
+import { JobsPage } from '@/pages/JobsPage'
 import { LoginPage } from '@/pages/LoginPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { ProfilePage } from '@/pages/ProfilePage'
@@ -52,6 +55,12 @@ export function App() {
               <Route element={<AppLayout />}>
                 <Route path="/dashboard" element={<DashboardPage />} />
                 <Route path="/resume" element={<ResumePage />} />
+                {/* /jobs/new before /jobs/:jobId — otherwise the parameter
+                    route matches "new" and the detail page looks up a job
+                    whose id is the word new. */}
+                <Route path="/jobs" element={<JobsPage />} />
+                <Route path="/jobs/new" element={<AddJobPage />} />
+                <Route path="/jobs/:jobId" element={<JobDetailPage />} />
                 <Route path="/profile" element={<ProfilePage />} />
               </Route>
             </Route>
