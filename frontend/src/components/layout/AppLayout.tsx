@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
-import { useAuth } from '@/hooks/useAuth'
-import { Button } from '@/components/ui/Button'
+import { UserMenu } from '@/components/layout/UserMenu'
 import { cn } from '@/utils/cn'
 
 const NAV_ITEMS = [
@@ -34,10 +33,8 @@ function MenuIcon({ open }: { open: boolean }) {
 }
 
 export function AppLayout() {
-  const { user, logout } = useAuth()
   const [menuOpen, setMenuOpen] = useState(false)
   const location = useLocation()
-  const panelRef = useRef<HTMLDivElement>(null)
 
   // Close on navigation. Without this the panel stays open over the page the
   // user just asked for, hiding the thing they navigated to.
@@ -79,6 +76,22 @@ export function AppLayout() {
             CareerIQ
           </NavLink>
 
+          {/* Sits immediately after the logo, where a hamburger is expected.
+              aria-expanded and aria-controls are what tell a screen reader this
+              button owns a collapsible region and whether it is open; without
+              them it announces as an unlabelled button that appears to do
+              nothing. */}
+          <button
+            type="button"
+            onClick={() => setMenuOpen((open) => !open)}
+            aria-expanded={menuOpen}
+            aria-controls="mobile-nav"
+            aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+            className="rounded-md p-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900 md:hidden"
+          >
+            <MenuIcon open={menuOpen} />
+          </button>
+
           {/* Desktop navigation. */}
           <nav aria-label="Main" className="hidden gap-1 md:flex">
             {NAV_ITEMS.map((item) => (
@@ -88,39 +101,11 @@ export function AppLayout() {
             ))}
           </nav>
 
-          <div className="ml-auto flex items-center gap-2 sm:gap-3">
-            {user && (
-              <span
-                className="hidden max-w-[16rem] truncate text-sm text-slate-600 lg:inline"
-                title={user.email}
-              >
-                {user.email}
-              </span>
-            )}
-            <Button
-              variant="secondary"
-              size="sm"
-              className="hidden md:inline-flex"
-              onClick={() => void logout()}
-            >
-              Sign out
-            </Button>
-
-            {/* Toggle, shown only where the desktop nav is hidden. */}
-            <button
-              type="button"
-              onClick={() => setMenuOpen((open) => !open)}
-              // aria-expanded and aria-controls are what tell a screen reader
-              // this button owns a collapsible region and whether it is open.
-              // Without them it announces as an unlabelled button that appears
-              // to do nothing.
-              aria-expanded={menuOpen}
-              aria-controls="mobile-nav"
-              aria-label={menuOpen ? 'Close menu' : 'Open menu'}
-              className="rounded-md p-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900 md:hidden"
-            >
-              <MenuIcon open={menuOpen} />
-            </button>
+          {/* No `md:` visibility class on the avatar — it is now the only
+              sign-out path at every width, and hiding it on mobile would strand
+              the user. */}
+          <div className="ml-auto flex items-center">
+            <UserMenu />
           </div>
         </div>
 
@@ -129,10 +114,12 @@ export function AppLayout() {
             collapse is a single attribute change rather than a remount. */}
         <div
           id="mobile-nav"
-          ref={panelRef}
           hidden={!menuOpen}
           className="border-t border-slate-200 bg-white md:hidden"
         >
+          {/* Navigation only. The account details and Sign out moved into the
+              avatar menu, which is visible at every breakpoint, so duplicating
+              them here would be two places to keep in step. */}
           <nav aria-label="Main" className="space-y-1 px-4 py-3 sm:px-6">
             {NAV_ITEMS.map((item) => (
               <NavLink
@@ -143,20 +130,6 @@ export function AppLayout() {
                 {item.label}
               </NavLink>
             ))}
-
-            <div className="mt-3 border-t border-slate-200 pt-3">
-              {user && (
-                <p className="truncate px-3 pb-2 text-sm text-slate-500">{user.email}</p>
-              )}
-              <Button
-                variant="secondary"
-                size="sm"
-                className="w-full"
-                onClick={() => void logout()}
-              >
-                Sign out
-              </Button>
-            </div>
           </nav>
         </div>
       </header>
