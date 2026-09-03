@@ -30,6 +30,7 @@ from app.repositories.user import ProfileRepository, UserRepository
 from app.repositories.verification import VerificationTokenRepository
 from app.services.auth import AuthService
 from app.services.notifications import NotificationService
+from app.services.profile import ProfileService
 from app.services.resume.pipeline import process_resume_version
 from app.services.resume.service import ResumeService
 
@@ -113,9 +114,7 @@ def get_resume_service(
     resumes: Annotated[ResumeRepository, Depends(get_resume_repository)],
     versions: Annotated[ResumeVersionRepository, Depends(get_resume_version_repository)],
     storage: Annotated[ObjectStorage, Depends(get_storage)],
-    candidate_skills: Annotated[
-        CandidateSkillRepository, Depends(get_candidate_skill_repository)
-    ],
+    candidate_skills: Annotated[CandidateSkillRepository, Depends(get_candidate_skill_repository)],
 ) -> ResumeService:
     return ResumeService(
         resumes=resumes,
@@ -126,6 +125,16 @@ def get_resume_service(
 
 
 ResumeServiceDep = Annotated[ResumeService, Depends(get_resume_service)]
+
+
+# ---------------------------------------------------------------- profile
+def get_profile_service(
+    profiles: Annotated[ProfileRepository, Depends(get_profile_repository)],
+) -> ProfileService:
+    return ProfileService(profiles=profiles)
+
+
+ProfileServiceDep = Annotated[ProfileService, Depends(get_profile_service)]
 
 
 async def run_resume_pipeline(version_id: uuid.UUID) -> None:

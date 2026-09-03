@@ -48,6 +48,10 @@ known-first-party = ["app", "tests"]
 # "Tech Stack – Docker". The "ambiguous" characters are the input this module
 # exists to handle, so it necessarily contains them.
 "app/services/resume/skill_extraction.py" = ["RUF001", "RUF003"]
+# Matches the punctuation resumes use as separators, including en and em
+# dashes in date ranges and header segments. The "ambiguous" characters are
+# the input this module exists to recognise.
+"app/services/resume/contact.py" = ["RUF001", "RUF003"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

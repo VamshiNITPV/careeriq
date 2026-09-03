@@ -54,6 +54,22 @@ class BaseRepository[ModelT: Base]:
         """
         await self.session.flush()
 
+    async def refresh(self, entity: ModelT) -> None:
+        """Reload an instance after a flush that touched server-side defaults.
+
+        A column with `onupdate=func.now()` — every `updated_at` in this
+        codebase — is computed by PostgreSQL, so SQLAlchemy marks the attribute
+        expired once the UPDATE is issued. Reading it afterwards triggers a
+        lazy load, and in async that load needs an await point it does not
+        have, producing `MissingGreenlet` at serialisation time rather than at
+        the access.
+
+        `expire_on_commit=False` does not cover this: the expiry happens on
+        flush, not on commit. Any service that flushes and then returns the
+        object for serialisation must refresh it first.
+        """
+        await self.session.refresh(entity)
+
     async def delete(self, entity: ModelT) -> None:
         await self.session.delete(entity)
 

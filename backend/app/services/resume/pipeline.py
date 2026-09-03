@@ -30,7 +30,10 @@ from app.models.resume import ResumeVersion
 from app.models.skill import Skill
 from app.repositories.resume import ResumeRepository, ResumeVersionRepository
 from app.repositories.skill import CandidateSkillRepository, SkillRepository
+from app.repositories.user import ProfileRepository
 from app.services.file_validation import DocumentType
+from app.services.profile import ProfileService
+from app.services.resume.contact import ContactDetails, extract_contact, head_of
 from app.services.resume.extraction import UnextractableDocumentError, extract_text
 from app.services.resume.inference import infer_skills
 from app.services.resume.sections import SectionType, detect_sections, section_map
@@ -56,6 +59,9 @@ class PipelineResult:
     # to the profile — they await the user's confirmation.
     skills_suggested: int = 0
     unknown_terms: int = 0
+    # Empty profile fields filled from the resume header. Never includes a
+    # field the user had already set.
+    contact_fields_filled: int = 0
     error: str | None = None
 
 
@@ -194,6 +200,25 @@ async def _run(
         ],
     }
 
+    # ------------------------------------------------------------ contact
+    # Fills empty profile fields only; a value the user typed is never touched
+    # (ProfileService.apply_extracted_contact).
+    #
+    # Wrapped because this is a bonus, not a requirement of the parse. A regex
+    # edge case in a resume header must not cost the user their skills — every
+    # other step here is essential, this one is not.
+    contact = ContactDetails()
+    contact_result: dict[str, list[str]] = {"applied": [], "skipped": []}
+    try:
+        contact = extract_contact(by_type.get(SectionType.CONTACT) or head_of(extracted.text))
+        contact_result = await ProfileService(
+            profiles=ProfileRepository(session)
+        ).apply_extracted_contact(user_id=version.resume.user_id, contact=contact)
+    except Exception:
+        log.exception("pipeline: contact extraction failed", version_id=str(version.id))
+
+    result.contact_fields_filled = len(contact_result["applied"])
+
     # ------------------------------------------------------------ skills
     skills_repo = SkillRepository(session)
     taxonomy = await skills_repo.load_taxonomy()
@@ -267,6 +292,16 @@ async def _run(
         ],
         "unknown_terms": unknown_terms[:50],
         "review_threshold": REVIEW_THRESHOLD,
+        # Recorded so "why didn't my name update?" is answerable without a
+        # debugger: `skipped` names the fields the user had already filled.
+        "contact": {
+            "extracted": {
+                field: getattr(contact, field)
+                for field in ("full_name", "phone", "location", "linkedin_url", "github_url")
+                if getattr(contact, field)
+            },
+            **contact_result,
+        },
     }
 
     # ------------------------------------------------------------ finish

@@ -85,20 +85,29 @@ class Profile(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # Arrays rather than join tables: these are free-text user preferences with
     # no shared identity or attributes of their own. Skills are the opposite
     # case and get a real taxonomy table (database.md section 3.1).
+    #
+    # `default=list` is not redundant alongside `server_default`. The server
+    # default only applies to rows the database inserts; a Profile constructed
+    # in Python holds None until it is re-read, and `expire_on_commit=False`
+    # (core/database.py) means a commit never re-reads it. Serialising that
+    # object as `list[str]` then fails. `open_to_relocation` below already
+    # carries a Python default — these four were simply missed.
     target_roles: Mapped[list[str]] = mapped_column(
-        ARRAY(Text), nullable=False, server_default=text("'{}'::text[]")
+        ARRAY(Text), nullable=False, default=list, server_default=text("'{}'::text[]")
     )
     preferred_locations: Mapped[list[str]] = mapped_column(
-        ARRAY(Text), nullable=False, server_default=text("'{}'::text[]")
+        ARRAY(Text), nullable=False, default=list, server_default=text("'{}'::text[]")
     )
     preferred_work_modes: Mapped[list[WorkMode]] = mapped_column(
         ARRAY(_pg_enum(WorkMode, "work_mode")),
         nullable=False,
+        default=list,
         server_default=text("'{}'::work_mode[]"),
     )
     preferred_employment_types: Mapped[list[EmploymentType]] = mapped_column(
         ARRAY(_pg_enum(EmploymentType, "employment_type")),
         nullable=False,
+        default=list,
         server_default=text("'{}'::employment_type[]"),
     )
 
