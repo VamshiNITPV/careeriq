@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.data.skill_taxonomy import normalize_skill_text
@@ -166,6 +166,47 @@ class CandidateSkillRepository(BaseRepository[CandidateSkill]):
         )
         result = await self.session.execute(statement)
         return bool(result.rowcount)
+
+    async def names_for_user(self, user_id: uuid.UUID) -> set[str]:
+        """Canonical names already on this user's profile.
+
+        Used to filter suggestions. Suggestions are computed once at parse time
+        and stored, so without checking live profile state a skill the user has
+        already accepted keeps being offered on every refresh.
+        """
+        stmt = (
+            select(Skill.name)
+            .join(CandidateSkill, CandidateSkill.skill_id == Skill.id)
+            .where(CandidateSkill.user_id == user_id)
+        )
+        return set((await self.session.scalars(stmt)).all())
+
+    async def delete_extracted_for_resume(
+        self, *, user_id: uuid.UUID, resume_id: uuid.UUID
+    ) -> int:
+        """Remove skills this resume produced, keeping anything the user owns.
+
+        Extracted skills are derived data: if the resume goes, the derivation
+        should go with it, or a deleted resume leaves behind claims the user
+        can no longer trace to any document.
+
+        The `is_user_verified` filter is what makes this safe. A skill the user
+        added or corrected by hand is their own claim, not a derivation, and
+        must survive — the same rule that stops re-parsing overwriting
+        corrections (US-2.4 AC2).
+        """
+        from app.models.resume import ResumeVersion
+
+        versions = select(ResumeVersion.id).where(ResumeVersion.resume_id == resume_id)
+
+        result = await self.session.execute(
+            delete(CandidateSkill).where(
+                CandidateSkill.user_id == user_id,
+                CandidateSkill.source_version_id.in_(versions),
+                CandidateSkill.is_user_verified.is_(False),
+            )
+        )
+        return result.rowcount or 0
 
     async def count_for_user(self, user_id: uuid.UUID) -> int:
         return (

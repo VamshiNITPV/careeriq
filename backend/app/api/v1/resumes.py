@@ -10,6 +10,7 @@ from fastapi import APIRouter, BackgroundTasks, File, Form, UploadFile, status
 from fastapi.responses import Response
 
 from app.api.deps import (
+    CandidateSkillRepositoryDep,
     CurrentUser,
     PipelineRunnerDep,
     ResumeServiceDep,
@@ -147,6 +148,7 @@ async def version_suggestions(
     user: CurrentUser,
     service: ResumeServiceDep,
     skills: SkillRepositoryDep,
+    candidate_skills: CandidateSkillRepositoryDep,
 ) -> SuggestionsResponse:
     """Return inferred skills for the user to confirm or discard.
 
@@ -163,7 +165,13 @@ async def version_suggestions(
     version = await service.get_version(version_id=version_id, user_id=user.id)
     entities = version.parsed_entities or {}
 
-    raw = entities.get("suggested_skills", [])
+    # Suggestions are computed once at parse time and stored, but whether one
+    # is still worth showing depends on the profile *now*. Filtering here rather
+    # than at parse time is what stops an accepted suggestion reappearing on
+    # every refresh, asking the user to add what they just added.
+    on_profile = await candidate_skills.names_for_user(user.id)
+
+    raw = [s for s in entities.get("suggested_skills", []) if s["name"] not in on_profile]
     resolved = await skills.get_by_names([s["name"] for s in raw])
 
     return SuggestionsResponse(
