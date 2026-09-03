@@ -299,9 +299,7 @@ class TestSkillsListParsing:
             ("Tech Stack - Docker, Kubernetes", "docker"),
         ],
     )
-    def test_handles_the_labels_real_resumes_use(
-        self, line: str, expected_first: str
-    ) -> None:
+    def test_handles_the_labels_real_resumes_use(self, line: str, expected_first: str) -> None:
         assert parse_skills_list(line)[0] == expected_first
 
     def test_a_label_only_affects_its_own_line(self) -> None:
@@ -364,9 +362,22 @@ class TestNewlyCoveredSkills:
             "Databases: MySQL, MongoDB\n"
         )
         expected = {
-            "C", "C++", "Python", "HTML", "CSS", "JavaScript", "Next.js", "FastAPI",
-            "Cloudinary", "Google Colab", "Jupyter Notebook", "Git", "GitHub",
-            "VS Code", "MySQL", "MongoDB",
+            "C",
+            "C++",
+            "Python",
+            "HTML",
+            "CSS",
+            "JavaScript",
+            "Next.js",
+            "FastAPI",
+            "Cloudinary",
+            "Google Colab",
+            "Jupyter Notebook",
+            "Git",
+            "GitHub",
+            "VS Code",
+            "MySQL",
+            "MongoDB",
         }
         assert expected <= names, f"missing: {expected - names}"
 
