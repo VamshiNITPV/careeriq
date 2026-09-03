@@ -13,6 +13,7 @@ from app.models.base import (
     TimestampMixin,
     UUIDPrimaryKeyMixin,
 )
+from app.models.career import Certification, EducationRecord, Project, WorkExperience
 from app.models.enums import (
     AuthProvider,
     EducationLevel,
@@ -39,9 +40,11 @@ __all__ = [
     "AuthProvider",
     "Base",
     "CandidateSkill",
+    "Certification",
     "Company",
     "CreatedAtMixin",
     "EducationLevel",
+    "EducationRecord",
     "EmploymentType",
     "ExperienceLevel",
     "Job",
@@ -51,6 +54,7 @@ __all__ = [
     "ProcessingStatus",
     "ProficiencyLevel",
     "Profile",
+    "Project",
     "RefreshToken",
     "Resume",
     "ResumeVersion",
@@ -64,5 +68,6 @@ __all__ = [
     "UserRole",
     "VerificationPurpose",
     "VerificationToken",
+    "WorkExperience",
     "WorkMode",
 ]

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Awaitable, Callable
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -23,6 +23,13 @@ from app.core.security import decode_access_token
 from app.integrations.email import get_email_provider
 from app.integrations.storage import ObjectStorage, get_object_storage
 from app.models.user import User
+from app.repositories.career import (
+    CareerEntityRepository,
+    CertificationRepository,
+    EducationRepository,
+    ProjectRepository,
+    WorkExperienceRepository,
+)
 from app.repositories.job import CompanyRepository, JobRepository, JobSkillRepository
 from app.repositories.refresh_token import RefreshTokenRepository
 from app.repositories.resume import ResumeRepository, ResumeVersionRepository
@@ -133,17 +140,34 @@ def get_storage() -> ObjectStorage:
     return get_object_storage()
 
 
+def get_career_repositories(session: DbSession) -> list[CareerEntityRepository[Any]]:
+    """Every entity type a resume can produce.
+
+    One list rather than four dependencies, because the only caller treats them
+    identically — and a fifth entity type should be one line here, not five
+    edits across the wiring.
+    """
+    return [
+        WorkExperienceRepository(session),
+        EducationRepository(session),
+        ProjectRepository(session),
+        CertificationRepository(session),
+    ]
+
+
 def get_resume_service(
     resumes: Annotated[ResumeRepository, Depends(get_resume_repository)],
     versions: Annotated[ResumeVersionRepository, Depends(get_resume_version_repository)],
     storage: Annotated[ObjectStorage, Depends(get_storage)],
     candidate_skills: Annotated[CandidateSkillRepository, Depends(get_candidate_skill_repository)],
+    career: Annotated[list[CareerEntityRepository[Any]], Depends(get_career_repositories)],
 ) -> ResumeService:
     return ResumeService(
         resumes=resumes,
         versions=versions,
         storage=storage,
         candidate_skills=candidate_skills,
+        career=career,
     )
 
 

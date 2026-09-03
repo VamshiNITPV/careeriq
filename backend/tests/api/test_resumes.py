@@ -8,7 +8,8 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.enums import ProcessingStatus
+from app.models.career import Certification, EducationRecord, Project, WorkExperience
+from app.models.enums import EducationLevel, ProcessingStatus
 from app.models.resume import Resume, ResumeVersion
 from app.models.skill import CandidateSkill
 from app.services.file_validation import MAX_UPLOAD_BYTES
@@ -969,3 +970,227 @@ class TestManualSkills:
             json={"proficiency": "EXPERT"},
         )
         assert response.status_code == 404
+
+
+class TestEntityExtraction:
+    """US-2.3 AC1 beyond contact details and skills (Phase 5.5)."""
+
+    async def test_writes_work_history_from_a_parse(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        run_pipeline,
+    ) -> None:
+        response = await client.post(f"{API}/resumes", headers=auth_headers, files=pdf_upload())
+        await run_pipeline(uuid.UUID(response.json()["version_id"]))
+
+        rows = list((await db_session.scalars(select(WorkExperience))).all())
+        titles = {row.title for row in rows}
+        assert "Backend Engineer" in titles
+
+        current = next(row for row in rows if row.title == "Backend Engineer")
+        assert current.company_name == "Zenith Systems"
+        assert current.is_current is True
+        assert current.end_date is None
+        # Month precision: the resume said "June 2023", not a day.
+        assert current.start_date is not None
+        assert (current.start_date.year, current.start_date.month, current.start_date.day) == (
+            2023,
+            6,
+            1,
+        )
+        assert any("REST APIs" in h for h in current.highlights)
+
+    async def test_writes_education_projects_and_certifications(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        run_pipeline,
+    ) -> None:
+        response = await client.post(f"{API}/resumes", headers=auth_headers, files=pdf_upload())
+        await run_pipeline(uuid.UUID(response.json()["version_id"]))
+
+        education = list((await db_session.scalars(select(EducationRecord))).all())
+        assert len(education) == 1
+        assert "National Institute of Technology" in education[0].institution
+        assert education[0].education_level is EducationLevel.BACHELORS
+
+        projects = list((await db_session.scalars(select(Project))).all())
+        assert any("Resume Matcher" in p.name for p in projects)
+
+        certifications = list((await db_session.scalars(select(Certification))).all())
+        assert any("Cloud Practitioner" in c.name for c in certifications)
+
+    async def test_records_the_source_version(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        run_pipeline,
+    ) -> None:
+        # Provenance decides deletion, exactly as it does for skills.
+        response = await client.post(f"{API}/resumes", headers=auth_headers, files=pdf_upload())
+        version_id = uuid.UUID(response.json()["version_id"])
+        await run_pipeline(version_id)
+
+        rows = list((await db_session.scalars(select(WorkExperience))).all())
+        assert rows
+        assert all(row.source_version_id == version_id for row in rows)
+
+    async def test_reparsing_does_not_duplicate_entries(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        run_pipeline,
+    ) -> None:
+        """The content key earning its place.
+
+        Without it a second parse inserts a second copy of every job the
+        candidate has ever held.
+        """
+        response = await client.post(f"{API}/resumes", headers=auth_headers, files=pdf_upload())
+        version_id = uuid.UUID(response.json()["version_id"])
+        await run_pipeline(version_id)
+        first = len(list((await db_session.scalars(select(WorkExperience))).all()))
+
+        version = await db_session.get(ResumeVersion, version_id)
+        assert version is not None
+        version.processing_status = ProcessingStatus.PENDING
+        await db_session.commit()
+        await run_pipeline(version_id)
+
+        second = len(list((await db_session.scalars(select(WorkExperience))).all()))
+        assert first == second
+        assert first > 0
+
+    async def test_reparsing_never_overwrites_a_user_edit(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        run_pipeline,
+    ) -> None:
+        """US-2.4 AC2 for entities, not just skills.
+
+        A better extractor is not grounds to revert someone's correction.
+        """
+        response = await client.post(f"{API}/resumes", headers=auth_headers, files=pdf_upload())
+        version_id = uuid.UUID(response.json()["version_id"])
+        await run_pipeline(version_id)
+
+        row = await db_session.scalar(
+            select(WorkExperience).where(WorkExperience.title == "Backend Engineer")
+        )
+        assert row is not None
+        row.company_name = "Zenith Systems Private Limited"
+        row.is_user_verified = True
+        await db_session.commit()
+
+        version = await db_session.get(ResumeVersion, version_id)
+        assert version is not None
+        version.processing_status = ProcessingStatus.PENDING
+        await db_session.commit()
+        await run_pipeline(version_id)
+
+        await db_session.refresh(row)
+        assert row.company_name == "Zenith Systems Private Limited"
+
+    async def test_a_failed_parse_writes_nothing(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        run_pipeline,
+    ) -> None:
+        files = {"file": ("scan.pdf", build_image_only_pdf(), "application/pdf")}
+        response = await client.post(f"{API}/resumes", headers=auth_headers, files=files)
+        await run_pipeline(uuid.UUID(response.json()["version_id"]))
+
+        assert list((await db_session.scalars(select(WorkExperience))).all()) == []
+
+    async def test_counts_are_recorded_for_diagnosis(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        run_pipeline,
+    ) -> None:
+        # So "why is my work history empty?" is answerable without a debugger.
+        response = await client.post(f"{API}/resumes", headers=auth_headers, files=pdf_upload())
+        version_id = uuid.UUID(response.json()["version_id"])
+        await run_pipeline(version_id)
+
+        version = await db_session.get(ResumeVersion, version_id)
+        assert version is not None
+        assert version.parsed_entities is not None
+        counts = version.parsed_entities["entities"]
+        assert counts["experiences"] >= 2
+        assert counts["education"] == 1
+
+    async def test_deleting_a_resume_removes_its_entities(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        run_pipeline,
+    ) -> None:
+        """Provenance decides, exactly as it does for skills.
+
+        This is the bug that was found by using the product: leaving extracted
+        rows behind is what made a deleted resume appear to resurrect its
+        contents.
+        """
+        response = await client.post(f"{API}/resumes", headers=auth_headers, files=pdf_upload())
+        resume_id = response.json()["resume_id"]
+        await run_pipeline(uuid.UUID(response.json()["version_id"]))
+        assert list((await db_session.scalars(select(WorkExperience))).all())
+
+        deleted = await client.delete(f"{API}/resumes/{resume_id}", headers=auth_headers)
+        assert deleted.status_code == 200
+
+        assert list((await db_session.scalars(select(WorkExperience))).all()) == []
+        assert list((await db_session.scalars(select(EducationRecord))).all()) == []
+        assert list((await db_session.scalars(select(Project))).all()) == []
+        assert list((await db_session.scalars(select(Certification))).all()) == []
+
+    async def test_a_hand_typed_entry_survives_a_resume_deletion(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        auth_headers: dict[str, str],
+        registered_user: dict[str, object],
+        seeded_skills: int,
+        run_pipeline,
+    ) -> None:
+        # No source version, so it was never about this document.
+        response = await client.post(f"{API}/resumes", headers=auth_headers, files=pdf_upload())
+        resume_id = response.json()["resume_id"]
+        await run_pipeline(uuid.UUID(response.json()["version_id"]))
+
+        db_session.add(
+            WorkExperience(
+                id=uuid.uuid4(),
+                user_id=uuid.UUID(str(registered_user["user"]["id"])),  # type: ignore[index]
+                content_key="exp:typed",
+                title="Typed By Hand",
+                company_name="Somewhere",
+                is_user_verified=True,
+            )
+        )
+        await db_session.commit()
+
+        await client.delete(f"{API}/resumes/{resume_id}", headers=auth_headers)
+
+        remaining = list((await db_session.scalars(select(WorkExperience))).all())
+        assert [row.title for row in remaining] == ["Typed By Hand"]

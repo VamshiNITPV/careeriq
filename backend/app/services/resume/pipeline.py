@@ -18,6 +18,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,12 +29,20 @@ from app.integrations.storage import ObjectStorage, get_object_storage
 from app.models.enums import ProcessingStatus
 from app.models.resume import ResumeVersion
 from app.models.skill import Skill
+from app.repositories.career import (
+    CareerEntityRepository,
+    CertificationRepository,
+    EducationRepository,
+    ProjectRepository,
+    WorkExperienceRepository,
+)
 from app.repositories.resume import ResumeRepository, ResumeVersionRepository
 from app.repositories.skill import CandidateSkillRepository, SkillRepository
 from app.repositories.user import ProfileRepository
 from app.services.file_validation import DocumentType
 from app.services.profile import ProfileService
 from app.services.resume.contact import ContactDetails, extract_contact, head_of
+from app.services.resume.entities import extract_entities
 from app.services.resume.extraction import UnextractableDocumentError, extract_text
 from app.services.resume.inference import infer_skills
 from app.services.resume.sections import SectionType, detect_sections, section_map
@@ -58,6 +67,7 @@ class PipelineResult:
     # Inferred from prose. Counted separately because none of these are written
     # to the profile — they await the user's confirmation.
     skills_suggested: int = 0
+    entities_written: int = 0
     unknown_terms: int = 0
     # Empty profile fields filled from the resume header. Never includes a
     # field the user had already set.
@@ -219,6 +229,25 @@ async def _run(
 
     result.contact_fields_filled = len(contact_result["applied"])
 
+    # ------------------------------------------------------------ entities
+    # Work history, education, projects and certifications (US-2.3 AC1).
+    #
+    # Wrapped for the same reason as contact extraction: this is heuristic
+    # reading of wildly variable layouts, and an edge case in one resume's
+    # experience section must not cost that user their skills.
+    entity_counts: dict[str, int] = {}
+    try:
+        entity_counts = await _store_entities(
+            session=session,
+            user_id=version.resume.user_id,
+            version_id=version.id,
+            sections=by_type,
+        )
+    except Exception:
+        log.exception("pipeline: entity extraction failed", version_id=str(version.id))
+
+    result.entities_written = sum(entity_counts.values())
+
     # ------------------------------------------------------------ skills
     skills_repo = SkillRepository(session)
     taxonomy = await skills_repo.load_taxonomy()
@@ -302,6 +331,9 @@ async def _run(
             },
             **contact_result,
         },
+        # How many rows each entity type produced, so a user asking why their
+        # work history is empty gets an answer without a debugger.
+        "entities": entity_counts,
     }
 
     # ------------------------------------------------------------ finish
@@ -357,3 +389,111 @@ async def seed_skill_taxonomy(session: AsyncSession) -> int:
     await session.commit()
     log.info("skill taxonomy seeded", inserted=inserted, parents_linked=linked)
     return inserted
+
+
+async def _store_entities(
+    *,
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    version_id: uuid.UUID,
+    sections: dict[SectionType, str],
+) -> dict[str, int]:
+    """Write extracted work history, education, projects and certifications.
+
+    Each type follows the same two steps: upsert what this parse found, then
+    remove what a previous parse of the same version produced and this one no
+    longer does. Both steps skip rows the user has edited (US-2.4 AC2) — a
+    better extractor is not grounds to revert someone's correction, nor to
+    delete an entry they asserted.
+    """
+    entities = extract_entities(sections)
+    counts: dict[str, int] = {}
+
+    async def apply(
+        repository: CareerEntityRepository[Any], name: str, rows: list[dict[str, Any]]
+    ) -> None:
+        keys = [row["content_key"] for row in rows]
+        counts[name] = await repository.upsert_from_extraction(
+            user_id=user_id, source_version_id=version_id, rows=rows
+        )
+        await repository.delete_stale(
+            user_id=user_id, source_version_id=version_id, keep_keys=keys
+        )
+
+    await apply(
+        WorkExperienceRepository(session),
+        "experiences",
+        [
+            {
+                "content_key": e.content_key,
+                "title": e.title,
+                "company_name": e.company_name,
+                "location": e.location,
+                "employment_type": e.employment_type,
+                "start_date": e.dates.start,
+                "end_date": e.dates.end,
+                "is_current": e.dates.is_current,
+                "highlights": e.highlights,
+                "extraction_confidence": e.confidence,
+            }
+            for e in entities.experiences
+        ],
+    )
+
+    await apply(
+        EducationRepository(session),
+        "education",
+        [
+            {
+                "content_key": e.content_key,
+                "institution": e.institution,
+                "degree": e.degree,
+                "field_of_study": e.field_of_study,
+                "education_level": e.level,
+                "grade": e.grade,
+                "start_date": e.dates.start,
+                "end_date": e.dates.end,
+                "is_current": e.dates.is_current,
+                "extraction_confidence": e.confidence,
+            }
+            for e in entities.education
+        ],
+    )
+
+    await apply(
+        ProjectRepository(session),
+        "projects",
+        [
+            {
+                "content_key": p.content_key,
+                "name": p.name,
+                "description": p.description,
+                "url": p.url,
+                "highlights": p.highlights,
+                "start_date": p.dates.start,
+                "end_date": p.dates.end,
+                "is_current": p.dates.is_current,
+                "extraction_confidence": p.confidence,
+            }
+            for p in entities.projects
+        ],
+    )
+
+    await apply(
+        CertificationRepository(session),
+        "certifications",
+        [
+            {
+                "content_key": c.content_key,
+                "name": c.name,
+                "issuer": c.issuer,
+                "issued_date": c.dates.start,
+                "expires_date": c.dates.end,
+                "extraction_confidence": c.confidence,
+            }
+            for c in entities.certifications
+        ],
+    )
+
+    await session.flush()
+    return counts

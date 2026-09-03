@@ -6,6 +6,7 @@ import hashlib
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from typing import Any
 
 from app.core.exceptions import ConflictError, ResourceNotFoundError
 from app.core.ids import uuid7
@@ -13,6 +14,7 @@ from app.core.logging import get_logger
 from app.integrations.storage import ObjectStorage, build_storage_key
 from app.models.enums import ProcessingStatus
 from app.models.resume import Resume, ResumeVersion
+from app.repositories.career import CareerEntityRepository
 from app.repositories.resume import LatestVersion, ResumeRepository, ResumeVersionRepository
 from app.repositories.skill import CandidateSkillRepository
 from app.services.file_validation import ValidatedUpload
@@ -33,6 +35,7 @@ class ResumeService:
         versions: ResumeVersionRepository,
         storage: ObjectStorage,
         candidate_skills: CandidateSkillRepository | None = None,
+        career: Sequence[CareerEntityRepository[Any]] | None = None,
     ) -> None:
         self.resumes = resumes
         self.versions = versions
@@ -40,6 +43,11 @@ class ResumeService:
         # Optional so the service can still be constructed for upload-only use
         # without dragging in a repository it does not need.
         self.candidate_skills = candidate_skills
+        # Work history, education, projects and certifications. A sequence
+        # rather than four named attributes: deletion treats them identically,
+        # and naming each one here would mean four places to edit when a fifth
+        # entity type arrives.
+        self.career = list(career or [])
 
     async def upload(
         self,
@@ -188,6 +196,11 @@ class ResumeService:
 
         Skills typed in by hand carry no source version and are untouched, since
         they were never about this document.
+
+        The same rule governs work history, education, projects and
+        certifications. They were added in Phase 5.5 and are deleted here for
+        exactly the reason skills are: leaving them behind is what made a
+        deleted resume appear to resurrect its contents.
         """
         resume = await self.get_resume(resume_id=resume_id, user_id=user_id)
         resume.deleted_at = datetime.now(UTC)
@@ -199,11 +212,18 @@ class ResumeService:
                 user_id=user_id, resume_id=resume_id
             )
 
+        entities_removed = 0
+        for repository in self.career:
+            entities_removed += await repository.delete_for_resume(
+                user_id=user_id, resume_id=resume_id
+            )
+
         log.info(
             "resume deleted",
             user_id=str(user_id),
             resume_id=str(resume_id),
             skills_removed=removed,
+            entities_removed=entities_removed,
         )
 
     async def latest_versions(
