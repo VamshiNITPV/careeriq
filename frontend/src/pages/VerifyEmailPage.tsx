@@ -2,12 +2,14 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Alert } from '@/components/ui/Alert'
 import { Spinner } from '@/components/ui/Spinner'
+import { useAuth } from '@/hooks/useAuth'
 import { authService } from '@/services/authService'
 
 type State = 'verifying' | 'verified' | 'failed' | 'missing-token'
 
 export function VerifyEmailPage() {
   const [searchParams] = useSearchParams()
+  const { user, setUser } = useAuth()
   const token = searchParams.get('token')
   const [state, setState] = useState<State>(token === null ? 'missing-token' : 'verifying')
 
@@ -22,9 +24,19 @@ export function VerifyEmailPage() {
 
     authService
       .verifyEmail(token)
-      .then(() => setState('verified'))
+      .then((updated) => {
+        // Apply the fresh user, so the "confirm your email" notice disappears
+        // immediately instead of surviving until a hard reload.
+        //
+        // The id guard is not optional: this route is public and the request
+        // is unauthenticated, so a verification link opened on a shared device
+        // may belong to somebody other than whoever is signed in here.
+        // Applying it unconditionally would swap the signed-in identity.
+        if (user !== null && user.id === updated.id) setUser(updated)
+        setState('verified')
+      })
       .catch(() => setState('failed'))
-  }, [token])
+  }, [token, user, setUser])
 
   return (
     <div className="flex min-h-screen flex-col justify-center bg-slate-50 px-6 py-12">

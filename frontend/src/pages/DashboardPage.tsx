@@ -4,6 +4,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { Spinner } from '@/components/ui/Spinner'
 import { authService } from '@/services/authService'
 import { resumeService, skillService } from '@/services/resumeService'
+import { firstNameFor } from '@/utils/initials'
 import { cn } from '@/utils/cn'
 
 /**
@@ -142,7 +143,7 @@ const ROADMAP = [
 ] as const
 
 export function DashboardPage() {
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   const [resumeCount, setResumeCount] = useState(0)
   const [skillCount, setSkillCount] = useState(0)
   const [loaded, setLoaded] = useState(false)
@@ -184,7 +185,9 @@ export function DashboardPage() {
     },
   ]
 
-  const firstName = user?.email.split('@')[0] ?? 'there'
+  // Prefers the profile name, so editing it on /profile changes the greeting
+  // here immediately — both read the same context value.
+  const firstName = firstNameFor(profile?.full_name, user?.email ?? '')
 
   if (!loaded) {
     return (
