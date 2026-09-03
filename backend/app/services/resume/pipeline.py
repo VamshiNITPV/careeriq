@@ -32,6 +32,7 @@ from app.repositories.resume import ResumeRepository, ResumeVersionRepository
 from app.repositories.skill import CandidateSkillRepository, SkillRepository
 from app.services.file_validation import DocumentType
 from app.services.resume.extraction import UnextractableDocumentError, extract_text
+from app.services.resume.inference import infer_skills
 from app.services.resume.sections import SectionType, detect_sections, section_map
 from app.services.resume.skill_extraction import (
     REVIEW_THRESHOLD,
@@ -51,6 +52,9 @@ class PipelineResult:
     sections_detected: int = 0
     skills_written: int = 0
     skills_for_review: int = 0
+    # Inferred from prose. Counted separately because none of these are written
+    # to the profile — they await the user's confirmation.
+    skills_suggested: int = 0
     unknown_terms: int = 0
     error: str | None = None
 
@@ -232,6 +236,13 @@ async def _run(
     ]
     result.unknown_terms = len(unknown_terms)
 
+    # Skills the prose demonstrates but never names. Kept in a separate key
+    # from `skills` because they are suggestions, not claims: they are never
+    # written to a profile, and each carries the sentence it came from so the
+    # user judges the reasoning rather than a bare label (ADR-012, inference.py).
+    inferred = infer_skills(sections=by_type, already_found={c.canonical_name for c in candidates})
+    result.skills_suggested = len(inferred)
+
     version.parsed_entities = {
         "skills": [
             {
@@ -244,6 +255,15 @@ async def _run(
                 "accepted": not c.needs_review,
             }
             for c in candidates
+        ],
+        "suggested_skills": [
+            {
+                "name": s.canonical_name,
+                "confidence": s.confidence,
+                "evidence": s.evidence,
+                "section": s.section.value,
+            }
+            for s in inferred
         ],
         "unknown_terms": unknown_terms[:50],
         "review_threshold": REVIEW_THRESHOLD,
@@ -261,6 +281,7 @@ async def _run(
         sections=result.sections_detected,
         skills_written=result.skills_written,
         skills_for_review=result.skills_for_review,
+        skills_suggested=result.skills_suggested,
         unknown_terms=result.unknown_terms,
     )
     return result
