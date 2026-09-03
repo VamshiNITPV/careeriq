@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent } from 'react'
 import { SkillAdder } from '@/components/SkillAdder'
 import { Alert } from '@/components/ui/Alert'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 import { useResumeProcessing } from '@/hooks/useResumeProcessing'
@@ -74,6 +75,9 @@ export function ResumePage() {
   const [skills, setSkills] = useState<CandidateSkill[]>([])
   const [suggestions, setSuggestions] = useState<SuggestedSkill[]>([])
   const [dismissed, setDismissed] = useState<Set<string>>(new Set())
+  const [suggestionVersionId, setSuggestionVersionId] = useState<string | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<Resume | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
   const [error, setError] = useState<ApiError | string | null>(null)
   const [isUploading, setIsUploading] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
@@ -98,11 +102,14 @@ export function ResumePage() {
       try {
         const result = await resumeService.suggestions(primary.current_version_id)
         setSuggestions(result.suggestions)
+        setSuggestionVersionId(result.version_id)
       } catch {
         setSuggestions([])
+        setSuggestionVersionId(null)
       }
     } else {
       setSuggestions([])
+      setSuggestionVersionId(null)
     }
   }, [])
 
@@ -169,8 +176,45 @@ export function ResumePage() {
   // from one click.
   const visibleSuggestions = suggestions.filter((s) => !dismissed.has(s.name))
 
+  async function confirmDelete() {
+    if (pendingDelete === null) return
+    setIsDeleting(true)
+    try {
+      await resumeService.remove(pendingDelete.id)
+      await refresh()
+      setPendingDelete(null)
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught : 'Could not delete that resume.')
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
   return (
     <div className="space-y-8">
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title={`Delete “${pendingDelete?.title ?? ''}”?`}
+        confirmLabel="Delete resume"
+        destructive
+        isBusy={isDeleting}
+        onConfirm={() => void confirmDelete()}
+        onCancel={() => {
+          if (!isDeleting) setPendingDelete(null)
+        }}
+      >
+        {/* States the consequence in numbers. "Are you sure?" tells the user
+            nothing they did not already know; what they cannot see is how much
+            of their profile is about to go with the file. */}
+        <p>This cannot be undone.</p>
+        {pendingDelete !== null && pendingDelete.skill_count > 0 && (
+          <p className="mt-2">
+            <strong>{pendingDelete.skill_count} skills</strong> came from this resume and will be
+            removed with it. Skills you typed in yourself are kept.
+          </p>
+        )}
+      </ConfirmDialog>
+
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-slate-900">Resume</h1>
         <p className="mt-1 text-sm text-slate-600">
@@ -306,9 +350,7 @@ export function ResumePage() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => {
-                    void resumeService.remove(resume.id).then(refresh)
-                  }}
+                  onClick={() => setPendingDelete(resume)}
                 >
                   Delete
                 </Button>
@@ -355,8 +397,10 @@ export function ResumePage() {
                       disabled={suggestion.skill_id === null}
                       onClick={() => {
                         const id = suggestion.skill_id
-                        if (id === null) return
-                        void skillService.add(id).then(() => {
+                        if (id === null || suggestionVersionId === null) return
+                        // Linked to the resume it was suggested from, so it is
+                        // removed with that resume rather than outliving it.
+                        void skillService.add(id, suggestionVersionId).then(() => {
                           setDismissed((prev) => new Set(prev).add(suggestion.name))
                           void refresh()
                         })

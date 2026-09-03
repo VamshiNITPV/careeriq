@@ -105,8 +105,18 @@ export const skillService = {
     return api.get<CandidateSkill[]>('/profile/skills')
   },
 
-  add(skillId: string): Promise<CandidateSkill> {
-    return api.post<CandidateSkill>('/profile/skills', { skill_id: skillId })
+  /**
+   * Add a skill by id.
+   *
+   * `sourceVersionId` is passed when accepting a suggestion, which links the
+   * skill to the resume it came from so it is removed with it. Omitted for a
+   * skill added by hand, which is not about any particular document.
+   */
+  add(skillId: string, sourceVersionId?: string): Promise<CandidateSkill> {
+    return api.post<CandidateSkill>('/profile/skills', {
+      skill_id: skillId,
+      ...(sourceVersionId !== undefined ? { source_version_id: sourceVersionId } : {}),
+    })
   },
 
   /**

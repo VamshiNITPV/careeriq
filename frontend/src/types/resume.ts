@@ -29,6 +29,8 @@ export interface Resume {
   current_version_id: string | null
   created_at: string
   updated_at: string
+  /** Skills traceable to this resume, removed along with it. */
+  skill_count: number
 }
 
 export interface ResumeDetail extends Resume {
