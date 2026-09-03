@@ -105,7 +105,12 @@ async def upload_resume(
 @router.get("", response_model=list[ResumeRead], summary="List your resumes")
 async def list_resumes(user: CurrentUser, service: ResumeServiceDep) -> list[ResumeRead]:
     resumes = await service.list_resumes(user.id)
-    return [ResumeRead.model_validate(r) for r in resumes]
+    counts = await service.skill_counts(user_id=user.id)
+
+    return [
+        ResumeRead.model_validate(r).model_copy(update={"skill_count": counts.get(r.id, 0)})
+        for r in resumes
+    ]
 
 
 @router.get(

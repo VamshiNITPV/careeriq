@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import Select, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.data.skill_taxonomy import normalize_skill_text
@@ -181,29 +181,51 @@ class CandidateSkillRepository(BaseRepository[CandidateSkill]):
         )
         return set((await self.session.scalars(stmt)).all())
 
-    async def delete_extracted_for_resume(
-        self, *, user_id: uuid.UUID, resume_id: uuid.UUID
-    ) -> int:
-        """Remove skills this resume produced, keeping anything the user owns.
-
-        Extracted skills are derived data: if the resume goes, the derivation
-        should go with it, or a deleted resume leaves behind claims the user
-        can no longer trace to any document.
-
-        The `is_user_verified` filter is what makes this safe. A skill the user
-        added or corrected by hand is their own claim, not a derivation, and
-        must survive — the same rule that stops re-parsing overwriting
-        corrections (US-2.4 AC2).
-        """
+    def _versions_of(self, resume_id: uuid.UUID) -> Select[tuple[uuid.UUID]]:
+        """Subquery of every version id belonging to a resume."""
         from app.models.resume import ResumeVersion
 
-        versions = select(ResumeVersion.id).where(ResumeVersion.resume_id == resume_id)
+        return select(ResumeVersion.id).where(ResumeVersion.resume_id == resume_id)
 
+    async def count_for_resume(self, *, user_id: uuid.UUID, resume_id: uuid.UUID) -> int:
+        """How many profile skills came from this resume.
+
+        Shown in the delete confirmation, so the user is told what they are
+        about to lose rather than discovering it afterwards.
+        """
+        return (
+            await self.session.scalar(
+                select(func.count())
+                .select_from(CandidateSkill)
+                .where(
+                    CandidateSkill.user_id == user_id,
+                    CandidateSkill.source_version_id.in_(self._versions_of(resume_id)),
+                )
+            )
+        ) or 0
+
+    async def delete_for_resume(self, *, user_id: uuid.UUID, resume_id: uuid.UUID) -> int:
+        """Remove every skill that came from this resume.
+
+        Deliberately ignores `is_user_verified`. An earlier version kept
+        verified rows, on the reasoning that confirming a skill made it the
+        user's own claim — but that produced exactly the surprise reported:
+        delete the document, and skills accepted while reviewing it stay behind
+        with nothing to trace them to.
+
+        Provenance is what decides, not verification. A skill sourced from this
+        resume is derived from it and goes with it, whether it was extracted,
+        corrected, or accepted from a suggestion. Skills typed in by hand carry
+        no source and are untouched, because they were never about this
+        document.
+
+        `is_user_verified` still does its real job elsewhere: stopping a
+        re-parse from silently reverting a correction (US-2.4 AC2).
+        """
         result = await self.session.execute(
             delete(CandidateSkill).where(
                 CandidateSkill.user_id == user_id,
-                CandidateSkill.source_version_id.in_(versions),
-                CandidateSkill.is_user_verified.is_(False),
+                CandidateSkill.source_version_id.in_(self._versions_of(resume_id)),
             )
         )
         return result.rowcount or 0

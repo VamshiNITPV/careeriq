@@ -7,7 +7,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query
 
-from app.api.deps import CandidateSkillRepositoryDep, CurrentUser, SkillRepositoryDep
+from app.api.deps import (
+    CandidateSkillRepositoryDep,
+    CurrentUser,
+    ResumeVersionRepositoryDep,
+    SkillRepositoryDep,
+)
 from app.core.exceptions import (
     DuplicateResourceError,
     ResourceNotFoundError,
@@ -75,6 +80,7 @@ async def add_skill(
     user: CurrentUser,
     skills: SkillRepositoryDep,
     candidate_skills: CandidateSkillRepositoryDep,
+    versions: ResumeVersionRepositoryDep,
 ) -> CandidateSkillRead:
     """Add a skill to your profile, by id or by name.
 
@@ -119,6 +125,15 @@ async def add_skill(
     if await candidate_skills.get_for_skill(user.id, skill.id) is not None:
         raise DuplicateResourceError("That skill is already on your profile.")
 
+    # Ownership is checked before the id is trusted: an unchecked version id
+    # would let a caller attach their skill to somebody else's resume.
+    source_version_id: uuid.UUID | None = None
+    if payload.source_version_id is not None:
+        version = await versions.get_owned(payload.source_version_id, user.id)
+        if version is None:
+            raise ResourceNotFoundError("Resume version")
+        source_version_id = version.id
+
     row = CandidateSkill(
         id=uuid7(),
         user_id=user.id,
@@ -126,6 +141,7 @@ async def add_skill(
         proficiency=payload.proficiency,
         years_of_experience=payload.years_of_experience,
         last_used_year=payload.last_used_year,
+        source_version_id=source_version_id,
         # A skill the user added by hand is verified by definition, which also
         # protects it from being overwritten by a later re-parse (US-2.4 AC2).
         is_user_verified=True,

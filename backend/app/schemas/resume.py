@@ -44,6 +44,9 @@ class ResumeRead(BaseModel):
     current_version_id: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
+    # Skills traceable to this resume. Shown in the delete confirmation so the
+    # user is told what they are about to lose rather than discovering it after.
+    skill_count: int = 0
 
 
 class ResumeDetail(ResumeRead):
@@ -163,6 +166,14 @@ class CandidateSkillCreate(BaseModel):
 
     skill_id: uuid.UUID | None = None
     skill_name: str | None = Field(default=None, min_length=1, max_length=120)
+    # Set when accepting a suggestion, so the skill is traceable to the resume
+    # that produced it and is removed with it. A skill typed in by hand leaves
+    # this null and survives any resume deletion, because it was never about a
+    # particular document.
+    source_version_id: uuid.UUID | None = Field(
+        default=None,
+        description="The resume version this came from, when accepting a suggestion.",
+    )
     proficiency: ProficiencyLevel | None = None
     years_of_experience: Decimal | None = Field(default=None, ge=0, le=70)
     last_used_year: int | None = Field(default=None, ge=1950, le=2100)

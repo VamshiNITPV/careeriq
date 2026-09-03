@@ -145,6 +145,9 @@ def get_pipeline_runner() -> Callable[[uuid.UUID], Awaitable[None]]:
 
 PipelineRunnerDep = Annotated[Callable[[uuid.UUID], Awaitable[None]], Depends(get_pipeline_runner)]
 SkillRepositoryDep = Annotated[SkillRepository, Depends(get_skill_repository)]
+ResumeVersionRepositoryDep = Annotated[
+    ResumeVersionRepository, Depends(get_resume_version_repository)
+]
 CandidateSkillRepositoryDep = Annotated[
     CandidateSkillRepository, Depends(get_candidate_skill_repository)
 ]

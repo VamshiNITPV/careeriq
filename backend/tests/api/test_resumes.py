@@ -448,35 +448,104 @@ class TestDeleteRemovesExtractedSkills:
         after = (await client.get(f"{API}/profile/skills", headers=auth_headers)).json()
         assert after == []
 
-    async def test_user_verified_skills_survive_the_delete(
+    async def test_a_corrected_skill_still_goes_with_its_resume(
         self,
         client: AsyncClient,
         auth_headers: dict[str, str],
         seeded_skills: int,
         run_pipeline,
     ) -> None:
-        """The distinction that makes the deletion safe.
+        """Provenance decides, not verification.
 
-        An extracted skill is a derivation and goes with its source. A skill the
-        user added or corrected is their own claim, and deleting a document must
-        not silently retract it.
+        An earlier version kept verified rows on the reasoning that confirming a
+        skill made it the user's own claim. That produced the reported surprise:
+        delete the resume, and skills reviewed alongside it stayed behind with
+        nothing to trace them to. Correcting an extracted skill does not change
+        where it came from.
         """
         upload = await client.post(f"{API}/resumes", headers=auth_headers, files=pdf_upload())
         await run_pipeline(uuid.UUID(upload.json()["version_id"]))
 
         listed = (await client.get(f"{API}/profile/skills", headers=auth_headers)).json()
-        kept = listed[0]
         await client.patch(
-            f"{API}/profile/skills/{kept['id']}",
+            f"{API}/profile/skills/{listed[0]['id']}",
             headers=auth_headers,
             json={"proficiency": "EXPERT"},
         )
 
         await client.delete(f"{API}/resumes/{upload.json()['resume_id']}", headers=auth_headers)
 
+        assert (await client.get(f"{API}/profile/skills", headers=auth_headers)).json() == []
+
+    async def test_an_accepted_suggestion_goes_with_its_resume(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        run_pipeline,
+    ) -> None:
+        """The exact case reported.
+
+        Suggestions are accepted while reviewing a resume, so they are derived
+        from it. Leaving them behind is what made a deleted resume look like it
+        had resurrected its skills.
+        """
+        upload = await client.post(f"{API}/resumes", headers=auth_headers, files=pdf_upload())
+        version_id = upload.json()["version_id"]
+        await run_pipeline(uuid.UUID(version_id))
+
+        suggestions = (
+            await client.get(
+                f"{API}/resumes/versions/{version_id}/suggestions", headers=auth_headers
+            )
+        ).json()["suggestions"]
+        assert suggestions
+
+        accepted = await client.post(
+            f"{API}/profile/skills",
+            headers=auth_headers,
+            json={
+                "skill_id": suggestions[0]["skill_id"],
+                "source_version_id": version_id,
+            },
+        )
+        assert accepted.status_code == 201
+
+        await client.delete(f"{API}/resumes/{upload.json()['resume_id']}", headers=auth_headers)
+
+        assert (await client.get(f"{API}/profile/skills", headers=auth_headers)).json() == []
+
+    async def test_hand_typed_skills_are_untouched(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        run_pipeline,
+    ) -> None:
+        """A skill typed in by hand was never about any particular document."""
+        upload = await client.post(f"{API}/resumes", headers=auth_headers, files=pdf_upload())
+        await run_pipeline(uuid.UUID(upload.json()["version_id"]))
+
+        await client.post(f"{API}/profile/skills", headers=auth_headers, json={"skill_name": "Bun"})
+
+        await client.delete(f"{API}/resumes/{upload.json()['resume_id']}", headers=auth_headers)
+
         remaining = (await client.get(f"{API}/profile/skills", headers=auth_headers)).json()
-        assert [s["skill"]["name"] for s in remaining] == [kept["skill"]["name"]]
-        assert remaining[0]["is_user_verified"] is True
+        assert [s["skill"]["name"] for s in remaining] == ["Bun"]
+
+    async def test_the_list_reports_how_many_skills_a_resume_owns(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        run_pipeline,
+    ) -> None:
+        # Drives the delete confirmation, so the user is told what they lose.
+        upload = await client.post(f"{API}/resumes", headers=auth_headers, files=pdf_upload())
+        await run_pipeline(uuid.UUID(upload.json()["version_id"]))
+
+        listed = (await client.get(f"{API}/resumes", headers=auth_headers)).json()
+        assert listed[0]["skill_count"] > 5
 
     async def test_deleting_one_resume_leaves_another_alone(
         self,

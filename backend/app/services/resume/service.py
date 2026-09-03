@@ -179,14 +179,14 @@ class ResumeService:
         on it (database.md section 3.7). Reclaiming orphaned objects is a
         Phase 10 job.
 
-        The extracted skills, however, do go. They are derived from the
-        document, so leaving them behind means a deleted resume leaves claims
-        on the profile that the user can no longer trace to anything — which is
-        exactly what it looks like when it is wrong.
+        Every skill that came from this resume goes with it — extracted,
+        corrected, or accepted from one of its suggestions. Provenance decides,
+        not whether the user confirmed it: a skill accepted while reviewing this
+        document is still derived from it, and leaving it behind is what made a
+        deleted resume appear to resurrect its skills.
 
-        Skills the user added or corrected by hand survive: those are their own
-        claims rather than a derivation, and the `is_user_verified` flag is what
-        distinguishes them.
+        Skills typed in by hand carry no source version and are untouched, since
+        they were never about this document.
         """
         resume = await self.get_resume(resume_id=resume_id, user_id=user_id)
         resume.deleted_at = datetime.now(UTC)
@@ -194,7 +194,7 @@ class ResumeService:
 
         removed = 0
         if self.candidate_skills is not None:
-            removed = await self.candidate_skills.delete_extracted_for_resume(
+            removed = await self.candidate_skills.delete_for_resume(
                 user_id=user_id, resume_id=resume_id
             )
 
@@ -202,8 +202,20 @@ class ResumeService:
             "resume deleted",
             user_id=str(user_id),
             resume_id=str(resume_id),
-            extracted_skills_removed=removed,
+            skills_removed=removed,
         )
+
+    async def skill_counts(self, *, user_id: uuid.UUID) -> dict[uuid.UUID, int]:
+        """Skills-per-resume, for the delete confirmation."""
+        if self.candidate_skills is None:
+            return {}
+        resumes = await self.resumes.list_for_user(user_id)
+        return {
+            resume.id: await self.candidate_skills.count_for_resume(
+                user_id=user_id, resume_id=resume.id
+            )
+            for resume in resumes
+        }
 
     async def download(
         self, *, version_id: uuid.UUID, user_id: uuid.UUID
