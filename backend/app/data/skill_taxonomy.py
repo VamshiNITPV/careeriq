@@ -262,7 +262,6 @@ SEED_SKILLS: tuple[SeedSkill, ...] = (
     SeedSkill("Celery", FRAMEWORK, parent="Python"),
     SeedSkill("Streamlit", FRAMEWORK, parent="Python"),
     SeedSkill("Gradio", FRAMEWORK, parent="Python"),
-
     # ---------------------------------------------------------------- developer tools
     # GitHub is its own entry rather than a Git alias: candidates list them
     # separately, and a portfolio on GitHub is a distinct signal from knowing
@@ -287,7 +286,6 @@ SEED_SKILLS: tuple[SeedSkill, ...] = (
     SeedSkill("Slack", TOOL),
     SeedSkill("Trello", TOOL),
     SeedSkill("Confluence", TOOL),
-
     # ---------------------------------------------------------------- cs fundamentals
     # Coursework lines are near-universal on student resumes and were matching
     # nothing.
@@ -302,21 +300,31 @@ SEED_SKILLS: tuple[SeedSkill, ...] = (
     SeedSkill("Linear Algebra", PRACTICE),
     SeedSkill("Probability", PRACTICE, ("probability and statistics",)),
     SeedSkill("Competitive Programming", PRACTICE, ("cp",)),
-
     # ---------------------------------------------------------------- ml architectures
     # A resume naming CNN or ConvLSTM is describing real, specific work; the
     # taxonomy only knew the umbrella terms.
-    SeedSkill("CNN", PRACTICE, ("convolutional neural network", "convolutional neural networks"),
-              parent="Deep Learning"),
-    SeedSkill("RNN", PRACTICE, ("recurrent neural network", "recurrent neural networks"),
-              parent="Deep Learning"),
+    SeedSkill(
+        "CNN",
+        PRACTICE,
+        ("convolutional neural network", "convolutional neural networks"),
+        parent="Deep Learning",
+    ),
+    SeedSkill(
+        "RNN",
+        PRACTICE,
+        ("recurrent neural network", "recurrent neural networks"),
+        parent="Deep Learning",
+    ),
     SeedSkill("LSTM", PRACTICE, ("long short term memory",), parent="Deep Learning"),
-    SeedSkill("ConvLSTM", PRACTICE, ("bi-directional convlstm", "bidirectional convlstm",
-                                     "conv lstm"), parent="LSTM"),
+    SeedSkill(
+        "ConvLSTM",
+        PRACTICE,
+        ("bi-directional convlstm", "bidirectional convlstm", "conv lstm"),
+        parent="LSTM",
+    ),
     SeedSkill("Transformers", PRACTICE, ("transformer architecture",), parent="Deep Learning"),
     SeedSkill("BERT", PRACTICE, parent="Transformers"),
-    SeedSkill("GAN", PRACTICE, ("generative adversarial network", "gans"),
-              parent="Deep Learning"),
+    SeedSkill("GAN", PRACTICE, ("generative adversarial network", "gans"), parent="Deep Learning"),
     SeedSkill("YOLO", PRACTICE, ("you only look once",), parent="Computer Vision"),
     SeedSkill("OpenCV", FRAMEWORK, ("cv2",), parent="Computer Vision"),
     SeedSkill("Generative AI", PRACTICE, ("gen ai", "genai", "generative artificial intelligence")),
@@ -329,14 +337,85 @@ SEED_SKILLS: tuple[SeedSkill, ...] = (
     SeedSkill("XGBoost", FRAMEWORK, parent="Machine Learning"),
     SeedSkill("Feature Engineering", PRACTICE, parent="Machine Learning"),
     SeedSkill("Model Evaluation", PRACTICE, ("model validation",), parent="Machine Learning"),
-
+    # ---------------------------------------------------------------- segmentation & metrics
+    # Named architectures and metrics. A resume saying "BCDU-Net" is describing
+    # specific, verifiable work, not a general interest in deep learning.
+    SeedSkill("Image Segmentation", PRACTICE, ("semantic segmentation",), parent="Computer Vision"),
+    SeedSkill(
+        "Medical Image Segmentation",
+        PRACTICE,
+        ("medical imaging", "medical image analysis"),
+        parent="Image Segmentation",
+    ),
+    SeedSkill("U-Net", PRACTICE, ("unet", "u net"), parent="Image Segmentation"),
+    SeedSkill(
+        "BCDU-Net",
+        PRACTICE,
+        ("bcdunet", "bcdu net", "bi-directional convlstm u-net"),
+        parent="U-Net",
+    ),
+    SeedSkill("Image Classification", PRACTICE, parent="Computer Vision"),
+    SeedSkill("Object Detection", PRACTICE, parent="Computer Vision"),
+    SeedSkill("AUC-ROC", PRACTICE, ("auc", "roc auc", "roc curve", "auc roc")),
+    SeedSkill("Precision and Recall", PRACTICE, ("f1 score", "precision recall")),
+    SeedSkill("Confusion Matrix", PRACTICE),
+    SeedSkill("Cross-Validation", PRACTICE, ("k fold cross validation", "cross validation")),
+    SeedSkill("Data Preprocessing", PRACTICE, ("data cleaning", "preprocessing", "data wrangling")),
+    SeedSkill("Model Training", PRACTICE, ("training models", "model tuning")),
+    SeedSkill("Model Validation", PRACTICE, ("model testing",)),
+    SeedSkill("Hyperparameter Tuning", PRACTICE, ("hyperparameter optimization",)),
+    SeedSkill("Data Augmentation", PRACTICE),
+    # ---------------------------------------------------------------- engineering disciplines
+    # Broad but genuine capabilities. They are named directly on many resumes,
+    # and where they are not, the inference rules can suggest them from evidence.
+    SeedSkill(
+        "Full-Stack Development", PRACTICE, ("full stack", "fullstack", "full stack development")
+    ),
+    SeedSkill(
+        "Frontend Development",
+        PRACTICE,
+        ("front end development", "frontend engineering", "ui development"),
+    ),
+    SeedSkill(
+        "Backend Development",
+        PRACTICE,
+        ("back end development", "server side development", "backend engineering"),
+    ),
+    SeedSkill(
+        "Responsive Web Design",
+        PRACTICE,
+        ("responsive design", "responsive ui", "mobile responsive"),
+    ),
+    SeedSkill("Web Development", PRACTICE, ("web application development",)),
+    SeedSkill("API Development", PRACTICE, ("api design", "rest api development")),
+    SeedSkill("Authentication", PRACTICE, ("user authentication", "auth")),
+    SeedSkill("Authorization", PRACTICE, ("access control", "role based access control", "rbac")),
+    SeedSkill("Database Design", PRACTICE, ("schema design", "data modeling", "data modelling")),
+    SeedSkill("Database Management", PRACTICE, ("database administration",)),
+    SeedSkill("Debugging", PRACTICE, ("troubleshooting",)),
+    SeedSkill("Software Testing", PRACTICE, ("testing", "qa", "quality assurance")),
+    SeedSkill("Integration Testing", PRACTICE, parent="Software Testing"),
+    SeedSkill("Performance Optimization", PRACTICE, ("performance tuning", "optimization")),
+    SeedSkill("Deployment", PRACTICE, ("web deployment", "application deployment")),
+    SeedSkill(
+        "Scalability",
+        PRACTICE,
+        ("scalable systems", "scalable applications"),
+        parent="System Design",
+    ),
+    SeedSkill("Caching", PRACTICE, ("cache", "caching strategies")),
+    SeedSkill("Data Processing", PRACTICE, ("data transformation",)),
+    SeedSkill("Technical Documentation", PRACTICE, ("documentation",)),
+    # ---------------------------------------------------------------- framework features
+    SeedSkill("Next.js App Router", FRAMEWORK, ("app router",), parent="Next.js"),
+    SeedSkill("Server-Side Rendering", PRACTICE, ("ssr",), parent="Next.js"),
+    SeedSkill("Server Components", PRACTICE, ("react server components",), parent="React"),
     # ---------------------------------------------------------------- office
     SeedSkill("Microsoft Word", TOOL, ("ms word", "msword")),
     SeedSkill("Microsoft PowerPoint", TOOL, ("ms powerpoint", "powerpoint", "ms power point")),
     SeedSkill("Microsoft Office", TOOL, ("ms office",)),
     SeedSkill("Google Workspace", TOOL, ("google sheets", "google docs", "g suite")),
     SeedSkill("LaTeX", TOOL),
-
     # ---------------------------------------------------------------- soft skills
     SeedSkill("Communication", SOFT, ("verbal communication", "written communication")),
     SeedSkill("Leadership", SOFT, ("team leadership",)),
