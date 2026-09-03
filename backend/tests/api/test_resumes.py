@@ -422,6 +422,216 @@ class TestResumeManagement:
         assert row.deleted_at is not None
 
 
+class TestDeleteRemovesExtractedSkills:
+    """Deleting a resume must not leave its skills behind.
+
+    Reported as "after deleting the resume the extracted skills are still
+    there" — a deleted document leaving untraceable claims on the profile.
+    """
+
+    async def test_extracted_skills_go_with_the_resume(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        run_pipeline,
+    ) -> None:
+        upload = await client.post(f"{API}/resumes", headers=auth_headers, files=pdf_upload())
+        await run_pipeline(uuid.UUID(upload.json()["version_id"]))
+
+        before = (await client.get(f"{API}/profile/skills", headers=auth_headers)).json()
+        assert len(before) > 5
+
+        await client.delete(f"{API}/resumes/{upload.json()['resume_id']}", headers=auth_headers)
+
+        after = (await client.get(f"{API}/profile/skills", headers=auth_headers)).json()
+        assert after == []
+
+    async def test_user_verified_skills_survive_the_delete(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        run_pipeline,
+    ) -> None:
+        """The distinction that makes the deletion safe.
+
+        An extracted skill is a derivation and goes with its source. A skill the
+        user added or corrected is their own claim, and deleting a document must
+        not silently retract it.
+        """
+        upload = await client.post(f"{API}/resumes", headers=auth_headers, files=pdf_upload())
+        await run_pipeline(uuid.UUID(upload.json()["version_id"]))
+
+        listed = (await client.get(f"{API}/profile/skills", headers=auth_headers)).json()
+        kept = listed[0]
+        await client.patch(
+            f"{API}/profile/skills/{kept['id']}",
+            headers=auth_headers,
+            json={"proficiency": "EXPERT"},
+        )
+
+        await client.delete(f"{API}/resumes/{upload.json()['resume_id']}", headers=auth_headers)
+
+        remaining = (await client.get(f"{API}/profile/skills", headers=auth_headers)).json()
+        assert [s["skill"]["name"] for s in remaining] == [kept["skill"]["name"]]
+        assert remaining[0]["is_user_verified"] is True
+
+    async def test_deleting_one_resume_leaves_another_alone(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        run_pipeline,
+    ) -> None:
+        first = await client.post(f"{API}/resumes", headers=auth_headers, files=pdf_upload())
+        await run_pipeline(uuid.UUID(first.json()["version_id"]))
+
+        second = await client.post(
+            f"{API}/resumes",
+            headers=auth_headers,
+            files={"file": ("other.docx", build_docx(), "application/vnd.ms-word")},
+        )
+        await run_pipeline(uuid.UUID(second.json()["version_id"]))
+
+        await client.delete(f"{API}/resumes/{first.json()['resume_id']}", headers=auth_headers)
+
+        # The second resume's skills were re-sourced to it by its own parse, so
+        # they must remain.
+        remaining = (await client.get(f"{API}/profile/skills", headers=auth_headers)).json()
+        assert len(remaining) > 5
+
+
+class TestSuggestions:
+    async def test_accepted_suggestions_stop_being_offered(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        run_pipeline,
+    ) -> None:
+        """Reported as suggestions reappearing after refresh.
+
+        Suggestions are computed once at parse time and stored, so whether one
+        is still worth showing has to be decided against the live profile — not
+        against the snapshot taken when the file was parsed.
+        """
+        upload = await client.post(f"{API}/resumes", headers=auth_headers, files=pdf_upload())
+        version_id = upload.json()["version_id"]
+        await run_pipeline(uuid.UUID(version_id))
+
+        first = (
+            await client.get(
+                f"{API}/resumes/versions/{version_id}/suggestions", headers=auth_headers
+            )
+        ).json()["suggestions"]
+        assert first, "fixture resume should produce at least one suggestion"
+
+        target = first[0]
+        added = await client.post(
+            f"{API}/profile/skills", headers=auth_headers, json={"skill_id": target["skill_id"]}
+        )
+        assert added.status_code == 201
+
+        second = (
+            await client.get(
+                f"{API}/resumes/versions/{version_id}/suggestions", headers=auth_headers
+            )
+        ).json()["suggestions"]
+
+        assert target["name"] not in {s["name"] for s in second}
+        assert len(second) == len(first) - 1
+
+    async def test_every_suggestion_carries_evidence(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        run_pipeline,
+    ) -> None:
+        upload = await client.post(f"{API}/resumes", headers=auth_headers, files=pdf_upload())
+        version_id = upload.json()["version_id"]
+        await run_pipeline(uuid.UUID(version_id))
+
+        body = (
+            await client.get(
+                f"{API}/resumes/versions/{version_id}/suggestions", headers=auth_headers
+            )
+        ).json()
+
+        for suggestion in body["suggestions"]:
+            assert suggestion["evidence"].strip()
+            # Never auto-accepted: below the pipeline's write threshold.
+            assert float(suggestion["confidence"]) < 0.60
+
+
+class TestAddSkillByName:
+    async def test_creates_a_skill_the_taxonomy_does_not_know(
+        self, client: AsyncClient, auth_headers: dict[str, str], seeded_skills: int
+    ) -> None:
+        """No taxonomy is complete.
+
+        Refusing a skill because we have not heard of it leaves the user unable
+        to record something true about themselves.
+        """
+        response = await client.post(
+            f"{API}/profile/skills", headers=auth_headers, json={"skill_name": "Bun"}
+        )
+
+        assert response.status_code == 201
+        assert response.json()["skill"]["name"] == "Bun"
+        assert response.json()["is_user_verified"] is True
+
+    async def test_a_known_name_attaches_to_the_existing_skill(
+        self, client: AsyncClient, auth_headers: dict[str, str], seeded_skills: int
+    ) -> None:
+        # Typing a name that already exists must not create a duplicate entry
+        # that nothing else in the system will ever match.
+        response = await client.post(
+            f"{API}/profile/skills", headers=auth_headers, json={"skill_name": "Python"}
+        )
+
+        assert response.status_code == 201
+        assert response.json()["skill"]["name"] == "Python"
+
+    async def test_an_alias_resolves_to_its_canonical_skill(
+        self, client: AsyncClient, auth_headers: dict[str, str], seeded_skills: int
+    ) -> None:
+        response = await client.post(
+            f"{API}/profile/skills", headers=auth_headers, json={"skill_name": "postgres"}
+        )
+
+        assert response.status_code == 201
+        assert response.json()["skill"]["name"] == "PostgreSQL"
+
+    async def test_rejects_both_identifiers_at_once(
+        self, client: AsyncClient, auth_headers: dict[str, str], seeded_skills: int
+    ) -> None:
+        found = await client.get(f"{API}/skills/search?q=python", headers=auth_headers)
+        response = await client.post(
+            f"{API}/profile/skills",
+            headers=auth_headers,
+            json={"skill_id": found.json()[0]["id"], "skill_name": "Python"},
+        )
+        assert response.status_code == 422
+
+    async def test_rejects_neither_identifier(
+        self, client: AsyncClient, auth_headers: dict[str, str]
+    ) -> None:
+        response = await client.post(f"{API}/profile/skills", headers=auth_headers, json={})
+        assert response.status_code == 422
+
+    async def test_cannot_add_the_same_name_twice(
+        self, client: AsyncClient, auth_headers: dict[str, str], seeded_skills: int
+    ) -> None:
+        await client.post(f"{API}/profile/skills", headers=auth_headers, json={"skill_name": "Bun"})
+        again = await client.post(
+            f"{API}/profile/skills", headers=auth_headers, json={"skill_name": "bun"}
+        )
+        assert again.status_code == 409
+
+
 class TestSkillSearch:
     async def test_finds_by_canonical_name(
         self, client: AsyncClient, auth_headers: dict[str, str], seeded_skills: int
