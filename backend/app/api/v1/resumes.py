@@ -16,8 +16,11 @@ from app.api.deps import (
     ResumeServiceDep,
     SkillRepositoryDep,
 )
+from app.core.exceptions import ConflictError
 from app.core.logging import get_logger
 from app.models.enums import ProcessingStatus
+from app.models.resume import Resume
+from app.repositories.resume import LatestVersion
 from app.schemas.common import ErrorResponse, MessageResponse
 from app.schemas.resume import (
     ProcessingStatusResponse,
@@ -43,10 +46,60 @@ _STAGE: dict[ProcessingStatus, tuple[int, str]] = {
     ProcessingStatus.PENDING: (5, "Queued"),
     ProcessingStatus.EXTRACTING: (30, "Reading the document"),
     ProcessingStatus.PARSING: (65, "Finding sections and skills"),
+    # Reserved. The pipeline never assigns EMBEDDING today — the real path is
+    # PENDING → EXTRACTING → PARSING → COMPLETE — so a user has never seen this
+    # label. Kept because the enum member and the migration both exist and
+    # ADR-010 specifies the stage; delete all three together or none.
     ProcessingStatus.EMBEDDING: (85, "Generating embeddings"),
     ProcessingStatus.COMPLETE: (100, "Complete"),
     ProcessingStatus.FAILED: (100, "Failed"),
 }
+
+# Statuses that mean a pipeline run is already under way for this version.
+_IN_FLIGHT = (
+    ProcessingStatus.PENDING,
+    ProcessingStatus.EXTRACTING,
+    ProcessingStatus.PARSING,
+    ProcessingStatus.EMBEDDING,
+)
+
+
+def _to_read(
+    resume: Resume, *, skill_count: int = 0, latest: LatestVersion | None = None
+) -> ResumeRead:
+    """Build the list/detail representation of a resume.
+
+    One helper rather than three call sites, because the three used to disagree:
+    the list computed skill_count while detail and update hardcoded zero, and
+    the delete dialog's "N skills will be removed" copy reads that number.
+    """
+    return ResumeRead.model_validate(resume).model_copy(
+        update={
+            "skill_count": skill_count,
+            "latest_version_id": latest.id if latest is not None else None,
+            "latest_version_status": latest.processing_status if latest is not None else None,
+            "latest_version_error": latest.processing_error if latest is not None else None,
+        }
+    )
+
+
+def _latest_of(resume: Resume) -> LatestVersion | None:
+    """Latest version from an already-loaded relationship.
+
+    Resume.versions is ordered desc(version_number), so the newest is first.
+    Used by the detail endpoints in preference to a second query, which also
+    means the summary fields cannot contradict the `versions` array shipped
+    alongside them.
+    """
+    if not resume.versions:
+        return None
+    newest = resume.versions[0]
+    return LatestVersion(
+        id=newest.id,
+        version_number=newest.version_number,
+        processing_status=newest.processing_status,
+        processing_error=newest.processing_error,
+    )
 
 
 @router.post(
@@ -106,10 +159,10 @@ async def upload_resume(
 async def list_resumes(user: CurrentUser, service: ResumeServiceDep) -> list[ResumeRead]:
     resumes = await service.list_resumes(user.id)
     counts = await service.skill_counts(user_id=user.id)
+    latest = await service.latest_versions(resume_ids=[r.id for r in resumes])
 
     return [
-        ResumeRead.model_validate(r).model_copy(update={"skill_count": counts.get(r.id, 0)})
-        for r in resumes
+        _to_read(r, skill_count=counts.get(r.id, 0), latest=latest.get(r.id)) for r in resumes
     ]
 
 
@@ -129,7 +182,9 @@ async def version_status(
     everywhere and needs no connection handling.
     """
     version = await service.get_version(version_id=version_id, user_id=user.id)
-    percent, label = _STAGE[version.processing_status]
+    # .get, not [], so that adding a ProcessingStatus member cannot 500 this
+    # endpoint mid-poll and leave the page spinning forever.
+    percent, label = _STAGE.get(version.processing_status, (0, "Processing"))
 
     return ProcessingStatusResponse(
         version_id=version.id,
@@ -200,7 +255,10 @@ async def version_suggestions(
     response_model=ResumeUploadResponse,
     status_code=status.HTTP_202_ACCEPTED,
     summary="Re-run parsing on an already-uploaded file",
-    responses={404: {"model": ErrorResponse}},
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse, "description": "Already being processed"},
+    },
 )
 async def reparse_version(
     version_id: uuid.UUID,
@@ -221,6 +279,17 @@ async def reparse_version(
     without reverting anything edited by hand.
     """
     version = await service.get_version(version_id=version_id, user_id=user.id)
+
+    if version.processing_status in _IN_FLIGHT:
+        # Without this, a second run starts on its own session and the two
+        # interleave their status commits — so a poller watches the progress bar
+        # rewind from "Finding sections" back to "Reading the document", and
+        # both runs upsert skills concurrently. The client disables the button
+        # while it polls; this covers the other tab and the retried request.
+        raise ConflictError(
+            "That resume is already being processed. Wait for it to finish before trying again.",
+            code="ALREADY_PROCESSING",
+        )
 
     # The pipeline short-circuits on COMPLETE for idempotency, so a re-run has
     # to reset the status explicitly. Committed here for the same reason the
@@ -288,8 +357,11 @@ async def get_resume(
     resume_id: uuid.UUID, user: CurrentUser, service: ResumeServiceDep
 ) -> ResumeDetail:
     resume = await service.get_resume(resume_id=resume_id, user_id=user.id)
+    counts = await service.skill_counts(user_id=user.id)
     return ResumeDetail(
-        **ResumeRead.model_validate(resume).model_dump(),
+        **_to_read(
+            resume, skill_count=counts.get(resume.id, 0), latest=_latest_of(resume)
+        ).model_dump(),
         versions=[ResumeVersionSummary.model_validate(v) for v in resume.versions],
     )
 
@@ -325,7 +397,8 @@ async def update_resume(
         resume = await service.set_primary(resume_id=resume_id, user_id=user.id)
     else:
         resume = await service.get_resume(resume_id=resume_id, user_id=user.id)
-    return ResumeRead.model_validate(resume)
+    counts = await service.skill_counts(user_id=user.id)
+    return _to_read(resume, skill_count=counts.get(resume.id, 0), latest=_latest_of(resume))
 
 
 @router.delete(

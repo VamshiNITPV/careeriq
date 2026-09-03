@@ -17,6 +17,9 @@ from tests.fixtures.documents import build_docx, build_image_only_pdf, build_pdf
 API = "/api/v1"
 
 
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
 def pdf_upload(name: str = "resume.pdf") -> dict[str, tuple[str, bytes, str]]:
     return {"file": (name, build_pdf(), "application/pdf")}
 
@@ -315,6 +318,168 @@ class TestPipeline:
         assert version is not None
         assert version.processing_error is not None
         assert "scan" in version.processing_error.lower()
+
+
+class TestFailedParseIsVisibleInTheList:
+    """A failed parse must be distinguishable from a healthy resume.
+
+    The pipeline sets current_version_id only on success, so without the
+    latest_version_* fields a resume whose parse failed looks exactly like one
+    with no versions at all — and the client has nothing to retry against.
+    """
+
+    async def test_list_exposes_the_failure_while_current_stays_null(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        run_pipeline,
+    ) -> None:
+        files = {"file": ("scan.pdf", build_image_only_pdf(), "application/pdf")}
+        response = await client.post(f"{API}/resumes", headers=auth_headers, files=files)
+        version_id = response.json()["version_id"]
+        await run_pipeline(uuid.UUID(version_id))
+
+        listed = (await client.get(f"{API}/resumes", headers=auth_headers)).json()
+        row = listed[0]
+
+        # No successful parse, so nothing is "current" — that is the whole
+        # reason the latest_* fields exist.
+        assert row["current_version_id"] is None
+        assert row["latest_version_id"] == version_id
+        assert row["latest_version_status"] == "FAILED"
+        assert row["latest_version_error"] is not None
+
+    async def test_latest_is_the_highest_version_number(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        run_pipeline,
+    ) -> None:
+        # Ordered by version_number, not created_at: two uploads in the same
+        # millisecond would make a timestamp ordering non-deterministic.
+        first = await client.post(f"{API}/resumes", headers=auth_headers, files=pdf_upload())
+        resume_id = first.json()["resume_id"]
+        await run_pipeline(uuid.UUID(first.json()["version_id"]))
+
+        second = await client.post(
+            f"{API}/resumes",
+            headers=auth_headers,
+            files={"file": ("v2.docx", build_docx(), DOCX_MIME)},
+            data={"resume_id": resume_id},
+        )
+        second_version_id = second.json()["version_id"]
+
+        listed = (await client.get(f"{API}/resumes", headers=auth_headers)).json()
+        assert listed[0]["latest_version_id"] == second_version_id
+        # The first parse succeeded, so current still points at version 1 while
+        # version 2 is queued. The two fields mean different things.
+        assert listed[0]["current_version_id"] == first.json()["version_id"]
+        assert listed[0]["latest_version_status"] == "PENDING"
+
+    async def test_a_resume_with_no_failure_reports_complete(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        run_pipeline,
+    ) -> None:
+        response = await client.post(f"{API}/resumes", headers=auth_headers, files=pdf_upload())
+        await run_pipeline(uuid.UUID(response.json()["version_id"]))
+
+        row = (await client.get(f"{API}/resumes", headers=auth_headers)).json()[0]
+        assert row["latest_version_status"] == "COMPLETE"
+        assert row["latest_version_error"] is None
+        assert row["latest_version_id"] == row["current_version_id"]
+
+    async def test_detail_reports_the_same_facts_as_the_list(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        run_pipeline,
+    ) -> None:
+        # Detail derives these from the already-loaded versions relationship
+        # rather than a second query, so it cannot contradict the list.
+        response = await client.post(f"{API}/resumes", headers=auth_headers, files=pdf_upload())
+        resume_id = response.json()["resume_id"]
+        await run_pipeline(uuid.UUID(response.json()["version_id"]))
+
+        listed = (await client.get(f"{API}/resumes", headers=auth_headers)).json()[0]
+        detail = (await client.get(f"{API}/resumes/{resume_id}", headers=auth_headers)).json()
+
+        for field in ("latest_version_id", "latest_version_status", "skill_count"):
+            assert detail[field] == listed[field], field
+        # skill_count used to be hardcoded to zero on this endpoint while the
+        # list computed it; the delete dialog reads that number.
+        assert detail["skill_count"] > 0
+
+
+class TestReparse:
+    async def test_reparses_a_failed_version(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        run_pipeline,
+    ) -> None:
+        # The recovery path for a failed parse. Previously the endpoint had no
+        # coverage at all.
+        response = await client.post(f"{API}/resumes", headers=auth_headers, files=pdf_upload())
+        version_id = response.json()["version_id"]
+        await run_pipeline(uuid.UUID(version_id))
+
+        version = await db_session.get(ResumeVersion, uuid.UUID(version_id))
+        assert version is not None
+        version.processing_status = ProcessingStatus.FAILED
+        version.processing_error = "something went wrong"
+        await db_session.commit()
+
+        again = await client.post(
+            f"{API}/resumes/versions/{version_id}/reparse", headers=auth_headers
+        )
+        assert again.status_code == 202
+        assert again.json()["status"] == "PENDING"
+
+        await db_session.refresh(version)
+        assert version.processing_error is None
+
+    async def test_refuses_while_already_processing(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        run_pipeline,
+    ) -> None:
+        """Two runs on one version interleave their status commits.
+
+        The visible symptom is a progress bar rewinding from "Finding sections"
+        back to "Reading the document" while both runs upsert skills at once.
+        """
+        response = await client.post(f"{API}/resumes", headers=auth_headers, files=pdf_upload())
+        version_id = response.json()["version_id"]
+
+        version = await db_session.get(ResumeVersion, uuid.UUID(version_id))
+        assert version is not None
+        version.processing_status = ProcessingStatus.EXTRACTING
+        await db_session.commit()
+
+        conflict = await client.post(
+            f"{API}/resumes/versions/{version_id}/reparse", headers=auth_headers
+        )
+        assert conflict.status_code == 409
+        assert conflict.json()["error"]["code"] == "ALREADY_PROCESSING"
+
+    async def test_unknown_version_is_404(
+        self, client: AsyncClient, auth_headers: dict[str, str]
+    ) -> None:
+        response = await client.post(
+            f"{API}/resumes/versions/{uuid.uuid4()}/reparse", headers=auth_headers
+        )
+        assert response.status_code == 404
 
 
 class TestStatusPolling:

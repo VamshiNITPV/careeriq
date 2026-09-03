@@ -41,12 +41,29 @@ class ResumeRead(BaseModel):
     id: uuid.UUID
     title: str
     is_primary: bool
+    # The last version that parsed *successfully* — the pipeline sets this as
+    # its final step. Null while the first parse runs, and null forever if every
+    # parse of this resume failed. This is the version to ask for suggestions.
     current_version_id: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
     # Skills traceable to this resume. Shown in the delete confirmation so the
     # user is told what they are about to lose rather than discovering it after.
     skill_count: int = 0
+
+    # The most recent upload, successful or not. Distinct from
+    # current_version_id on purpose: a failed parse never becomes "current", so
+    # without this a resume whose parse failed is indistinguishable from one
+    # with no versions at all, and there is nothing for the client to retry
+    # against.
+    #
+    # Every field defaults, because ResumeRead.model_validate(resume) runs
+    # against the ORM object, which has none of these attributes. Without the
+    # defaults each of those call sites raises at runtime — and mypy would not
+    # catch it.
+    latest_version_id: uuid.UUID | None = None
+    latest_version_status: ProcessingStatus | None = None
+    latest_version_error: str | None = None
 
 
 class ResumeDetail(ResumeRead):

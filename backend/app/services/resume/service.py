@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from app.core.exceptions import ConflictError, ResourceNotFoundError
@@ -12,7 +13,7 @@ from app.core.logging import get_logger
 from app.integrations.storage import ObjectStorage, build_storage_key
 from app.models.enums import ProcessingStatus
 from app.models.resume import Resume, ResumeVersion
-from app.repositories.resume import ResumeRepository, ResumeVersionRepository
+from app.repositories.resume import LatestVersion, ResumeRepository, ResumeVersionRepository
 from app.repositories.skill import CandidateSkillRepository
 from app.services.file_validation import ValidatedUpload
 
@@ -204,6 +205,12 @@ class ResumeService:
             resume_id=str(resume_id),
             skills_removed=removed,
         )
+
+    async def latest_versions(
+        self, *, resume_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, LatestVersion]:
+        """Newest version per resume, so a list row can show a failed parse."""
+        return await self.versions.latest_for_resumes(resume_ids)
 
     async def skill_counts(self, *, user_id: uuid.UUID) -> dict[uuid.UUID, int]:
         """Skills-per-resume, for the delete confirmation."""

@@ -26,11 +26,25 @@ export interface Resume {
   id: string
   title: string
   is_primary: boolean
+  /**
+   * The last version that parsed *successfully*. Null while the first parse
+   * runs, and null forever if every parse failed. This is the version to ask
+   * for suggestions.
+   */
   current_version_id: string | null
   created_at: string
   updated_at: string
   /** Skills traceable to this resume, removed along with it. */
   skill_count: number
+  /**
+   * The most recent upload, successful or not — the version to re-parse.
+   * Distinct from `current_version_id`: a failed parse never becomes current,
+   * so without this a failed resume is indistinguishable from an empty one and
+   * there is nothing to retry against.
+   */
+  latest_version_id: string | null
+  latest_version_status: ProcessingStatus | null
+  latest_version_error: string | null
 }
 
 export interface ResumeDetail extends Resume {

@@ -152,7 +152,13 @@ async function request<T>(
   const { body, skipAuth = false, headers, ...init } = options
 
   const requestHeaders = new Headers(headers)
-  if (body !== undefined) requestHeaders.set('Content-Type', 'application/json')
+  // FormData generates its own Content-Type, multipart boundary included.
+  // Setting it by hand omits the boundary and the server rejects the body,
+  // which is why the resume upload used to bypass this client entirely — and
+  // with it the 401 refresh below, the network-error mapping, and the
+  // correlation id.
+  const isForm = body instanceof FormData
+  if (body !== undefined && !isForm) requestHeaders.set('Content-Type', 'application/json')
 
   const accessToken = getAccessToken()
   if (!skipAuth && accessToken) {
@@ -164,7 +170,7 @@ async function request<T>(
     response = await fetch(`${API_BASE}${path}`, {
       ...init,
       headers: requestHeaders,
-      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      ...(body !== undefined ? { body: isForm ? body : JSON.stringify(body) } : {}),
     })
   } catch {
     throw new ApiError(
@@ -180,6 +186,9 @@ async function request<T>(
     // — a deactivated account, for instance.
     const result = await refreshAccessToken()
 
+    // The retry re-sends the same body. Safe for FormData, which is re-read per
+    // request; it would NOT be safe for a ReadableStream body, which is
+    // one-shot. Nothing sends one today.
     if (result === 'refreshed') return request<T>(path, options, true)
 
     if (result === 'rejected') {

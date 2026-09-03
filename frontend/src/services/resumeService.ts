@@ -1,5 +1,4 @@
-import { api, ApiError } from './apiClient'
-import { getAccessToken } from './tokenStorage'
+import { api } from './apiClient'
 import type { MessageResponse } from '@/types/api'
 import type {
   CandidateSkill,
@@ -17,37 +16,19 @@ export const resumeService = {
   /**
    * Upload a resume.
    *
-   * Uses `fetch` directly rather than the shared client because this is
-   * multipart, not JSON: setting Content-Type by hand would omit the multipart
-   * boundary and the server would reject the body. The browser must generate
-   * that header itself.
+   * Goes through the shared client like everything else. It used to use `fetch`
+   * directly, on the reasoning that multipart needs the browser to generate its
+   * own Content-Type — true, but the client now leaves a FormData body's header
+   * alone, so the exemption bought nothing and cost three things: the 401
+   * refresh (so an upload after an idle tab hard-failed and did not even log
+   * the user out), the offline error mapping, and the correlation id on the
+   * operation most likely to fail.
    */
-  async upload(file: File, title?: string): Promise<ResumeUploadResponse> {
+  upload(file: File, title?: string): Promise<ResumeUploadResponse> {
     const form = new FormData()
     form.append('file', file)
     if (title !== undefined && title !== '') form.append('title', title)
-
-    const token = getAccessToken()
-    const response = await fetch(`${API_BASE}/resumes`, {
-      method: 'POST',
-      // Deliberately no Content-Type — see above.
-      headers: token !== null ? { Authorization: `Bearer ${token}` } : {},
-      body: form,
-    })
-
-    if (!response.ok) {
-      const body = (await response.json().catch(() => null)) as {
-        error?: { code: string; message: string; details?: Record<string, unknown> }
-      } | null
-      throw new ApiError(
-        response.status,
-        body?.error?.code ?? `HTTP_${response.status}`,
-        body?.error?.message ?? 'Upload failed.',
-        body?.error?.details ?? {},
-      )
-    }
-
-    return (await response.json()) as ResumeUploadResponse
+    return api.post<ResumeUploadResponse>('/resumes', form)
   },
 
   list(): Promise<Resume[]> {

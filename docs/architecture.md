@@ -681,6 +681,34 @@ upsert in SQL, not in application logic that could race. Without it,
 re-processing a resume would silently revert every manual fix — worse than not
 re-processing at all.
 
+**US-2.3 AC1 is two-sixths implemented, deliberately.** The acceptance criterion
+names contact info, education, skills, experience, projects and certifications.
+Contact details and skills reach structured storage; the other four do not.
+Their *section boundaries* are detected and used as context for skill matching,
+but no employer, job title, date range, degree or institution is parsed out, and
+the four tables `database.md` section 3.2 specifies (`work_experiences`,
+`education_records`, `projects`, `certifications`) do not exist.
+
+This is scheduled after Phase 5 rather than before it. Extracting a work history
+is a step-sized piece of work — date-range parsing, employer and title
+recognition, four tables with the same provenance columns as `candidate_skills`
+— and the ranking formula's experience and education dimensions cannot be
+evaluated without a job corpus to score against, which Phase 5 builds. Doing it
+first would mean building the extractor with no way to measure whether it helps,
+which is the opposite of the evaluation-first workflow in `ml.md` section 9.
+
+Two smaller gaps in the same area, recorded so they are not rediscovered:
+
+- `ProcessingStatus.EMBEDDING` exists in the enum, the migration and the
+  progress map, but the pipeline never assigns it. The real path is
+  `PENDING → EXTRACTING → PARSING → COMPLETE`. The label is kept because
+  ADR-010 specifies the stage; delete the enum member, the migration value and
+  the label together or not at all.
+- `profiles.years_of_experience`, `current_experience_level` and
+  `highest_education` are never populated by parsing, despite the model
+  docstring describing them as derived from the resume. They are
+  user-supplied-only until the extraction above lands.
+
 ---
 
 ## 4. Cross-cutting conventions

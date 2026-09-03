@@ -38,7 +38,40 @@ function localFileError(file: File): string | undefined {
   return undefined
 }
 
-function SkillChip({ skill, onRemove }: { skill: CandidateSkill; onRemove: () => void }) {
+/**
+ * One shape for every failure on this page.
+ *
+ * `title` names the action, which is what makes a single alert at the top
+ * legible for a click that happened at the bottom — "Couldn't remove that
+ * skill" rather than a bare server message with no context.
+ */
+interface PageError {
+  title: string
+  message: string
+  correlationId?: string | undefined
+}
+
+function toPageError(caught: unknown, title: string, fallback: string): PageError {
+  return caught instanceof ApiError
+    ? { title, message: caught.message, correlationId: caught.correlationId }
+    : { title, message: fallback }
+}
+
+function messageOf(caught: unknown, fallback: string): string {
+  return caught instanceof ApiError ? caught.message : fallback
+}
+
+function SkillChip({
+  skill,
+  onRemove,
+  isBusy,
+  disabled,
+}: {
+  skill: CandidateSkill
+  onRemove: () => void
+  isBusy: boolean
+  disabled: boolean
+}) {
   const confidence =
     skill.extraction_confidence !== null ? Number(skill.extraction_confidence) : null
 
@@ -61,8 +94,11 @@ function SkillChip({ skill, onRemove }: { skill: CandidateSkill; onRemove: () =>
       <button
         type="button"
         onClick={onRemove}
+        // A raw button, so it gets none of Button's built-in busy handling.
+        disabled={disabled || isBusy}
+        aria-busy={isBusy}
         aria-label={`Remove ${skill.skill.name}`}
-        className="rounded-full px-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+        className="rounded-full px-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
       >
         ×
       </button>
@@ -70,27 +106,50 @@ function SkillChip({ skill, onRemove }: { skill: CandidateSkill; onRemove: () =>
   )
 }
 
+/** Statuses that mean the server is still working on this resume. */
+const IN_FLIGHT = ['PENDING', 'EXTRACTING', 'PARSING', 'EMBEDDING']
+
 export function ResumePage() {
   const [resumes, setResumes] = useState<Resume[]>([])
   const [skills, setSkills] = useState<CandidateSkill[]>([])
   const [suggestions, setSuggestions] = useState<SuggestedSkill[]>([])
+  const [suggestionsFailed, setSuggestionsFailed] = useState(false)
   const [dismissed, setDismissed] = useState<Set<string>>(new Set())
   const [suggestionVersionId, setSuggestionVersionId] = useState<string | null>(null)
   const [pendingDelete, setPendingDelete] = useState<Resume | null>(null)
-  const [isDeleting, setIsDeleting] = useState(false)
-  const [error, setError] = useState<ApiError | string | null>(null)
-  const [isUploading, setIsUploading] = useState(false)
+  const [error, setError] = useState<PageError | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  // Rendered inside the dialog, not at the top of the page: ConfirmDialog uses
+  // showModal(), which makes the rest of the document inert — so a page-level
+  // alert about a failed delete sits behind the backdrop, invisible.
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
-  const [loaded, setLoaded] = useState(false)
+  const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading')
+  /**
+   * Which single action is in flight, if any.
+   *
+   * One key rather than a set: every mutation ends in a full `refresh()` that
+   * rewrites resumes, skills and suggestions wholesale, so two overlapping
+   * mutations produce two overlapping refreshes whose responses can land out of
+   * order — and the stale one wins. A single string makes that impossible.
+   */
+  const [busyKey, setBusyKey] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const requestId = useRef(0)
 
-  const { progress, timedOut, track, reset } = useResumeProcessing()
+  const { progress, phase, track, retry, reset } = useResumeProcessing()
 
   const refresh = useCallback(async () => {
+    // Guards against an out-of-order landing. The poll's own onDone → refresh()
+    // is not user-triggered, so busyKey cannot serialise it against a manual
+    // action, and without this a just-removed skill can reappear.
+    const id = ++requestId.current
+
     const [resumeList, skillList] = await Promise.all([
       resumeService.list(),
       skillService.mySkills(),
     ])
+    if (id !== requestId.current) return
     setResumes(resumeList)
     setSkills(skillList)
 
@@ -101,39 +160,106 @@ export function ResumePage() {
     if (primary?.current_version_id != null) {
       try {
         const result = await resumeService.suggestions(primary.current_version_id)
+        if (id !== requestId.current) return
         setSuggestions(result.suggestions)
         setSuggestionVersionId(result.version_id)
+        setSuggestionsFailed(false)
       } catch {
+        if (id !== requestId.current) return
         setSuggestions([])
         setSuggestionVersionId(null)
+        // Tracked separately so a 500 does not present as "the parser found
+        // nothing", which is what an empty list silently looks like.
+        setSuggestionsFailed(true)
       }
     } else {
       setSuggestions([])
       setSuggestionVersionId(null)
+      setSuggestionsFailed(false)
     }
   }, [])
 
-  useEffect(() => {
-    void refresh().finally(() => setLoaded(true))
+  const load = useCallback(() => {
+    setLoadState('loading')
+    setError(null)
+    refresh().then(
+      () => setLoadState('ready'),
+      (caught: unknown) => {
+        // Without this the page reported "Nothing uploaded yet." for a network
+        // blip — telling the user their resumes were gone.
+        setError(toPageError(caught, "We couldn't load your resumes", 'Please try again.'))
+        setLoadState('error')
+      },
+    )
   }, [refresh])
+
+  useEffect(load, [load])
+
+  /**
+   * Every mutation goes through here, so clearing, busy state and error capture
+   * are decided in one place rather than six.
+   */
+  const run = useCallback(
+    async (key: string, title: string, fallback: string, action: () => Promise<void>) => {
+      if (busyKey !== null) return
+      setBusyKey(key)
+      setError(null)
+      setNotice(null)
+      // Drop a finished banner so the page never congratulates the user on a
+      // parse while they are doing something else. Guarded on 'settled' so it
+      // cannot cancel a poll that is still running.
+      if (phase === 'settled') reset()
+
+      try {
+        await action()
+      } catch (caught) {
+        setError(toPageError(caught, title, fallback))
+        setBusyKey(null)
+        return
+      }
+
+      // A separate try: the action succeeded, and reporting "Couldn't remove
+      // that skill" because the *refresh* failed would tell the user the
+      // opposite of what happened.
+      try {
+        await refresh()
+      } catch {
+        setError({
+          title: 'That worked, but this page is out of date',
+          message: 'Reload to see the latest.',
+        })
+      } finally {
+        setBusyKey(null)
+      }
+    },
+    [busyKey, phase, refresh, reset],
+  )
 
   const handleFile = useCallback(
     async (file: File) => {
+      if (busyKey !== null) return
       setError(null)
+      setNotice(null)
       reset()
 
       const localError = localFileError(file)
       if (localError !== undefined) {
-        setError(localError)
+        setError({ title: "We can't use that file", message: localError })
         return
       }
 
-      setIsUploading(true)
+      setBusyKey('upload')
       try {
         const result = await resumeService.upload(file)
 
         if (result.is_duplicate) {
           // The server reused an earlier parse, so there is nothing to poll.
+          // Said out loud: previously this branch changed nothing on screen and
+          // the upload looked like it had silently failed.
+          setNotice(
+            "You've already uploaded that file. We reused the skills we pulled from it the " +
+              'first time, so there was nothing new to process.',
+          )
           await refresh()
           return
         }
@@ -143,15 +269,17 @@ export function ResumePage() {
         })
       } catch (caught) {
         setError(
-          caught instanceof ApiError
-            ? caught
-            : 'Upload failed. Please check your connection and try again.',
+          toPageError(
+            caught,
+            "We couldn't upload that file",
+            'Upload failed. Please check your connection and try again.',
+          ),
         )
       } finally {
-        setIsUploading(false)
+        setBusyKey(null)
       }
     },
-    [refresh, reset, track],
+    [busyKey, refresh, reset, track],
   )
 
   function onInputChange(event: ChangeEvent<HTMLInputElement>) {
@@ -168,8 +296,12 @@ export function ResumePage() {
     if (file) void handleFile(file)
   }
 
-  const isProcessing = progress !== null && !progress.is_terminal
-  const failed = progress?.status === 'FAILED'
+  const isPolling = phase === 'polling'
+  // Covers the gap between the 202 and the first status response. Without it
+  // the panel drops back to "Drag a file here" for a whole round trip and
+  // visibly forgets the file that was just uploaded.
+  const showProcessing = busyKey === 'upload' || isPolling
+  const locked = busyKey !== null || isPolling
 
   // Dismissals are local to the session on purpose: persisting "never suggest
   // this again" is a preference worth designing properly rather than inferring
@@ -177,16 +309,18 @@ export function ResumePage() {
   const visibleSuggestions = suggestions.filter((s) => !dismissed.has(s.name))
 
   async function confirmDelete() {
-    if (pendingDelete === null) return
-    setIsDeleting(true)
+    if (pendingDelete === null || busyKey !== null) return
+    const target = pendingDelete
+    setDeleteError(null)
+    setBusyKey(`delete:${target.id}`)
     try {
-      await resumeService.remove(pendingDelete.id)
-      await refresh()
+      await resumeService.remove(target.id)
       setPendingDelete(null)
+      await refresh()
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught : 'Could not delete that resume.')
+      setDeleteError(messageOf(caught, 'Could not delete that resume.'))
     } finally {
-      setIsDeleting(false)
+      setBusyKey(null)
     }
   }
 
@@ -197,10 +331,13 @@ export function ResumePage() {
         title={`Delete “${pendingDelete?.title ?? ''}”?`}
         confirmLabel="Delete resume"
         destructive
-        isBusy={isDeleting}
+        isBusy={busyKey === `delete:${pendingDelete?.id ?? ''}`}
         onConfirm={() => void confirmDelete()}
         onCancel={() => {
-          if (!isDeleting) setPendingDelete(null)
+          if (busyKey === null) {
+            setPendingDelete(null)
+            setDeleteError(null)
+          }
         }}
       >
         {/* States the consequence in numbers. "Are you sure?" tells the user
@@ -213,6 +350,11 @@ export function ResumePage() {
             removed with it. Skills you typed in yourself are kept.
           </p>
         )}
+        {deleteError !== null && (
+          <p role="alert" className="mt-3 rounded-md bg-red-50 p-2 text-sm text-red-700">
+            {deleteError}
+          </p>
+        )}
       </ConfirmDialog>
 
       <div>
@@ -222,12 +364,12 @@ export function ResumePage() {
         </p>
       </div>
 
-      {typeof error === 'string' && <Alert tone="error">{error}</Alert>}
-      {error instanceof ApiError && (
-        <Alert tone="error" correlationId={error.correlationId}>
+      {error !== null && (
+        <Alert tone="error" title={error.title} correlationId={error.correlationId}>
           {error.message}
         </Alert>
       )}
+      {notice !== null && <Alert tone="info">{notice}</Alert>}
 
       {/* ------------------------------------------------------ upload */}
       <section
@@ -251,32 +393,30 @@ export function ResumePage() {
           id="resume-file"
         />
 
-        {isProcessing ? (
+        {showProcessing ? (
           <div className="space-y-3">
             <Spinner className="mx-auto size-8 text-indigo-600" label="Processing your resume" />
-            <p className="text-sm font-medium text-slate-900">{progress.stage_label}…</p>
+            <p className="text-sm font-medium text-slate-900">
+              {progress?.stage_label ?? 'Uploading'}…
+            </p>
             <div
               className="mx-auto h-2 w-full max-w-sm overflow-hidden rounded-full bg-slate-200"
               role="progressbar"
-              aria-valuenow={progress.percent}
+              aria-valuenow={progress?.percent ?? 0}
               aria-valuemin={0}
               aria-valuemax={100}
               aria-label="Resume processing progress"
             >
               <div
                 className="h-full bg-indigo-600 transition-all duration-500"
-                style={{ width: `${progress.percent}%` }}
+                style={{ width: `${progress?.percent ?? 0}%` }}
               />
             </div>
           </div>
         ) : (
           <>
             <p className="text-sm text-slate-600">Drag a file here, or</p>
-            <Button
-              className="mt-3"
-              isLoading={isUploading}
-              onClick={() => inputRef.current?.click()}
-            >
+            <Button className="mt-3" disabled={locked} onClick={() => inputRef.current?.click()}>
               Choose a file
             </Button>
             <p className="mt-3 text-xs text-slate-500">
@@ -286,21 +426,31 @@ export function ResumePage() {
         )}
       </section>
 
-      {failed && progress.error !== null && (
+      {progress?.status === 'FAILED' && (
         // A terminal failure states the reason, so the user knows whether to
-        // retry or upload something different (US-2.2 AC2).
+        // retry or upload something different (US-2.2 AC2). The fallback is not
+        // hypothetical — the pipeline has paths that reach FAILED without ever
+        // writing a message to the row.
         <Alert tone="error" title="We couldn't read that file">
-          {progress.error}
+          {progress.error ??
+            'Something went wrong reading this document. Try uploading it again, or try a ' +
+              'different file.'}
         </Alert>
       )}
 
-      {timedOut && (
-        <Alert tone="warning">
-          Processing is taking longer than expected. Refresh the page to check again.
+      {phase === 'timedOut' && (
+        <Alert tone="warning" title="Still working on it">
+          <p>
+            We&apos;ve stopped checking for now — the parse may still be finishing in the
+            background.
+          </p>
+          <Button variant="secondary" size="sm" className="mt-3" onClick={retry}>
+            Check again
+          </Button>
         </Alert>
       )}
 
-      {progress?.status === 'COMPLETE' && (
+      {phase === 'settled' && progress?.status === 'COMPLETE' && (
         <Alert tone="success">Resume processed. Your skills are below.</Alert>
       )}
 
@@ -310,57 +460,113 @@ export function ResumePage() {
           Your resumes
         </h2>
 
-        {!loaded ? (
+        {loadState === 'loading' ? (
           <Spinner className="mt-4 size-5 text-slate-400" label="Loading" />
+        ) : loadState === 'error' ? (
+          <Button variant="secondary" size="sm" className="mt-3" onClick={load}>
+            Try again
+          </Button>
         ) : resumes.length === 0 ? (
           <p className="mt-2 text-sm text-slate-500">Nothing uploaded yet.</p>
         ) : (
           <ul className="mt-3 divide-y divide-slate-200 overflow-hidden rounded-lg bg-white ring-1 ring-slate-200">
-            {resumes.map((resume) => (
-              <li key={resume.id} className="flex items-center gap-3 px-4 py-3">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-slate-900">{resume.title}</p>
-                  <p className="text-xs text-slate-500">
-                    Added {new Date(resume.created_at).toLocaleDateString()}
-                  </p>
-                </div>
-                {resume.is_primary && (
-                  <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">
-                    Primary
-                  </span>
-                )}
-                {resume.current_version_id !== null && (
-                  // The taxonomy keeps growing, so a resume parsed earlier was
-                  // parsed by an older extractor. Re-extracting picks up newly
-                  // recognised skills without needing the file uploaded again.
+            {resumes.map((resume) => {
+              const status = resume.latest_version_status
+              const rowFailed = status === 'FAILED'
+              const rowProcessing = status !== null && IN_FLIGHT.includes(status)
+              const versionId = resume.latest_version_id
+
+              return (
+                <li key={resume.id} className="flex items-center gap-3 px-4 py-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-slate-900">{resume.title}</p>
+                    <p className="text-xs text-slate-500">
+                      Added {new Date(resume.created_at).toLocaleDateString()}
+                    </p>
+                    {/* Without this a resume whose parse failed reads exactly
+                        like a healthy one, and the user has no idea why it
+                        contributed no skills. */}
+                    {rowFailed && resume.latest_version_error !== null && (
+                      <p className="mt-1 text-xs text-red-600">{resume.latest_version_error}</p>
+                    )}
+                  </div>
+
+                  {rowFailed && (
+                    <span className="shrink-0 rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">
+                      Couldn&apos;t be read
+                    </span>
+                  )}
+                  {rowProcessing && (
+                    <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
+                      Processing…
+                    </span>
+                  )}
+                  {resume.is_primary && !rowFailed && !rowProcessing && (
+                    <span className="shrink-0 rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">
+                      Primary
+                    </span>
+                  )}
+
+                  {versionId !== null && (
+                    // Targets the *latest* version, not the current one: for
+                    // "try again" that is the file that failed, and for
+                    // "re-extract" it is the newest file uploaded. Gating this
+                    // on current_version_id, as it used to, hid the button
+                    // precisely when it was needed — a failed parse never
+                    // becomes current, so the only recovery was delete and
+                    // re-upload.
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={locked || rowProcessing}
+                      isLoading={busyKey === `reparse:${versionId}`}
+                      onClick={() =>
+                        void run(
+                          `reparse:${versionId}`,
+                          "We couldn't start that again",
+                          'Please try again.',
+                          async () => {
+                            const result = await resumeService.reparse(versionId)
+                            track(result.version_id, () => void refresh())
+                          },
+                        )
+                      }
+                    >
+                      {rowFailed ? 'Try again' : 'Re-extract'}
+                    </Button>
+                  )}
                   <Button
-                    variant="secondary"
+                    variant="ghost"
                     size="sm"
+                    disabled={locked}
                     onClick={() => {
-                      const versionId = resume.current_version_id
-                      if (versionId === null) return
-                      void resumeService.reparse(versionId).then((result) => {
-                        track(result.version_id, () => void refresh())
-                      })
+                      setDeleteError(null)
+                      setPendingDelete(resume)
                     }}
                   >
-                    Re-extract
+                    Delete
                   </Button>
-                )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setPendingDelete(resume)}
-                >
-                  Delete
-                </Button>
-              </li>
-            ))}
+                </li>
+              )
+            })}
           </ul>
         )}
       </section>
 
       {/* ------------------------------------------------------ suggestions */}
+      {loadState === 'ready' && suggestionsFailed && (
+        <p className="text-sm text-slate-500">
+          Couldn&apos;t load suggested skills.{' '}
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            className="font-medium text-indigo-600 underline hover:text-indigo-700"
+          >
+            Try again
+          </button>
+        </p>
+      )}
+
       {visibleSuggestions.length > 0 && (
         <section aria-labelledby="suggested-heading">
           <h2 id="suggested-heading" className="text-base font-semibold text-slate-900">
@@ -372,8 +578,8 @@ export function ResumePage() {
                 not something the candidate wrote, and presenting them as
                 findings would be putting words in their mouth. */}
             Your resume describes these but doesn&apos;t name them. They are{' '}
-            <strong>not on your profile</strong> — add only the ones you would be
-            comfortable discussing in an interview.
+            <strong>not on your profile</strong> — add only the ones you would be comfortable
+            discussing in an interview.
           </p>
 
           <ul className="mt-3 space-y-2">
@@ -394,16 +600,26 @@ export function ResumePage() {
                   <div className="flex shrink-0 gap-2">
                     <Button
                       size="sm"
-                      disabled={suggestion.skill_id === null}
+                      disabled={suggestion.skill_id === null || locked}
+                      isLoading={busyKey === `suggestion:${suggestion.name}`}
                       onClick={() => {
                         const id = suggestion.skill_id
                         if (id === null || suggestionVersionId === null) return
-                        // Linked to the resume it was suggested from, so it is
-                        // removed with that resume rather than outliving it.
-                        void skillService.add(id, suggestionVersionId).then(() => {
-                          setDismissed((prev) => new Set(prev).add(suggestion.name))
-                          void refresh()
-                        })
+                        void run(
+                          `suggestion:${suggestion.name}`,
+                          "We couldn't add that skill",
+                          'Please try again.',
+                          async () => {
+                            // Linked to the resume it was suggested from, so it
+                            // is removed with that resume rather than outliving
+                            // it.
+                            await skillService.add(id, suggestionVersionId)
+                            // Inside the action, so a failed add leaves the
+                            // suggestion on screen instead of quietly
+                            // dismissing it.
+                            setDismissed((prev) => new Set(prev).add(suggestion.name))
+                          },
+                        )
                       }}
                     >
                       Add
@@ -411,9 +627,8 @@ export function ResumePage() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() =>
-                        setDismissed((prev) => new Set(prev).add(suggestion.name))
-                      }
+                      disabled={locked}
+                      onClick={() => setDismissed((prev) => new Set(prev).add(suggestion.name))}
                     >
                       Dismiss
                     </Button>
@@ -432,7 +647,12 @@ export function ResumePage() {
           {skills.length > 0 && <span className="text-slate-400">({skills.length})</span>}
         </h2>
 
-        {skills.length === 0 ? (
+        {loadState !== 'ready' ? (
+          // Gated on the load, like the resumes section above. Ungated, a
+          // returning user with forty skills was told to go upload a resume on
+          // every single visit, for as long as the fetch took.
+          <Spinner className="mt-4 size-5 text-slate-400" label="Loading" />
+        ) : skills.length === 0 ? (
           <p className="mt-2 text-sm text-slate-500">
             Upload a resume, or add skills by hand below.
           </p>
@@ -442,16 +662,36 @@ export function ResumePage() {
               <SkillChip
                 key={skill.id}
                 skill={skill}
-                onRemove={() => {
-                  void skillService.remove(skill.id).then(refresh)
-                }}
+                isBusy={busyKey === `skill:${skill.id}`}
+                disabled={locked}
+                onRemove={() =>
+                  void run(
+                    `skill:${skill.id}`,
+                    "We couldn't remove that skill",
+                    'Please try again.',
+                    async () => {
+                      await skillService.remove(skill.id)
+                    },
+                  )
+                }
               />
             ))}
           </div>
         )}
 
         <div className="mt-6 rounded-lg bg-white p-4 shadow-sm ring-1 ring-slate-200">
-          <SkillAdder onAdded={() => void refresh()} />
+          {/* Routed through refresh's own error path rather than a bare
+              `void refresh()`, which was a fourth unhandled rejection. */}
+          <SkillAdder
+            onAdded={() => {
+              refresh().catch(() =>
+                setError({
+                  title: 'That worked, but this page is out of date',
+                  message: 'Reload to see the latest.',
+                }),
+              )
+            }}
+          />
         </div>
       </section>
     </div>
