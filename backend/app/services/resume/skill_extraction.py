@@ -44,6 +44,16 @@ _MAX_CONFIDENCE = 0.99
 
 
 @dataclass(frozen=True, slots=True)
+class SkillSpan:
+    """A raw taxonomy match: what was found, and where. Nothing interpreted."""
+
+    canonical_name: str
+    matched_text: str
+    start: int
+    end: int
+
+
+@dataclass(frozen=True, slots=True)
 class SkillMention:
     """One skill found in the text, with where and how confidently."""
 
@@ -109,9 +119,16 @@ class SkillMatcher:
         escaped = re.escape(form).replace(r"\ ", r"[\s\-_/]+")
         return re.compile(rf"(?<![\w+#.]){escaped}(?![\w+#])", re.IGNORECASE)
 
-    def find(self, text: str, section: SectionType) -> list[SkillMention]:
-        confidence = _SECTION_CONFIDENCE.get(section, _DEFAULT_CONFIDENCE)
-        mentions: list[SkillMention] = []
+    def find_spans(self, text: str) -> list[SkillSpan]:
+        """Scan text for taxonomy entries. No confidence, no section.
+
+        The matching engine on its own, so job-description parsing can reuse it
+        without inheriting the resume's section vocabulary. Resume sections and
+        job sections mean different things — SKILLS versus REQUIREMENTS — and
+        the confidence each implies is a judgement about that document type, not
+        about the scan.
+        """
+        spans: list[SkillSpan] = []
         # Character offsets already claimed, so a longer name that matched first
         # prevents a shorter one from also matching inside it.
         claimed: list[tuple[int, int]] = []
@@ -122,18 +139,23 @@ class SkillMatcher:
                 if any(start < c_end and end > c_start for c_start, c_end in claimed):
                     continue
                 claimed.append((start, end))
-                mentions.append(
-                    SkillMention(
-                        canonical_name=canonical,
-                        matched_text=match.group(0),
-                        section=section,
-                        confidence=confidence,
-                        start=start,
-                        end=end,
-                    )
-                )
+                spans.append(SkillSpan(canonical, match.group(0), start, end))
 
-        return mentions
+        return spans
+
+    def find(self, text: str, section: SectionType) -> list[SkillMention]:
+        confidence = _SECTION_CONFIDENCE.get(section, _DEFAULT_CONFIDENCE)
+        return [
+            SkillMention(
+                canonical_name=span.canonical_name,
+                matched_text=span.matched_text,
+                section=section,
+                confidence=confidence,
+                start=span.start,
+                end=span.end,
+            )
+            for span in self.find_spans(text)
+        ]
 
 
 def build_matcher(taxonomy: dict[str, list[str]]) -> SkillMatcher:

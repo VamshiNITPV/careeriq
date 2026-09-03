@@ -23,12 +23,14 @@ from app.core.security import decode_access_token
 from app.integrations.email import get_email_provider
 from app.integrations.storage import ObjectStorage, get_object_storage
 from app.models.user import User
+from app.repositories.job import CompanyRepository, JobRepository, JobSkillRepository
 from app.repositories.refresh_token import RefreshTokenRepository
 from app.repositories.resume import ResumeRepository, ResumeVersionRepository
 from app.repositories.skill import CandidateSkillRepository, SkillRepository
 from app.repositories.user import ProfileRepository, UserRepository
 from app.repositories.verification import VerificationTokenRepository
 from app.services.auth import AuthService
+from app.services.job.service import JobService
 from app.services.notifications import NotificationService
 from app.services.profile import ProfileService
 from app.services.resume.pipeline import process_resume_version
@@ -104,6 +106,27 @@ def get_candidate_skill_repository(session: DbSession) -> CandidateSkillReposito
     return CandidateSkillRepository(session)
 
 
+def get_job_repository(session: DbSession) -> JobRepository:
+    return JobRepository(session)
+
+
+def get_company_repository(session: DbSession) -> CompanyRepository:
+    return CompanyRepository(session)
+
+
+def get_job_skill_repository(session: DbSession) -> JobSkillRepository:
+    return JobSkillRepository(session)
+
+
+def get_job_service(
+    jobs: Annotated[JobRepository, Depends(get_job_repository)],
+    companies: Annotated[CompanyRepository, Depends(get_company_repository)],
+    job_skills: Annotated[JobSkillRepository, Depends(get_job_skill_repository)],
+    skills: Annotated[SkillRepository, Depends(get_skill_repository)],
+) -> JobService:
+    return JobService(jobs=jobs, companies=companies, job_skills=job_skills, skills=skills)
+
+
 def get_storage() -> ObjectStorage:
     # Overridden in tests with a temporary directory, so the suite never writes
     # into a real upload location.
@@ -160,6 +183,8 @@ ResumeVersionRepositoryDep = Annotated[
 CandidateSkillRepositoryDep = Annotated[
     CandidateSkillRepository, Depends(get_candidate_skill_repository)
 ]
+JobServiceDep = Annotated[JobService, Depends(get_job_service)]
+JobSkillRepositoryDep = Annotated[JobSkillRepository, Depends(get_job_skill_repository)]
 
 
 # ---------------------------------------------------------------- current user

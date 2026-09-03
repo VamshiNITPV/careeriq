@@ -226,6 +226,30 @@ code `UNEXTRACTABLE_DOCUMENT` (requirements.md §6).
 | `GET` | `/jobs/{id}/similar` | Nearest neighbours by embedding |
 | `POST` | `/admin/jobs/import` | 🔒 `ADMIN` — bulk dataset import → `202` |
 
+> **As built in Phase 5, three of these differ from the sketch above.**
+>
+> `POST /jobs` returns **`201` with the parsed job**, not `202`. Parsing a
+> description is regex over text with no I/O — single-digit milliseconds — so
+> there is nothing to defer, and the interim background runner (ADR-018) strands
+> rows when the process restarts. The user pastes and sees the result in the same
+> response. Phase 6 adds embeddings, which is the point at which this genuinely
+> needs a queue.
+>
+> `POST /admin/jobs/import` returns **`200` with a per-record report**
+> (`created`, `duplicates`, `failed[]`, `processed`), not `202`. US-3.3 AC2
+> requires failures to be collected rather than aborting the batch, and an
+> operator needs to know which records failed and why — a fire-and-forget `202`
+> would mean bisecting the file by hand.
+>
+> `GET /jobs` paginates by **`limit`/`offset`**, not a cursor, and does not yet
+> implement the `min_salary`, `posted_after` or `skill_ids` filters. The list is
+> ordered by a non-unique timestamp, so a stable cursor would have to encode a
+> composite key — worth doing for `/recommendations` in Phase 6, where the
+> ordering is expensive to recompute per page, and not before.
+>
+> `/jobs/{id}/match`, `/jobs/{id}/save` and `/jobs/{id}/similar` are Phases 6–8
+> and do not exist yet.
+
 <details>
 <summary><code>GET /jobs/{id}/match</code> — the explainable score (US-4.1, US-4.2)</summary>
 

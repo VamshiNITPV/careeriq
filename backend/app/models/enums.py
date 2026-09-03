@@ -126,3 +126,58 @@ class EmploymentType(StrEnum):
     CONTRACT = "CONTRACT"
     INTERNSHIP = "INTERNSHIP"
     TEMPORARY = "TEMPORARY"
+
+
+class JobSource(StrEnum):
+    """Where a job row came from.
+
+    Kept because provenance changes how much a row is trusted: a user paste is
+    one person's copy of a posting and may be truncated or edited, while an
+    imported dataset row is uniform and carries an `external_id` that makes
+    re-import idempotent (US-3.3 AC1).
+    """
+
+    USER_SUBMITTED = "USER_SUBMITTED"
+    DATASET_IMPORT = "DATASET_IMPORT"
+
+
+class JobStatus(StrEnum):
+    """Whether a job takes part in ranking.
+
+    DUPLICATE rows are retained rather than deleted: an application references
+    the job it was submitted against, and deleting the loser of a dedup would
+    invalidate that record (database.md section 3.3).
+
+    No EXPIRED member yet — expiry is a fact about `expires_at`, and browse
+    filters on the timestamp directly. A status value would be a second source
+    of truth that something has to keep in step.
+    """
+
+    ACTIVE = "ACTIVE"
+    DUPLICATE = "DUPLICATE"
+
+
+class SkillRequirement(StrEnum):
+    """How much a job needs a skill.
+
+    REQUIRED weighs more than PREFERRED in the skill dimension of the ranking
+    formula (ml.md section 4.1), so the distinction has to survive extraction
+    rather than being flattened into "mentioned".
+    """
+
+    REQUIRED = "REQUIRED"
+    PREFERRED = "PREFERRED"
+
+
+class SalaryPeriod(StrEnum):
+    """The unit a salary figure is quoted in.
+
+    A native enum rather than the free TEXT column database.md section 3.3
+    sketches: it is a closed vocabulary like every sibling here, and the salary
+    dimension of the ranking formula cannot compare two figures without knowing
+    their periods agree.
+    """
+
+    YEARLY = "YEARLY"
+    MONTHLY = "MONTHLY"
+    HOURLY = "HOURLY"
