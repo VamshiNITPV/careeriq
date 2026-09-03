@@ -169,4 +169,112 @@ describe('ProfilePage', () => {
     expect(sent).toHaveProperty('preferred_work_modes')
     expect(sent).toHaveProperty('open_to_relocation')
   })
+
+  describe('pickers', () => {
+    it('adds no button named "Save"', async () => {
+      // Two tests above index getAllByRole('button', { name: 'Save' })
+      // positionally. Asserting the count here turns a baffling failure in
+      // those into an obvious one here.
+      vi.spyOn(profileService, 'get').mockResolvedValue(profileFixture())
+      renderApp()
+
+      await screen.findByLabelText('Full name')
+      expect(screen.getAllByRole('button', { name: 'Save' })).toHaveLength(2)
+    })
+
+    it('sends the country code, not the country name', async () => {
+      const user = userEvent.setup()
+      vi.spyOn(profileService, 'get').mockResolvedValue(profileFixture())
+      const update = vi
+        .spyOn(profileService, 'updatePersonal')
+        .mockResolvedValue(profileFixture({ country_code: 'IN' }))
+      renderApp()
+
+      const country = await screen.findByLabelText('Country')
+      await user.type(country, 'India')
+      await user.keyboard('{Enter}')
+      await user.click(screen.getAllByRole('button', { name: 'Save' })[0]!)
+
+      await waitFor(() => expect(update).toHaveBeenCalled())
+      expect(update.mock.calls[0]![0].country_code).toBe('IN')
+    })
+
+    it('sends the currency code, not the currency name', async () => {
+      const user = userEvent.setup()
+      vi.spyOn(profileService, 'get').mockResolvedValue(profileFixture())
+      const replace = vi
+        .spyOn(profileService, 'replacePreferences')
+        .mockResolvedValue(profileFixture({ salary_currency: 'INR' }))
+      renderApp()
+
+      const currency = await screen.findByLabelText('Currency')
+      await user.type(currency, 'Indian Rupee')
+      await user.keyboard('{Enter}')
+      await user.click(screen.getAllByRole('button', { name: 'Save' })[1]!)
+
+      await waitFor(() => expect(replace).toHaveBeenCalled())
+      expect(replace.mock.calls[0]![0].salary_currency).toBe('INR')
+    })
+
+    it('sends preferred locations as an array', async () => {
+      // The state behind this field went from a comma-separated string to
+      // string[]; this is what proves the migration and that toList is no
+      // longer in the path.
+      const user = userEvent.setup()
+      vi.spyOn(profileService, 'get').mockResolvedValue(profileFixture())
+      const replace = vi
+        .spyOn(profileService, 'replacePreferences')
+        .mockResolvedValue(profileFixture())
+      renderApp()
+
+      const locations = await screen.findByLabelText('Preferred locations')
+      await user.type(locations, 'beng')
+      await user.keyboard('{Enter}')
+      await user.type(locations, 'remote')
+      await user.keyboard('{Enter}')
+      await user.click(screen.getAllByRole('button', { name: 'Save' })[1]!)
+
+      await waitFor(() => expect(replace).toHaveBeenCalled())
+      expect(replace.mock.calls[0]![0].preferred_locations).toEqual(['Bengaluru', 'Remote'])
+    })
+
+    it('sends a location that is not on the list, verbatim', async () => {
+      const user = userEvent.setup()
+      vi.spyOn(profileService, 'get').mockResolvedValue(profileFixture())
+      const replace = vi
+        .spyOn(profileService, 'replacePreferences')
+        .mockResolvedValue(profileFixture())
+      renderApp()
+
+      const locations = await screen.findByLabelText('Preferred locations')
+      await user.type(locations, 'Whitefield')
+      await user.keyboard('{Enter}')
+      await user.click(screen.getAllByRole('button', { name: 'Save' })[1]!)
+
+      await waitFor(() => expect(replace).toHaveBeenCalled())
+      expect(replace.mock.calls[0]![0].preferred_locations).toEqual(['Whitefield'])
+    })
+
+    it('seeds stored values without rewriting them', async () => {
+      /**
+       * "Bangalore" must stay "Bangalore" rather than being canonicalised to
+       * "Bengaluru" on the way in. _preference_snapshot compares
+       * case-sensitively, so a form that rewrites what it loads would make an
+       * untouched Save invalidate the user's cached rankings.
+       */
+      vi.spyOn(profileService, 'get').mockResolvedValue(
+        profileFixture({
+          country_code: 'IN',
+          salary_currency: 'INR',
+          preferred_locations: ['Pune', 'Bangalore'],
+        }),
+      )
+      renderApp()
+
+      expect(await screen.findByLabelText('Country')).toHaveValue('India')
+      expect(screen.getByLabelText('Currency')).toHaveValue('Indian Rupee')
+      expect(screen.getByRole('button', { name: 'Remove Pune' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Remove Bangalore' })).toBeInTheDocument()
+    })
+  })
 })

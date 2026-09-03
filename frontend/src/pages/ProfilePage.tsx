@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
+import { Combobox } from '@/components/ui/Combobox'
 import { Input } from '@/components/ui/Input'
+import { MultiCombobox } from '@/components/ui/MultiCombobox'
 import { Spinner } from '@/components/ui/Spinner'
 import { Textarea } from '@/components/ui/Textarea'
+import { COUNTRY_OPTIONS } from '@/data/countries'
+import { CURRENCY_OPTIONS, PINNED_CURRENCIES } from '@/data/currencies'
+import { LOCATION_OPTIONS } from '@/data/locations'
 import { useAuth } from '@/hooks/useAuth'
 import { ApiError } from '@/services/apiClient'
 import { profileService } from '@/services/profileService'
@@ -80,7 +85,12 @@ function Section({
   )
 }
 
-/** Comma-separated text ↔ string[]. Keeps a free-text list editable as text. */
+/**
+ * Comma-separated text ↔ string[]. Keeps a free-text list editable as text.
+ *
+ * Still used by target_roles, which stays a plain text field — roles are open
+ * vocabulary with no useful list to pick from, unlike locations.
+ */
 function toList(value: string): string[] {
   return value
     .split(',')
@@ -150,7 +160,7 @@ export function ProfilePage() {
 
   // Preferences section
   const [targetRoles, setTargetRoles] = useState('')
-  const [preferredLocations, setPreferredLocations] = useState('')
+  const [preferredLocations, setPreferredLocations] = useState<string[]>([])
   const [workModes, setWorkModes] = useState<WorkMode[]>([])
   const [employmentTypes, setEmploymentTypes] = useState<EmploymentType[]>([])
   const [minSalary, setMinSalary] = useState('')
@@ -160,7 +170,12 @@ export function ProfilePage() {
   const [prefsSaved, setPrefsSaved] = useState(false)
   const [prefsError, setPrefsError] = useState<ApiError | null>(null)
 
-  const seed = useCallback((profile: Profile) => {
+  /**
+   * Seeding is split per section so that saving one never re-seeds the other.
+   * Each Save returns the whole profile, and re-seeding wholesale would discard
+   * whatever the user had already typed into the section they did not save.
+   */
+  const seedPersonal = useCallback((profile: Profile) => {
     setPersonal({
       full_name: profile.full_name ?? '',
       headline: profile.headline ?? '',
@@ -172,8 +187,16 @@ export function ProfilePage() {
       github_url: profile.github_url ?? '',
       portfolio_url: profile.portfolio_url ?? '',
     })
+  }, [])
+
+  const seedPreferences = useCallback((profile: Profile) => {
     setTargetRoles(profile.target_roles.join(', '))
-    setPreferredLocations(profile.preferred_locations.join(', '))
+    // Verbatim, with no canonicalisation. A stored "Bangalore" stays
+    // "Bangalore": rewriting it to "Bengaluru" here would make an untouched
+    // form save a changed array, and _preference_snapshot compares
+    // case-sensitively, so that would invalidate the user's cached rankings for
+    // no reason.
+    setPreferredLocations(profile.preferred_locations)
     setWorkModes(profile.preferred_work_modes)
     setEmploymentTypes(profile.preferred_employment_types)
     setMinSalary(profile.min_salary_expectation ?? '')
@@ -185,14 +208,15 @@ export function ProfilePage() {
     profileService
       .get()
       .then((profile) => {
-        seed(profile)
+        seedPersonal(profile)
+        seedPreferences(profile)
         setProfile(profile)
       })
       .catch(() => setLoadError('Could not load your profile.'))
       .finally(() => setLoaded(true))
     // setProfile is stable; seeding must happen once, not on every context change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seed])
+  }, [seedPersonal, seedPreferences])
 
   function field(key: keyof ProfilePersonalUpdate) {
     return {
@@ -212,7 +236,7 @@ export function ProfilePage() {
       // the header initials in the same commit — no refetch.
       const updated = await profileService.updatePersonal(personal)
       setProfile(updated)
-      seed(updated)
+      seedPersonal(updated)
       setPersonalSaved(true)
     } catch (caught) {
       setPersonalError(
@@ -233,7 +257,7 @@ export function ProfilePage() {
     try {
       const updated = await profileService.replacePreferences({
         target_roles: toList(targetRoles),
-        preferred_locations: toList(preferredLocations),
+        preferred_locations: preferredLocations,
         preferred_work_modes: workModes,
         preferred_employment_types: employmentTypes,
         min_salary_expectation: minSalary.trim() || null,
@@ -241,6 +265,10 @@ export function ProfilePage() {
         open_to_relocation: relocate,
       })
       setProfile(updated)
+      // Re-seed from the response so the chips reflect what the server actually
+      // stored. _clean_list strips and dedupes; without this any divergence
+      // would sit on screen looking saved until the next reload.
+      seedPreferences(updated)
       setPrefsSaved(true)
     } catch (caught) {
       setPrefsError(
@@ -304,11 +332,17 @@ export function ProfilePage() {
             {...field('headline')}
           />
           <Input label="Location" autoComplete="address-level2" {...field('location')} />
-          <Input
-            label="Country code"
-            hint="Two letters, e.g. IN"
-            maxLength={2}
-            {...field('country_code')}
+          {/*
+            Not field('country_code'): that helper returns an event-shaped
+            onChange, and making the picker emit { target: { value } } to fit it
+            would be the tail wagging the dog.
+          */}
+          <Combobox
+            label="Country"
+            options={COUNTRY_OPTIONS}
+            value={personal.country_code ?? ''}
+            onChange={(next) => setPersonal((prev) => ({ ...prev, country_code: next }))}
+            placeholder="Search countries"
           />
           <Input label="Phone" type="tel" autoComplete="tel" {...field('phone')} />
         </div>
@@ -336,11 +370,16 @@ export function ProfilePage() {
           value={targetRoles}
           onChange={(e) => setTargetRoles(e.target.value)}
         />
-        <Input
+        <MultiCombobox
           label="Preferred locations"
-          hint="Comma separated"
+          options={LOCATION_OPTIONS}
           value={preferredLocations}
-          onChange={(e) => setPreferredLocations(e.target.value)}
+          onChange={setPreferredLocations}
+          allowCustom
+          // Mirrors MAX_LIST_ITEMS in backend/app/schemas/profile.py.
+          max={20}
+          hint="Search cities, or type your own. Remote and Anywhere are on the list."
+          placeholder="Search locations"
         />
 
         <CheckboxGroup
@@ -363,14 +402,18 @@ export function ProfilePage() {
             value={minSalary}
             onChange={(e) => setMinSalary(e.target.value)}
           />
-          <Input
+          <Combobox
             label="Currency"
+            options={CURRENCY_OPTIONS}
+            pinnedValues={PINNED_CURRENCIES}
+            pinnedLabel="Common"
+            restLabel="All currencies"
+            value={currency}
+            onChange={setCurrency}
             // Required alongside a salary: an unlabelled number is useless to
             // the matching engine, and the API rejects one without the other.
-            hint="Three letters, e.g. INR"
-            maxLength={3}
-            value={currency}
-            onChange={(e) => setCurrency(e.target.value)}
+            hint="Required if you set a minimum salary."
+            placeholder="Search currencies"
           />
         </div>
 

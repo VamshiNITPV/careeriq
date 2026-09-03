@@ -48,6 +48,15 @@ export default defineConfig({
         manualChunks: {
           react: ['react', 'react-dom', 'react-router-dom'],
           query: ['@tanstack/react-query'],
+          // Country, currency and city lists. Same reasoning as above from the
+          // other direction: reference data changes roughly never while app
+          // code changes constantly, so splitting keeps it cached across every
+          // deploy.
+          data: [
+            './src/data/countries.ts',
+            './src/data/currencies.ts',
+            './src/data/locations.ts',
+          ],
         },
       },
     },
