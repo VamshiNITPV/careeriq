@@ -689,13 +689,17 @@ but no employer, job title, date range, degree or institution is parsed out, and
 the four tables `database.md` section 3.2 specifies (`work_experiences`,
 `education_records`, `projects`, `certifications`) do not exist.
 
-This is scheduled after Phase 5 rather than before it. Extracting a work history
-is a step-sized piece of work — date-range parsing, employer and title
-recognition, four tables with the same provenance columns as `candidate_skills`
-— and the ranking formula's experience and education dimensions cannot be
-evaluated without a job corpus to score against, which Phase 5 builds. Doing it
-first would mean building the extractor with no way to measure whether it helps,
-which is the opposite of the evaluation-first workflow in `ml.md` section 9.
+This is **Phase 5.5** on the roadmap in `README.md` — a numbered slot rather than
+a note, so it is scheduled rather than remembered. Extracting a work history is a
+step-sized piece of work: date-range parsing, employer and title recognition, and
+four tables carrying the same provenance columns as `candidate_skills`
+(`source_version_id`, `extraction_confidence`, `is_user_verified`).
+
+It sits after Phase 5 rather than before it because the ranking formula's
+experience and education dimensions cannot be *evaluated* without a job corpus to
+score against, and Phase 5 builds one. Writing the extractor first would mean
+tuning it with no way to measure whether it helps — the opposite of the
+evaluation-first workflow in `ml.md` section 9.
 
 Two smaller gaps in the same area, recorded so they are not rediscovered:
 
