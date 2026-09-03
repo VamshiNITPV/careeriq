@@ -261,6 +261,24 @@ export function ResumePage() {
                     Primary
                   </span>
                 )}
+                {resume.current_version_id !== null && (
+                  // The taxonomy keeps growing, so a resume parsed earlier was
+                  // parsed by an older extractor. Re-extracting picks up newly
+                  // recognised skills without needing the file uploaded again.
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      const versionId = resume.current_version_id
+                      if (versionId === null) return
+                      void resumeService.reparse(versionId).then((result) => {
+                        track(result.version_id, () => void refresh())
+                      })
+                    }}
+                  >
+                    Re-extract
+                  </Button>
+                )}
                 <Button
                   variant="ghost"
                   size="sm"

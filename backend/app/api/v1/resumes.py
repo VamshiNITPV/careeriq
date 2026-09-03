@@ -128,6 +128,51 @@ async def version_status(
     )
 
 
+@router.post(
+    "/versions/{version_id}/reparse",
+    response_model=ResumeUploadResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Re-run parsing on an already-uploaded file",
+    responses={404: {"model": ErrorResponse}},
+)
+async def reparse_version(
+    version_id: uuid.UUID,
+    user: CurrentUser,
+    service: ResumeServiceDep,
+    background: BackgroundTasks,
+    run_pipeline: PipelineRunnerDep,
+) -> ResumeUploadResponse:
+    """Parse the stored file again with the current extractor.
+
+    The taxonomy and the parser improve over time, and a resume uploaded last
+    week was parsed by last week's version. Without this, the only way to pick
+    up an improvement is to re-upload the same file — which also creates a
+    pointless second version.
+
+    Corrections survive: the upsert refuses to overwrite any skill marked
+    user-verified (US-2.4 AC2), so re-parsing adds newly recognised skills
+    without reverting anything edited by hand.
+    """
+    version = await service.get_version(version_id=version_id, user_id=user.id)
+
+    # The pipeline short-circuits on COMPLETE for idempotency, so a re-run has
+    # to reset the status explicitly. Committed here for the same reason the
+    # upload commits: the worker runs on its own connection.
+    version.processing_status = ProcessingStatus.PENDING
+    version.processing_error = None
+    await service.versions.commit()
+
+    background.add_task(run_pipeline, version.id)
+
+    return ResumeUploadResponse(
+        resume_id=version.resume_id,
+        version_id=version.id,
+        status=ProcessingStatus.PENDING,
+        is_duplicate=False,
+        poll_url=f"/api/v1/resumes/versions/{version.id}/status",
+    )
+
+
 @router.get(
     "/versions/{version_id}",
     response_model=ResumeVersionDetail,

@@ -61,6 +61,17 @@ export const resumeService = {
     return api.get<ProcessingStatusResponse>(`/resumes/versions/${versionId}/status`)
   },
 
+  /**
+   * Re-run parsing on a file already uploaded.
+   *
+   * The skill taxonomy grows, so a resume parsed last week was parsed by an
+   * older extractor. Corrections survive — the server refuses to overwrite any
+   * skill the user has edited.
+   */
+  reparse(versionId: string): Promise<ResumeUploadResponse> {
+    return api.post<ResumeUploadResponse>(`/resumes/versions/${versionId}/reparse`)
+  },
+
   rename(resumeId: string, title: string): Promise<Resume> {
     return api.patch<Resume>(`/resumes/${resumeId}`, { title })
   },
