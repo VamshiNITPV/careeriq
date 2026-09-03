@@ -8,9 +8,14 @@ from typing import Annotated
 from fastapi import APIRouter, Query
 
 from app.api.deps import CandidateSkillRepositoryDep, CurrentUser, SkillRepositoryDep
-from app.core.exceptions import DuplicateResourceError, ResourceNotFoundError
+from app.core.exceptions import (
+    DuplicateResourceError,
+    ResourceNotFoundError,
+    ValidationError,
+)
 from app.core.ids import uuid7
-from app.models.skill import CandidateSkill
+from app.data.skill_taxonomy import normalize_skill_text
+from app.models.skill import CandidateSkill, Skill
 from app.schemas.common import ErrorResponse, MessageResponse
 from app.schemas.resume import (
     CandidateSkillCreate,
@@ -71,9 +76,45 @@ async def add_skill(
     skills: SkillRepositoryDep,
     candidate_skills: CandidateSkillRepositoryDep,
 ) -> CandidateSkillRead:
-    skill = await skills.get(payload.skill_id)
-    if skill is None:
-        raise ResourceNotFoundError("Skill")
+    """Add a skill to your profile, by id or by name.
+
+    A name that is not in the taxonomy creates a new entry marked unverified.
+    No taxonomy is ever complete, and refusing a skill because we have not
+    heard of it leaves the user with no way to record something true about
+    themselves. Unverified entries are visible to admins for curation and do
+    not pollute anything that relies on the verified set.
+    """
+    if payload.skill_id is not None:
+        skill = await skills.get(payload.skill_id)
+        if skill is None:
+            raise ResourceNotFoundError("Skill")
+    else:
+        assert payload.skill_name is not None  # guaranteed by the schema validator
+        normalized = normalize_skill_text(payload.skill_name)
+        if not normalized:
+            raise ValidationError("That skill name is not usable.")
+
+        # Resolve against existing entries first, aliases included: typing
+        # "postgres" must attach to PostgreSQL rather than create a duplicate
+        # skill that nothing else in the system will ever match.
+        existing = await skills.search(normalized, limit=1)
+        skill = next(
+            (s for s in existing if s.normalized_name == normalized or normalized in s.aliases),
+            None,
+        )
+
+        if skill is None:
+            skill = Skill(
+                id=uuid7(),
+                name=payload.skill_name.strip()[:120],
+                normalized_name=normalized,
+                aliases=[],
+                # Created from user input, so it has not been reviewed. Phase 5
+                # curates these against the job corpus.
+                is_verified=False,
+            )
+            skills.add(skill)
+            await skills.flush()
 
     if await candidate_skills.get_for_skill(user.id, skill.id) is not None:
         raise DuplicateResourceError("That skill is already on your profile.")

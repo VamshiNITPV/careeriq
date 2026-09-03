@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent } from 'react'
+import { SkillAdder } from '@/components/SkillAdder'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
@@ -389,7 +390,7 @@ export function ResumePage() {
 
         {skills.length === 0 ? (
           <p className="mt-2 text-sm text-slate-500">
-            Upload a resume and your skills will appear here.
+            Upload a resume, or add skills by hand below.
           </p>
         ) : (
           <div className="mt-3 flex flex-wrap gap-2">
@@ -404,6 +405,10 @@ export function ResumePage() {
             ))}
           </div>
         )}
+
+        <div className="mt-6 rounded-lg bg-white p-4 shadow-sm ring-1 ring-slate-200">
+          <SkillAdder onAdded={() => void refresh()} />
+        </div>
       </section>
     </div>
   )

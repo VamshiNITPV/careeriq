@@ -7,7 +7,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.models.enums import ProcessingStatus, ProficiencyLevel
 
@@ -145,10 +145,35 @@ class CandidateSkillRead(BaseModel):
 
 
 class CandidateSkillCreate(BaseModel):
-    skill_id: uuid.UUID
+    """Add a skill by id, or by name for one the taxonomy does not know yet.
+
+    Two ways in, because no taxonomy is ever complete. Without `skill_name` a
+    user whose skill is missing simply cannot record it, and telling someone
+    their real skill "does not exist" is a dead end.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {"skill_id": "01a0619b-d407-7b75-a46b-2c57c96e9855"},
+                {"skill_name": "Bun", "proficiency": "INTERMEDIATE"},
+            ]
+        }
+    )
+
+    skill_id: uuid.UUID | None = None
+    skill_name: str | None = Field(default=None, min_length=1, max_length=120)
     proficiency: ProficiencyLevel | None = None
     years_of_experience: Decimal | None = Field(default=None, ge=0, le=70)
     last_used_year: int | None = Field(default=None, ge=1950, le=2100)
+
+    @model_validator(mode="after")
+    def _exactly_one_identifier(self) -> CandidateSkillCreate:
+        # Accepting both would leave the server guessing which one the client
+        # meant when they disagree.
+        if (self.skill_id is None) == (self.skill_name is None):
+            raise ValueError("Provide exactly one of skill_id or skill_name.")
+        return self
 
 
 class CandidateSkillUpdate(BaseModel):

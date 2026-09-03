@@ -109,6 +109,16 @@ export const skillService = {
     return api.post<CandidateSkill>('/profile/skills', { skill_id: skillId })
   },
 
+  /**
+   * Add by name, creating the skill if the taxonomy does not know it.
+   *
+   * The server resolves aliases first, so typing "postgres" attaches to
+   * PostgreSQL rather than creating a duplicate nothing else will match.
+   */
+  addByName(name: string): Promise<CandidateSkill> {
+    return api.post<CandidateSkill>('/profile/skills', { skill_name: name })
+  },
+
   remove(candidateSkillId: string): Promise<MessageResponse> {
     return api.delete<MessageResponse>(`/profile/skills/${candidateSkillId}`)
   },
