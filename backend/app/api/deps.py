@@ -113,8 +113,16 @@ def get_resume_service(
     resumes: Annotated[ResumeRepository, Depends(get_resume_repository)],
     versions: Annotated[ResumeVersionRepository, Depends(get_resume_version_repository)],
     storage: Annotated[ObjectStorage, Depends(get_storage)],
+    candidate_skills: Annotated[
+        CandidateSkillRepository, Depends(get_candidate_skill_repository)
+    ],
 ) -> ResumeService:
-    return ResumeService(resumes=resumes, versions=versions, storage=storage)
+    return ResumeService(
+        resumes=resumes,
+        versions=versions,
+        storage=storage,
+        candidate_skills=candidate_skills,
+    )
 
 
 ResumeServiceDep = Annotated[ResumeService, Depends(get_resume_service)]

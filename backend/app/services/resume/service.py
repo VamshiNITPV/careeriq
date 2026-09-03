@@ -13,6 +13,7 @@ from app.integrations.storage import ObjectStorage, build_storage_key
 from app.models.enums import ProcessingStatus
 from app.models.resume import Resume, ResumeVersion
 from app.repositories.resume import ResumeRepository, ResumeVersionRepository
+from app.repositories.skill import CandidateSkillRepository
 from app.services.file_validation import ValidatedUpload
 
 log = get_logger(__name__)
@@ -30,10 +31,14 @@ class ResumeService:
         resumes: ResumeRepository,
         versions: ResumeVersionRepository,
         storage: ObjectStorage,
+        candidate_skills: CandidateSkillRepository | None = None,
     ) -> None:
         self.resumes = resumes
         self.versions = versions
         self.storage = storage
+        # Optional so the service can still be constructed for upload-only use
+        # without dragging in a repository it does not need.
+        self.candidate_skills = candidate_skills
 
     async def upload(
         self,
@@ -166,17 +171,39 @@ class ResumeService:
         return resume
 
     async def delete(self, *, resume_id: uuid.UUID, user_id: uuid.UUID) -> None:
-        """Soft delete.
+        """Soft delete the resume and drop the skills it produced.
 
-        The stored files are deliberately left in place. Applications reference
-        the resume version they were submitted with, and destroying that record
-        would quietly corrupt the analytics that depend on it (database.md
-        section 3.7). Reclaiming orphaned objects is a Phase 10 job.
+        The stored files and version rows are deliberately left in place.
+        Applications reference the resume version they were submitted with, and
+        destroying that record would quietly corrupt the analytics that depend
+        on it (database.md section 3.7). Reclaiming orphaned objects is a
+        Phase 10 job.
+
+        The extracted skills, however, do go. They are derived from the
+        document, so leaving them behind means a deleted resume leaves claims
+        on the profile that the user can no longer trace to anything — which is
+        exactly what it looks like when it is wrong.
+
+        Skills the user added or corrected by hand survive: those are their own
+        claims rather than a derivation, and the `is_user_verified` flag is what
+        distinguishes them.
         """
         resume = await self.get_resume(resume_id=resume_id, user_id=user_id)
         resume.deleted_at = datetime.now(UTC)
         resume.is_primary = False
-        log.info("resume deleted", user_id=str(user_id), resume_id=str(resume_id))
+
+        removed = 0
+        if self.candidate_skills is not None:
+            removed = await self.candidate_skills.delete_extracted_for_resume(
+                user_id=user_id, resume_id=resume_id
+            )
+
+        log.info(
+            "resume deleted",
+            user_id=str(user_id),
+            resume_id=str(resume_id),
+            extracted_skills_removed=removed,
+        )
 
     async def download(
         self, *, version_id: uuid.UUID, user_id: uuid.UUID
