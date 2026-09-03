@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { CareerProfile } from '@/components/career/CareerProfile'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 import { Combobox } from '@/components/ui/Combobox'
@@ -427,6 +428,13 @@ export function ProfilePage() {
           Open to relocation
         </label>
       </Section>
+
+      {/*
+        Below the two saved sections, not inside them: each entry saves on its
+        own, so folding these into a form with one Save button would imply an
+        atomicity that does not exist.
+      */}
+      <CareerProfile />
     </div>
   )
 }

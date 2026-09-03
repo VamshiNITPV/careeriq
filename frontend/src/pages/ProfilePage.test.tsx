@@ -6,6 +6,7 @@ import { AppLayout } from '@/components/layout/AppLayout'
 import { AuthProvider } from '@/providers/AuthProvider'
 import { ApiError } from '@/services/apiClient'
 import { authService } from '@/services/authService'
+import { careerService } from '@/services/careerService'
 import { profileService } from '@/services/profileService'
 import { setAccessToken, setRefreshToken } from '@/services/tokenStorage'
 import type { User } from '@/types/auth'
@@ -75,6 +76,16 @@ describe('ProfilePage', () => {
     setAccessToken('access')
     setRefreshToken('refresh')
     vi.spyOn(authService, 'me').mockResolvedValue(USER)
+    // The page also renders CareerProfile, which fetches on mount. Left
+    // unmocked it fails and renders its own role="alert", which the
+    // correlation-id test below — findByRole('alert'), singular — would then
+    // match instead of the one it is testing.
+    vi.spyOn(careerService, 'summary').mockResolvedValue({
+      experiences: [],
+      education: [],
+      projects: [],
+      certifications: [],
+    })
   })
 
   it('renders the fields with accessible labels', async () => {
