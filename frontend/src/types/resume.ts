@@ -58,6 +58,27 @@ export interface Skill {
   category: string | null
 }
 
+/**
+ * A skill the resume demonstrates but never names.
+ *
+ * Deliberately a different type from CandidateSkill. This is the system's
+ * interpretation of what someone wrote, not a claim they made — so it is never
+ * on the profile until confirmed, and always travels with its evidence.
+ */
+export interface SuggestedSkill {
+  skill_id: string | null
+  name: string
+  confidence: string
+  evidence: string
+  section: string
+}
+
+export interface SuggestionsResponse {
+  version_id: string
+  suggestions: SuggestedSkill[]
+  unknown_terms: string[]
+}
+
 export interface CandidateSkill {
   id: string
   skill: Skill

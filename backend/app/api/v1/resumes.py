@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, UploadFile, status
 from fastapi.responses import Response
 
-from app.api.deps import CurrentUser, PipelineRunnerDep, ResumeServiceDep
+from app.api.deps import (
+    CurrentUser,
+    PipelineRunnerDep,
+    ResumeServiceDep,
+    SkillRepositoryDep,
+)
 from app.core.logging import get_logger
 from app.models.enums import ProcessingStatus
 from app.schemas.common import ErrorResponse, MessageResponse
@@ -20,6 +26,8 @@ from app.schemas.resume import (
     ResumeUploadResponse,
     ResumeVersionDetail,
     ResumeVersionSummary,
+    SuggestedSkill,
+    SuggestionsResponse,
 )
 from app.services.file_validation import MAX_UPLOAD_BYTES, validate_upload
 
@@ -125,6 +133,52 @@ async def version_status(
         error=version.processing_error,
         is_terminal=version.processing_status
         in (ProcessingStatus.COMPLETE, ProcessingStatus.FAILED),
+    )
+
+
+@router.get(
+    "/versions/{version_id}/suggestions",
+    response_model=SuggestionsResponse,
+    summary="Skills the resume demonstrates but does not name",
+    responses={404: {"model": ErrorResponse}},
+)
+async def version_suggestions(
+    version_id: uuid.UUID,
+    user: CurrentUser,
+    service: ResumeServiceDep,
+    skills: SkillRepositoryDep,
+) -> SuggestionsResponse:
+    """Return inferred skills for the user to confirm or discard.
+
+    Separate from the extracted skills on purpose. "Built responsive user
+    interfaces" is evidence of Responsive Web Design, but the candidate never
+    claimed that skill — we interpreted it. Writing it to their profile
+    automatically would be the system inventing something about them, which
+    ADR-012 forbids.
+
+    Each suggestion carries the sentence it came from, so the user judges the
+    reasoning rather than a bare label. Confirming one is an ordinary
+    POST /profile/skills, which marks it user-verified like any manual addition.
+    """
+    version = await service.get_version(version_id=version_id, user_id=user.id)
+    entities = version.parsed_entities or {}
+
+    raw = entities.get("suggested_skills", [])
+    resolved = await skills.get_by_names([s["name"] for s in raw])
+
+    return SuggestionsResponse(
+        version_id=version.id,
+        suggestions=[
+            SuggestedSkill(
+                skill_id=resolved[s["name"]].id if s["name"] in resolved else None,
+                name=s["name"],
+                confidence=Decimal(str(s["confidence"])),
+                evidence=s["evidence"],
+                section=s["section"],
+            )
+            for s in raw
+        ],
+        unknown_terms=entities.get("unknown_terms", []),
     )
 
 

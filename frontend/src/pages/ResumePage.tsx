@@ -11,6 +11,7 @@ import {
   formatFileSize,
   type CandidateSkill,
   type Resume,
+  type SuggestedSkill,
 } from '@/types/resume'
 import { cn } from '@/utils/cn'
 
@@ -70,6 +71,8 @@ function SkillChip({ skill, onRemove }: { skill: CandidateSkill; onRemove: () =>
 export function ResumePage() {
   const [resumes, setResumes] = useState<Resume[]>([])
   const [skills, setSkills] = useState<CandidateSkill[]>([])
+  const [suggestions, setSuggestions] = useState<SuggestedSkill[]>([])
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set())
   const [error, setError] = useState<ApiError | string | null>(null)
   const [isUploading, setIsUploading] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
@@ -85,6 +88,21 @@ export function ResumePage() {
     ])
     setResumes(resumeList)
     setSkills(skillList)
+
+    // Suggestions belong to the primary resume's current version. Fetched
+    // separately and tolerantly: a failure here must not blank the page, since
+    // suggestions are an extra rather than the point of it.
+    const primary = resumeList.find((r) => r.is_primary) ?? resumeList[0]
+    if (primary?.current_version_id != null) {
+      try {
+        const result = await resumeService.suggestions(primary.current_version_id)
+        setSuggestions(result.suggestions)
+      } catch {
+        setSuggestions([])
+      }
+    } else {
+      setSuggestions([])
+    }
   }, [])
 
   useEffect(() => {
@@ -144,6 +162,11 @@ export function ResumePage() {
 
   const isProcessing = progress !== null && !progress.is_terminal
   const failed = progress?.status === 'FAILED'
+
+  // Dismissals are local to the session on purpose: persisting "never suggest
+  // this again" is a preference worth designing properly rather than inferring
+  // from one click.
+  const visibleSuggestions = suggestions.filter((s) => !dismissed.has(s.name))
 
   return (
     <div className="space-y-8">
@@ -293,6 +316,69 @@ export function ResumePage() {
           </ul>
         )}
       </section>
+
+      {/* ------------------------------------------------------ suggestions */}
+      {visibleSuggestions.length > 0 && (
+        <section aria-labelledby="suggested-heading">
+          <h2 id="suggested-heading" className="text-base font-semibold text-slate-900">
+            Suggested from your experience{' '}
+            <span className="text-slate-400">({visibleSuggestions.length})</span>
+          </h2>
+          <p className="mt-1 text-sm text-slate-600">
+            {/* Stated plainly. These are the system's reading of the resume,
+                not something the candidate wrote, and presenting them as
+                findings would be putting words in their mouth. */}
+            Your resume describes these but doesn&apos;t name them. They are{' '}
+            <strong>not on your profile</strong> — add only the ones you would be
+            comfortable discussing in an interview.
+          </p>
+
+          <ul className="mt-3 space-y-2">
+            {visibleSuggestions.map((suggestion) => (
+              <li
+                key={suggestion.name}
+                className="rounded-lg bg-white p-4 shadow-sm ring-1 ring-slate-200"
+              >
+                <div className="flex flex-wrap items-start gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-slate-900">{suggestion.name}</p>
+                    {/* The evidence is the whole point: the user judges the
+                        reasoning, not a bare label. */}
+                    <p className="mt-1 border-l-2 border-slate-200 pl-3 text-sm text-slate-600 italic">
+                      “{suggestion.evidence}”
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    <Button
+                      size="sm"
+                      disabled={suggestion.skill_id === null}
+                      onClick={() => {
+                        const id = suggestion.skill_id
+                        if (id === null) return
+                        void skillService.add(id).then(() => {
+                          setDismissed((prev) => new Set(prev).add(suggestion.name))
+                          void refresh()
+                        })
+                      }}
+                    >
+                      Add
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() =>
+                        setDismissed((prev) => new Set(prev).add(suggestion.name))
+                      }
+                    >
+                      Dismiss
+                    </Button>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {/* ------------------------------------------------------ skills */}
       <section aria-labelledby="skills-heading">

@@ -91,6 +91,33 @@ class ProcessingStatusResponse(BaseModel):
     is_terminal: bool
 
 
+class SuggestedSkill(BaseModel):
+    """A skill the resume demonstrates but never names.
+
+    Deliberately a distinct type from an extracted skill. These are the system's
+    interpretation of the candidate's words, not something the candidate said,
+    so they are never written to a profile and always travel with the sentence
+    that produced them (ADR-012).
+    """
+
+    skill_id: uuid.UUID | None = Field(
+        default=None,
+        description="Null if the suggested skill is not in the taxonomy yet.",
+    )
+    name: str
+    confidence: Decimal
+    evidence: str = Field(description="The exact sentence this was inferred from.")
+    section: str
+
+
+class SuggestionsResponse(BaseModel):
+    version_id: uuid.UUID
+    suggestions: list[SuggestedSkill]
+    unknown_terms: list[str] = Field(
+        description="Terms found in the skills section that the taxonomy does not recognise."
+    )
+
+
 class ResumeUpdateRequest(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     is_primary: bool | None = None

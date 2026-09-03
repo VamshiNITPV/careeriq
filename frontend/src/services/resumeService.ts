@@ -8,6 +8,7 @@ import type {
   ResumeDetail,
   ResumeUploadResponse,
   Skill,
+  SuggestionsResponse,
 } from '@/types/resume'
 
 const API_BASE = '/api/v1'
@@ -70,6 +71,11 @@ export const resumeService = {
    */
   reparse(versionId: string): Promise<ResumeUploadResponse> {
     return api.post<ResumeUploadResponse>(`/resumes/versions/${versionId}/reparse`)
+  },
+
+  /** Inferred skills awaiting the user's confirmation. */
+  suggestions(versionId: string): Promise<SuggestionsResponse> {
+    return api.get<SuggestionsResponse>(`/resumes/versions/${versionId}/suggestions`)
   },
 
   rename(resumeId: string, title: string): Promise<Resume> {
