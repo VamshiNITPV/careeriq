@@ -5,7 +5,7 @@ parses job descriptions, ranks jobs by personalized fit using hybrid semantic + 
 identifies skill gaps, suggests grounded resume improvements, tracks application outcomes, and
 conducts adaptive AI mock interviews.
 
-> **Status:** Phases 1–5 complete. Phase 5.5 (Resume entity extraction) is next.
+> **Status:** Phases 1–5.5 complete. Phase 6 (AI matching) is next.
 
 ---
 
@@ -101,9 +101,9 @@ Read these in order:
 | 2 | Backend foundation — FastAPI, Postgres, SQLAlchemy, Alembic, auth | ✅ Done |
 | 3 | Frontend foundation — React, TypeScript, auth, dashboard shell | ✅ Done |
 | 3.5 | Transactional email — password reset, email verification, security notices | ✅ Done |
-| 4 | Resume intelligence — upload, parsing, NLP, structured profile | ✅ Done¹ |
-| 5 | Job intelligence — ingestion, JD parsing, skill extraction, dedup | ✅ Done² |
-| 5.5 | Resume entity extraction — work history, education, projects, certifications | ⬜ |
+| 4 | Resume intelligence — upload, parsing, NLP, structured profile | ✅ Done |
+| 5 | Job intelligence — ingestion, JD parsing, skill extraction, dedup | ✅ Done¹ |
+| 5.5 | Resume entity extraction — work history, education, projects, certifications | ✅ Done |
 | 6 | AI matching — embeddings, pgvector, semantic search, hybrid ranking | ⬜ |
 | 7 | Career intelligence — skill gaps, learning paths, resume optimization | ⬜ |
 | 8 | Application system — tracking, analytics, outcome analysis | ⬜ |
@@ -112,19 +112,7 @@ Read these in order:
 | 11 | Cloud — Docker, GCP, CI/CD, monitoring | ⬜ |
 | 12 | Final polish — testing, documentation, diagrams, demo | ⬜ |
 
-¹ **Phase 4 is complete for contact details and skills only.** US-2.3 AC1 names
-six entity types; two reach structured storage. Experience, education, projects
-and certifications have their *sections* detected — that is what gives skill
-matching its section-aware confidence — but nothing is parsed out of them, and
-the four tables in `database.md` section 3.2 do not exist yet.
-
-Phase 5.5 closes that, and sits after Phase 5 rather than inside Phase 4 on
-purpose: the ranking formula's experience and education dimensions cannot be
-*evaluated* without a job corpus to score against, and Phase 5 is what builds
-one. Writing the extractor first would mean tuning it blind, which is the
-opposite of the evaluation-first rule in `ml.md` section 9.
-
-² **Duplicate detection is stage one of two.** A content hash catches exact and
+¹ **Duplicate detection is stage one of two.** A content hash catches exact and
 reformatted re-posts (US-3.2 AC1, first half). The near-duplicate pass — the same
 role reworded, or posted by both an agency and the employer — compares embedding
 cosine similarity and cannot exist before Phase 6 builds the embeddings.

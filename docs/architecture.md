@@ -681,25 +681,32 @@ upsert in SQL, not in application logic that could race. Without it,
 re-processing a resume would silently revert every manual fix — worse than not
 re-processing at all.
 
-**US-2.3 AC1 is two-sixths implemented, deliberately.** The acceptance criterion
-names contact info, education, skills, experience, projects and certifications.
-Contact details and skills reach structured storage; the other four do not.
-Their *section boundaries* are detected and used as context for skill matching,
-but no employer, job title, date range, degree or institution is parsed out, and
-the four tables `database.md` section 3.2 specifies (`work_experiences`,
-`education_records`, `projects`, `certifications`) do not exist.
-
-This is **Phase 5.5** on the roadmap in `README.md` — a numbered slot rather than
-a note, so it is scheduled rather than remembered. Extracting a work history is a
-step-sized piece of work: date-range parsing, employer and title recognition, and
-four tables carrying the same provenance columns as `candidate_skills`
+**US-2.3 AC1 is complete as of Phase 5.5.** All six entity types reach structured
+storage: contact details onto `profiles`, skills onto `candidate_skills`, and
+work history, education, projects and certifications onto the four tables
+`database.md` section 3.2 specifies, each carrying the same provenance columns
 (`source_version_id`, `extraction_confidence`, `is_user_verified`).
 
-It sits after Phase 5 rather than before it because the ranking formula's
-experience and education dimensions cannot be *evaluated* without a job corpus to
-score against, and Phase 5 builds one. Writing the extractor first would mean
-tuning it with no way to measure whether it helps — the opposite of the
-evaluation-first workflow in `ml.md` section 9.
+Three properties of that extraction are worth stating, because they are what
+make it safe to score against rather than merely present:
+
+1. **Dates are month precision**, with the day forced to 1. A resume saying
+   "Jan 2020" does not know the day, and the interface uses a month picker so it
+   never invites the user to state one either.
+2. **Entries are anchored on their dates.** Almost every resume, whatever its
+   layout, puts a range on or beside the line that begins an entry, and nothing
+   else in a bullet list resembles one. Recognising formatting instead was tried
+   and is far less reliable.
+3. **Every rule fails closed.** An entry whose role is unrecognisable is skipped
+   rather than guessed, and a degree with no named institution is dropped — a
+   wrong job title is quoted back to the candidate and scored against every job,
+   which is worse than an omission they can see and fix.
+
+Re-parsing is idempotent through a `content_key`, a normalised fingerprint
+unique per user. It is assigned once and never recomputed, including when the
+user edits the row: it identifies the entity *to the parser*, not to the reader,
+so tidying a company name must not leave the next parse with no match and cause
+it to insert a second row alongside the corrected one.
 
 Two smaller gaps in the same area, recorded so they are not rediscovered:
 
@@ -709,9 +716,17 @@ Two smaller gaps in the same area, recorded so they are not rediscovered:
   ADR-010 specifies the stage; delete the enum member, the migration value and
   the label together or not at all.
 - `profiles.years_of_experience`, `current_experience_level` and
-  `highest_education` are never populated by parsing, despite the model
-  docstring describing them as derived from the resume. They are
-  user-supplied-only until the extraction above lands.
+  `highest_education` are still never populated, despite the model docstring
+  describing them as derived from the resume. Phase 5.5 makes them *derivable*
+  for the first time — years from summing `work_experiences`, education level
+  from the highest `education_records.education_level` — but nothing computes
+  them yet, and they remain user-supplied only.
+
+  Whether they should be stored columns at all is now the open question. They
+  are aggregates over rows the user can edit, so a stored copy is a second
+  source of truth that something has to keep in step; computing them on read is
+  the alternative. That decision belongs with Phase 6, which is what first
+  makes the ranking formula actually read them.
 
 ---
 
