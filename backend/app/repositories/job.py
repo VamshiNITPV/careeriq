@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from decimal import Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -54,6 +55,7 @@ class JobRepository(BaseRepository[Job]):
         work_mode: str | None = None,
         employment_type: str | None = None,
         experience_level: str | None = None,
+        years_experience: Decimal | None = None,
         country_code: str | None = None,
         company_id: uuid.UUID | None = None,
         limit: int = 20,
@@ -83,6 +85,26 @@ class JobRepository(BaseRepository[Job]):
             conditions.append(Job.employment_type == employment_type)
         if experience_level:
             conditions.append(Job.experience_level == experience_level)
+        if years_experience is not None:
+            # "Does this posting's stated range cover me?"
+            #
+            # A null bound is no bound: a posting that never named a number has
+            # not ruled this candidate out, which is the same reading the
+            # ranking formula gives a missing salary. Two conditions rather than
+            # one nested boolean — where(*conditions) already ANDs them, and a
+            # pair of independent bound checks is what this actually is.
+            #
+            # The parentheses around each comparison are load-bearing: Python's
+            # `|` binds tighter than `<=`, so without them this parses as
+            # `(is_(None) | column) <= years` and silently means nothing.
+            conditions.append(
+                (Job.min_years_experience.is_(None))
+                | (Job.min_years_experience <= years_experience)
+            )
+            conditions.append(
+                (Job.max_years_experience.is_(None))
+                | (Job.max_years_experience >= years_experience)
+            )
         if country_code:
             conditions.append(Job.country_code == country_code)
         if company_id is not None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Query, status
@@ -140,6 +141,15 @@ async def list_jobs(
     work_mode: WorkMode | None = None,
     employment_type: EmploymentType | None = None,
     experience_level: ExperienceLevel | None = None,
+    years_experience: Annotated[
+        Decimal | None,
+        Query(
+            ge=0,
+            le=60,
+            decimal_places=1,
+            description="Show jobs whose stated experience range covers this many years.",
+        ),
+    ] = None,
     country_code: Annotated[str | None, Query(min_length=2, max_length=2)] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
@@ -157,6 +167,7 @@ async def list_jobs(
         work_mode=work_mode.value if work_mode else None,
         employment_type=employment_type.value if employment_type else None,
         experience_level=experience_level.value if experience_level else None,
+        years_experience=years_experience,
         country_code=country_code.upper() if country_code else None,
         limit=limit,
         offset=offset,

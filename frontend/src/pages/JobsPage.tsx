@@ -9,7 +9,7 @@ import { Select } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
 import { ApiError } from '@/services/apiClient'
 import { jobService } from '@/services/jobService'
-import { EXPERIENCE_LEVELS, type ExperienceLevel, type JobSummary } from '@/types/job'
+import { type JobSummary } from '@/types/job'
 import {
   EMPLOYMENT_TYPES,
   WORK_MODES,
@@ -26,7 +26,26 @@ import {
  */
 
 const PAGE_SIZE = 20
-const SEARCH_DEBOUNCE_MS = 300
+/** Renamed from SEARCH_DEBOUNCE_MS — two inputs use it now. */
+const FILTER_DEBOUNCE_MS = 300
+/** Mirrors Query(le=60) in backend/app/api/v1/jobs.py. */
+const MAX_YEARS = 60
+/** One or two digits, optionally one decimal — the shape Numeric(4,1) accepts. */
+const YEARS_PATTERN = /^\d{1,2}(\.\d)?$/
+
+/**
+ * A usable years filter, or nothing.
+ *
+ * The `^\d` anchor is what actually rejects a negative: `min={0}` on a number
+ * input only sets validity.rangeUnderflow and constrains the steppers, it does
+ * not stop "-3" being typed.
+ */
+function parseYears(text: string): number | null {
+  const trimmed = text.trim()
+  if (!YEARS_PATTERN.test(trimmed)) return null
+  const value = Number(trimmed)
+  return value <= MAX_YEARS ? value : null
+}
 
 export function JobsPage() {
   const [jobs, setJobs] = useState<JobSummary[]>([])
@@ -41,19 +60,36 @@ export function JobsPage() {
   const [query, setQuery] = useState('')
   const [workMode, setWorkMode] = useState<WorkMode | ''>('')
   const [employmentType, setEmploymentType] = useState<EmploymentType | ''>('')
-  const [level, setLevel] = useState<ExperienceLevel | ''>('')
+  // Same split as searchText/query: what the box shows, versus what has been
+  // committed and sent.
+  const [yearsText, setYearsText] = useState('')
+  const [years, setYears] = useState<number | null>(null)
 
   const requestId = useRef(0)
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setQuery(searchText.trim()), SEARCH_DEBOUNCE_MS)
+    const timer = window.setTimeout(() => setQuery(searchText.trim()), FILTER_DEBOUNCE_MS)
     return () => window.clearTimeout(timer)
   }, [searchText])
 
+  /**
+   * Debounced for a stronger reason than the search box.
+   *
+   * A partial search term is a narrower query returning a subset. A partial
+   * years value is a *valid, different* filter — typing "12" would fire
+   * years_experience: 1 first, flashing a genuinely different result set before
+   * replacing it.
+   */
+  useEffect(() => {
+    const timer = window.setTimeout(() => setYears(parseYears(yearsText)), FILTER_DEBOUNCE_MS)
+    return () => window.clearTimeout(timer)
+  }, [yearsText])
+
   // Any filter change puts the user back on page one. Without this, narrowing
   // a search while on page three shows an empty list that looks like no
-  // results.
-  useEffect(() => setOffset(0), [query, workMode, employmentType, level])
+  // results. Keyed on the committed values, never the raw text — otherwise
+  // every keystroke resets the page and fires a request.
+  useEffect(() => setOffset(0), [query, workMode, employmentType, years])
 
   const load = useCallback(() => {
     const id = ++requestId.current
@@ -65,7 +101,9 @@ export function JobsPage() {
         ...(query ? { q: query } : {}),
         ...(workMode ? { work_mode: workMode } : {}),
         ...(employmentType ? { employment_type: employmentType } : {}),
-        ...(level ? { experience_level: level } : {}),
+        // `years !== null`, not a falsy check: 0 is a real filter, and the
+        // truthiness pattern used above would silently drop it.
+        ...(years !== null ? { years_experience: years } : {}),
         limit: PAGE_SIZE,
         offset,
       })
@@ -85,11 +123,21 @@ export function JobsPage() {
           setLoadState('error')
         },
       )
-  }, [query, workMode, employmentType, level, offset])
+  }, [query, workMode, employmentType, years, offset])
 
   useEffect(load, [load])
 
-  const hasFilters = query !== '' || workMode !== '' || employmentType !== '' || level !== ''
+  // Same reason as the request itself: 0 is a filter. Miss it here and "0
+  // years" renders "No jobs yet." with an Add-a-job button while a filter is
+  // active.
+  const hasFilters = query !== '' || workMode !== '' || employmentType !== '' || years !== null
+
+  // Derived, not state, so the message appears on the keystroke while the
+  // request stays debounced.
+  const yearsError =
+    yearsText.trim() !== '' && parseYears(yearsText) === null
+      ? `Enter a number of years between 0 and ${MAX_YEARS}.`
+      : undefined
   const showing = jobs.length > 0 ? `${offset + 1}–${offset + jobs.length} of ${total}` : null
 
   return (
@@ -129,12 +177,22 @@ export function JobsPage() {
             value={employmentType}
             onChange={(e) => setEmploymentType(e.target.value as EmploymentType | '')}
           />
-          <Select
-            label="Experience level"
+          <Input
+            label="Your experience"
+            type="number"
+            inputMode="numeric"
+            min={0}
+            max={MAX_YEARS}
+            step={1}
             placeholder="Any"
-            options={EXPERIENCE_LEVELS}
-            value={level}
-            onChange={(e) => setLevel(e.target.value as ExperienceLevel | '')}
+            value={yearsText}
+            onChange={(e) => setYearsText(e.target.value)}
+            // A focused number input increments on the scroll wheel, and every
+            // increment would fire a request 300ms later — on a page whose whole
+            // purpose is scrolling. Blurring on wheel is the standard fix.
+            onWheel={(e) => e.currentTarget.blur()}
+            hint="Years. Shows jobs whose stated range covers your number; postings that don't say are still shown."
+            error={yearsError}
           />
         </div>
       </div>

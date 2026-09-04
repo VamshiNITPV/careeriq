@@ -218,7 +218,7 @@ code `UNEXTRACTABLE_DOCUMENT` (requirements.md §6).
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/jobs` | Browse/search. Filters: `q`, `work_mode`, `employment_type`, `experience_level`, `country_code`, `min_salary`, `posted_after`, `skill_ids` |
+| `GET` | `/jobs` | Browse/search. Filters: `q`, `work_mode`, `employment_type`, `experience_level`, `years_experience`, `country_code`, `min_salary`, `posted_after`, `skill_ids` |
 | `POST` | `/jobs` | Submit a job by pasting a description → `202` (parsing is async) |
 | `GET` | `/jobs/{id}` | Detail with parsed structure and extracted skills |
 | `GET` | `/jobs/{id}/match` | **This caller's** score breakdown for this job |
@@ -240,6 +240,14 @@ code `UNEXTRACTABLE_DOCUMENT` (requirements.md §6).
 > requires failures to be collected rather than aborting the batch, and an
 > operator needs to know which records failed and why — a fire-and-forget `202`
 > would mean bisecting the file by hand.
+>
+> `GET /jobs` **adds `years_experience`**, which the sketch above did not have:
+> "show jobs whose stated range covers this many years". A null bound is no
+> bound, so a posting that never named a number is still shown — the same
+> reading the ranking formula gives a missing salary. It exists because the
+> experience dimension of that formula is entirely numeric (`ml.md` section
+> 4.1); `experience_level` remains supported but the browse UI no longer sends
+> it.
 >
 > `GET /jobs` paginates by **`limit`/`offset`**, not a cursor, and does not yet
 > implement the `min_salary`, `posted_after` or `skill_ids` filters. The list is

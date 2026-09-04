@@ -266,6 +266,68 @@ class TestBrowse:
         searched = await client.get(f"{API}/jobs?q=Frontend", headers=auth_headers)
         assert searched.json()["total"] == 1
 
+        # The seniority filter is no longer called by the UI, which now filters
+        # on years — but it is still a documented API filter, and one nothing
+        # else covers. Untested and uncalled is how a filter rots into a lie in
+        # the docs.
+        senior = await client.get(f"{API}/jobs?experience_level=SENIOR", headers=auth_headers)
+        assert senior.json()["total"] == 1
+        assert senior.json()["items"][0]["title"] == "Senior Backend Engineer"
+
+    async def test_filters_by_years_of_experience(
+        self, client: AsyncClient, auth_headers: dict[str, str], seeded_skills: int
+    ) -> None:
+        """A stated range is a gate; an unstated one is not.
+
+        Covers all three storage shapes the parser can produce: a floor with no
+        ceiling, an explicit two-sided range, and nothing at all.
+        """
+        stated = "5+ years of professional backend experience"
+        for title, years in (
+            ("Open Ended Engineer", stated),  # min 5, max NULL
+            ("Bounded Engineer", "3-6 years of professional backend experience"),  # 3 to 6
+            ("Unstated Engineer", "Deep professional backend experience"),  # both NULL
+        ):
+            response = await client.post(
+                f"{API}/jobs",
+                headers=auth_headers,
+                json={
+                    "description": posting(title=title).replace(stated, years),
+                    "title": title,
+                },
+            )
+            assert response.status_code == 201, response.text
+
+        async def titles(query: str) -> set[str]:
+            body = (await client.get(f"{API}/jobs?{query}", headers=auth_headers)).json()
+            return {item["title"] for item in body["items"]}
+
+        # Inside 3-6, below the 5+ floor, and never ruled out by the posting
+        # that named no number at all.
+        assert await titles("years_experience=4") == {"Bounded Engineer", "Unstated Engineer"}
+        # Clears the 5+ floor, over the 3-6 ceiling.
+        assert await titles("years_experience=8") == {"Open Ended Engineer", "Unstated Engineer"}
+        # Zero is a filter, not an absent one.
+        assert await titles("years_experience=0") == {"Unstated Engineer"}
+        # One decimal place, the scale the column stores.
+        assert await titles("years_experience=5.5") == {
+            "Open Ended Engineer",
+            "Bounded Engineer",
+            "Unstated Engineer",
+        }
+
+    async def test_rejects_an_impossible_years_value(
+        self, client: AsyncClient, auth_headers: dict[str, str]
+    ) -> None:
+        # A typo like 600 would otherwise return everything plus every unstated
+        # job, and look like the filter is broken rather than the input.
+        assert (
+            await client.get(f"{API}/jobs?years_experience=-1", headers=auth_headers)
+        ).status_code == 422
+        assert (
+            await client.get(f"{API}/jobs?years_experience=600", headers=auth_headers)
+        ).status_code == 422
+
     async def test_list_rows_omit_the_description(
         self, client: AsyncClient, auth_headers: dict[str, str], seeded_skills: int
     ) -> None:

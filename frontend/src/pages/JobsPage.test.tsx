@@ -100,11 +100,93 @@ describe('JobsPage', () => {
     renderPage()
     await screen.findByRole('listitem')
 
-    await user.selectOptions(screen.getByLabelText('Experience level'), 'SENIOR')
+    // Employment type rather than work mode: the subject is "a dropdown
+    // selection reaches jobService.list", and work mode is already covered by
+    // two other tests here.
+    await user.selectOptions(screen.getByLabelText('Employment type'), 'FULL_TIME')
 
     await waitFor(() =>
-      expect(list).toHaveBeenCalledWith(expect.objectContaining({ experience_level: 'SENIOR' })),
+      expect(list).toHaveBeenCalledWith(expect.objectContaining({ employment_type: 'FULL_TIME' })),
     )
+  })
+
+  describe('years of experience', () => {
+    /**
+     * These prove what is *requested*. The filtering itself is server-side and
+     * is proven in backend/tests/api/test_jobs.py, which is also the only thing
+     * pinning the parameter name — service.list_jobs(**filters: object) erases
+     * types, so a typo would pass mypy and satisfy a spy like this one.
+     */
+
+    it('sends the years as a number', async () => {
+      const user = userEvent.setup()
+      const list = mockList([jobFixture()])
+      renderPage()
+      await screen.findByRole('listitem')
+
+      await user.type(screen.getByLabelText('Your experience'), '5')
+
+      await waitFor(() =>
+        expect(list).toHaveBeenCalledWith(expect.objectContaining({ years_experience: 5 })),
+      )
+    })
+
+    it('debounces rather than firing per keystroke', async () => {
+      // Matters more here than for the search box: the intermediate "1" is a
+      // valid, different filter returning a different page, not a wider version
+      // of the same one.
+      const user = userEvent.setup()
+      const list = mockList([jobFixture()])
+      renderPage()
+      await screen.findByRole('listitem')
+      list.mockClear()
+
+      await user.type(screen.getByLabelText('Your experience'), '12')
+
+      await waitFor(() =>
+        expect(list).toHaveBeenCalledWith(expect.objectContaining({ years_experience: 12 })),
+      )
+      expect(list).toHaveBeenCalledTimes(1)
+    })
+
+    it('treats zero as a filter, not as no filter', async () => {
+      // 0 is falsy, so the truthiness pattern the other filters use would drop
+      // it — from the request, and from hasFilters, which decides whether the
+      // empty state offers to add a job or to widen the search.
+      const user = userEvent.setup()
+      const list = mockList([])
+      renderPage()
+      await screen.findByText('No jobs yet.')
+
+      await user.type(screen.getByLabelText('Your experience'), '0')
+
+      await waitFor(() =>
+        expect(list).toHaveBeenCalledWith(expect.objectContaining({ years_experience: 0 })),
+      )
+      expect(await screen.findByText('No jobs match those filters.')).toBeInTheDocument()
+    })
+
+    it('never sends an unusable value', async () => {
+      // -3 rather than "abc": a number input silently drops non-numeric
+      // characters, so an "abc" test would pass against a completely unguarded
+      // implementation. A negative genuinely reaches the parser.
+      const user = userEvent.setup()
+      const list = mockList([jobFixture()])
+      renderPage()
+      await screen.findByRole('listitem')
+
+      const input = screen.getByLabelText('Your experience')
+      await user.type(input, '-3')
+      expect(await screen.findByText(/between 0 and 60/)).toBeInTheDocument()
+
+      // A valid entry afterwards: any bad request would already have fired.
+      await user.clear(input)
+      await user.type(input, '4')
+      await waitFor(() =>
+        expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ years_experience: 4 })),
+      )
+      expect(list.mock.calls.flat().some((f) => f?.years_experience === -3)).toBe(false)
+    })
   })
 
   it('debounces the search rather than firing per keystroke', async () => {
@@ -137,6 +219,20 @@ describe('JobsPage', () => {
     await waitFor(() =>
       expect(list).toHaveBeenLastCalledWith(
         expect.objectContaining({ offset: 0, work_mode: 'REMOTE' }),
+      ),
+    )
+
+    // The years input is the third site that reads the committed value — after
+    // the request itself and hasFilters. If it were keyed on the raw text
+    // instead, the page would reset on every keystroke.
+    await user.click(screen.getByRole('button', { name: 'Next' }))
+    await waitFor(() => expect(list).toHaveBeenCalledWith(expect.objectContaining({ offset: 20 })))
+
+    await user.type(screen.getByLabelText('Your experience'), '5')
+
+    await waitFor(() =>
+      expect(list).toHaveBeenLastCalledWith(
+        expect.objectContaining({ offset: 0, years_experience: 5 }),
       ),
     )
   })

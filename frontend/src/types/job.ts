@@ -89,7 +89,13 @@ export interface JobFilters {
   q?: string
   work_mode?: WorkMode
   employment_type?: EmploymentType
+  /**
+   * Still a supported API filter, though the browse UI now filters on years —
+   * the ranking formula is numeric and the seniority enum plays no part in it.
+   */
   experience_level?: ExperienceLevel
+  /** Show jobs whose stated range covers this many years. */
+  years_experience?: number
   country_code?: string
   limit?: number
   offset?: number
@@ -99,16 +105,6 @@ export interface JobFilters {
 export const MAX_DESCRIPTION_CHARS = 60_000
 /** Mirrors MIN_DESCRIPTION_CHARS in backend/app/services/job/pipeline.py. */
 export const MIN_DESCRIPTION_CHARS = 200
-
-export const EXPERIENCE_LEVELS: { value: ExperienceLevel; label: string }[] = [
-  { value: 'INTERN', label: 'Intern' },
-  { value: 'ENTRY', label: 'Entry' },
-  { value: 'JUNIOR', label: 'Junior' },
-  { value: 'MID', label: 'Mid' },
-  { value: 'SENIOR', label: 'Senior' },
-  { value: 'LEAD', label: 'Lead' },
-  { value: 'PRINCIPAL', label: 'Principal' },
-]
 
 const EDUCATION_LABELS: Record<EducationLevel, string> = {
   NONE: 'No formal requirement',
