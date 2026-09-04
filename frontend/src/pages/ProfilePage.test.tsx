@@ -94,9 +94,9 @@ describe('ProfilePage', () => {
 
     // Queried by label, not by class: passing this means a screen reader user
     // can identify the field too.
-    expect(await screen.findByLabelText('Full name')).toBeInTheDocument()
+    expect(await screen.findByLabelText(/^Full name/)).toBeInTheDocument()
     expect(screen.getByLabelText('Headline')).toBeInTheDocument()
-    expect(screen.getByLabelText('Target roles')).toBeInTheDocument()
+    expect(screen.getByLabelText(/^Target roles/)).toBeInTheDocument()
   })
 
   it('sends only the personal fields when saving details', async () => {
@@ -136,7 +136,7 @@ describe('ProfilePage', () => {
     // Initials from "Priya Sharma".
     expect(await screen.findByRole('button', { name: /Priya Sharma/ })).toBeInTheDocument()
 
-    const name = screen.getByLabelText('Full name')
+    const name = screen.getByLabelText(/^Full name/)
     await user.clear(name)
     await user.type(name, 'Ananya Iyer')
     await user.click(screen.getAllByRole('button', { name: 'Save' })[0]!)
@@ -154,7 +154,7 @@ describe('ProfilePage', () => {
     )
     renderApp()
 
-    await screen.findByLabelText('Full name')
+    await screen.findByLabelText(/^Full name/)
     await user.click(screen.getAllByRole('button', { name: 'Save' })[0]!)
 
     const alert = await screen.findByRole('alert')
@@ -163,14 +163,22 @@ describe('ProfilePage', () => {
 
   it('sends the full preference set, not a partial one', async () => {
     // The endpoint replaces wholesale, so omitting a key would silently clear it.
+    //
+    // The location override is what makes the form valid: preferred_locations
+    // is now required, and the bare fixture has an empty list, so the save
+    // would be blocked before reaching the service. The default fixture is left
+    // empty on purpose — seeding it would reorder the assertions in the
+    // locations tests below.
     const user = userEvent.setup()
-    vi.spyOn(profileService, 'get').mockResolvedValue(profileFixture())
+    vi.spyOn(profileService, 'get').mockResolvedValue(
+      profileFixture({ preferred_locations: ['Remote'] }),
+    )
     const replace = vi
       .spyOn(profileService, 'replacePreferences')
       .mockResolvedValue(profileFixture())
     renderApp()
 
-    const roles = await screen.findByLabelText('Target roles')
+    const roles = await screen.findByLabelText(/^Target roles/)
     await user.type(roles, 'Backend Engineer, ML Engineer')
     await user.click(screen.getAllByRole('button', { name: 'Save' })[1]!)
 
@@ -181,6 +189,188 @@ describe('ProfilePage', () => {
     expect(sent).toHaveProperty('open_to_relocation')
   })
 
+  describe('required fields', () => {
+    /**
+     * The frontend is deliberately stricter than the API here: the server
+     * defaults every personal field and only enforces the currency/salary
+     * pair. A profile with no name and no target roles is storable but useless
+     * to job matching, and the asterisk is the interface saying so — which
+     * means it has to actually prevent the save.
+     */
+
+    it('says nothing on a fresh, empty profile', async () => {
+      // A new profile is invalid by construction. Greeting someone with three
+      // red messages before they type a character is hostile.
+      vi.spyOn(profileService, 'get').mockResolvedValue(
+        profileFixture({ full_name: null, target_roles: [], preferred_locations: [] }),
+      )
+      renderApp()
+
+      await screen.findByLabelText(/^Full name/)
+      expect(screen.queryByText('Enter your full name.')).not.toBeInTheDocument()
+      expect(
+        screen.queryByText('Add at least one target role, separated by commas.'),
+      ).not.toBeInTheDocument()
+    })
+
+    it('blocks the save when the name is empty', async () => {
+      const user = userEvent.setup()
+      vi.spyOn(profileService, 'get').mockResolvedValue(profileFixture())
+      const update = vi.spyOn(profileService, 'updatePersonal')
+      renderApp()
+
+      const name = await screen.findByLabelText(/^Full name/)
+      await user.clear(name)
+      await user.click(screen.getAllByRole('button', { name: 'Save' })[0]!)
+
+      expect(await screen.findByText('Enter your full name.')).toBeInTheDocument()
+      expect(update).not.toHaveBeenCalled()
+      expect(name).toHaveAttribute('aria-invalid', 'true')
+    })
+
+    it('moves focus to the field that failed', async () => {
+      // Otherwise a blocked save is silent to anyone not looking at the screen:
+      // focus stays on Save and nothing is announced.
+      const user = userEvent.setup()
+      vi.spyOn(profileService, 'get').mockResolvedValue(profileFixture())
+      vi.spyOn(profileService, 'updatePersonal')
+      renderApp()
+
+      const name = await screen.findByLabelText(/^Full name/)
+      await user.clear(name)
+      await user.click(screen.getAllByRole('button', { name: 'Save' })[0]!)
+
+      await waitFor(() => expect(name).toHaveFocus())
+    })
+
+    it('names every empty preference from one press', async () => {
+      const user = userEvent.setup()
+      vi.spyOn(profileService, 'get').mockResolvedValue(profileFixture())
+      const replace = vi.spyOn(profileService, 'replacePreferences')
+      renderApp()
+
+      await screen.findByLabelText(/^Target roles/)
+      await user.click(screen.getAllByRole('button', { name: 'Save' })[1]!)
+
+      expect(
+        await screen.findByText('Add at least one target role, separated by commas.'),
+      ).toBeInTheDocument()
+      expect(
+        screen.getByText('Add at least one preferred location. Remote and Anywhere count.'),
+      ).toBeInTheDocument()
+      expect(replace).not.toHaveBeenCalled()
+    })
+
+    it('clears a message as soon as the field is valid, with no second press', async () => {
+      // The behaviour a stored-error implementation usually gets wrong.
+      const user = userEvent.setup()
+      vi.spyOn(profileService, 'get').mockResolvedValue(profileFixture())
+      vi.spyOn(profileService, 'updatePersonal').mockResolvedValue(profileFixture())
+      renderApp()
+
+      const name = await screen.findByLabelText(/^Full name/)
+      await user.clear(name)
+      await user.click(screen.getAllByRole('button', { name: 'Save' })[0]!)
+      await screen.findByText('Enter your full name.')
+
+      await user.type(name, 'Priya')
+
+      expect(screen.queryByText('Enter your full name.')).not.toBeInTheDocument()
+    })
+
+    it('keeps the message when only whitespace is typed', async () => {
+      // Trim-based, mirroring the server's own _blank_to_none.
+      const user = userEvent.setup()
+      vi.spyOn(profileService, 'get').mockResolvedValue(profileFixture())
+      renderApp()
+
+      const name = await screen.findByLabelText(/^Full name/)
+      await user.clear(name)
+      await user.click(screen.getAllByRole('button', { name: 'Save' })[0]!)
+      await screen.findByText('Enter your full name.')
+
+      await user.type(name, '   ')
+
+      expect(screen.getByText('Enter your full name.')).toBeInTheDocument()
+    })
+
+    it('marks currency required only once a salary is entered', async () => {
+      const user = userEvent.setup()
+      vi.spyOn(profileService, 'get').mockResolvedValue(
+        profileFixture({
+          target_roles: ['Backend Engineer'],
+          preferred_locations: ['Remote'],
+        }),
+      )
+      renderApp()
+
+      // No salary, so no asterisk — the exact-string query still matches.
+      const currency = await screen.findByLabelText('Currency')
+      expect(currency).not.toBeRequired()
+
+      await user.type(screen.getByLabelText('Minimum salary'), '2400000')
+
+      // The asterisk has appeared, so the label text has changed.
+      expect(screen.getByLabelText(/^Currency/)).toBeRequired()
+      expect(screen.queryByLabelText('Currency')).not.toBeInTheDocument()
+    })
+
+    it('blocks the save when a salary has no currency', async () => {
+      const user = userEvent.setup()
+      vi.spyOn(profileService, 'get').mockResolvedValue(
+        profileFixture({
+          target_roles: ['Backend Engineer'],
+          preferred_locations: ['Remote'],
+        }),
+      )
+      const replace = vi.spyOn(profileService, 'replacePreferences')
+      renderApp()
+
+      await user.type(await screen.findByLabelText('Minimum salary'), '2400000')
+      await user.click(screen.getAllByRole('button', { name: 'Save' })[1]!)
+
+      expect(
+        await screen.findByText('Choose the currency for your minimum salary.'),
+      ).toBeInTheDocument()
+      expect(replace).not.toHaveBeenCalled()
+    })
+
+    it('allows a currency with no salary', async () => {
+      // The rule is one-directional, matching the server: "pay me in INR, no
+      // floor stated" is legitimate.
+      const user = userEvent.setup()
+      vi.spyOn(profileService, 'get').mockResolvedValue(
+        profileFixture({
+          target_roles: ['Backend Engineer'],
+          preferred_locations: ['Remote'],
+          salary_currency: 'INR',
+          min_salary_expectation: null,
+        }),
+      )
+      const replace = vi
+        .spyOn(profileService, 'replacePreferences')
+        .mockResolvedValue(profileFixture())
+      renderApp()
+
+      await screen.findByLabelText(/^Target roles/)
+      await user.click(screen.getAllByRole('button', { name: 'Save' })[1]!)
+
+      await waitFor(() => expect(replace).toHaveBeenCalled())
+      expect(replace.mock.calls[0]![0].salary_currency).toBe('INR')
+    })
+
+    it('leaves optional fields unmarked', async () => {
+      // The asterisk only means something while it is scarce.
+      vi.spyOn(profileService, 'get').mockResolvedValue(profileFixture())
+      renderApp()
+
+      expect(await screen.findByLabelText('Headline')).not.toBeRequired()
+      expect(screen.getByLabelText('Location')).not.toBeRequired()
+      expect(screen.getByLabelText('Phone')).not.toBeRequired()
+      expect(screen.getByLabelText('Country')).not.toBeRequired()
+    })
+  })
+
   describe('pickers', () => {
     it('adds no button named "Save"', async () => {
       // Two tests above index getAllByRole('button', { name: 'Save' })
@@ -189,7 +379,7 @@ describe('ProfilePage', () => {
       vi.spyOn(profileService, 'get').mockResolvedValue(profileFixture())
       renderApp()
 
-      await screen.findByLabelText('Full name')
+      await screen.findByLabelText(/^Full name/)
       expect(screen.getAllByRole('button', { name: 'Save' })).toHaveLength(2)
     })
 
@@ -212,7 +402,14 @@ describe('ProfilePage', () => {
 
     it('sends the currency code, not the currency name', async () => {
       const user = userEvent.setup()
-      vi.spyOn(profileService, 'get').mockResolvedValue(profileFixture())
+      // Roles and locations seeded so the section is valid — this test is about
+      // currency, not about the required-field guard.
+      vi.spyOn(profileService, 'get').mockResolvedValue(
+        profileFixture({
+          target_roles: ['Backend Engineer'],
+          preferred_locations: ['Remote'],
+        }),
+      )
       const replace = vi
         .spyOn(profileService, 'replacePreferences')
         .mockResolvedValue(profileFixture({ salary_currency: 'INR' }))
@@ -231,14 +428,19 @@ describe('ProfilePage', () => {
       // The state behind this field went from a comma-separated string to
       // string[]; this is what proves the migration and that toList is no
       // longer in the path.
+      //
+      // Roles seeded so the guard does not block the save; locations are left
+      // empty because this test fills them itself.
       const user = userEvent.setup()
-      vi.spyOn(profileService, 'get').mockResolvedValue(profileFixture())
+      vi.spyOn(profileService, 'get').mockResolvedValue(
+        profileFixture({ target_roles: ['Backend Engineer'] }),
+      )
       const replace = vi
         .spyOn(profileService, 'replacePreferences')
         .mockResolvedValue(profileFixture())
       renderApp()
 
-      const locations = await screen.findByLabelText('Preferred locations')
+      const locations = await screen.findByLabelText(/^Preferred locations/)
       await user.type(locations, 'beng')
       await user.keyboard('{Enter}')
       await user.type(locations, 'remote')
@@ -251,13 +453,15 @@ describe('ProfilePage', () => {
 
     it('sends a location that is not on the list, verbatim', async () => {
       const user = userEvent.setup()
-      vi.spyOn(profileService, 'get').mockResolvedValue(profileFixture())
+      vi.spyOn(profileService, 'get').mockResolvedValue(
+        profileFixture({ target_roles: ['Backend Engineer'] }),
+      )
       const replace = vi
         .spyOn(profileService, 'replacePreferences')
         .mockResolvedValue(profileFixture())
       renderApp()
 
-      const locations = await screen.findByLabelText('Preferred locations')
+      const locations = await screen.findByLabelText(/^Preferred locations/)
       await user.type(locations, 'Whitefield')
       await user.keyboard('{Enter}')
       await user.click(screen.getAllByRole('button', { name: 'Save' })[1]!)
