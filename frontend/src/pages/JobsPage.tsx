@@ -4,12 +4,13 @@ import { JobCard } from '@/components/JobCard'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 import { buttonClass } from '@/components/ui/buttonStyles'
+import { Combobox } from '@/components/ui/Combobox'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
 import { ApiError } from '@/services/apiClient'
 import { jobService } from '@/services/jobService'
-import { type JobSummary } from '@/types/job'
+import { EXPERIENCE_YEAR_OPTIONS, type JobSummary } from '@/types/job'
 import {
   EMPLOYMENT_TYPES,
   WORK_MODES,
@@ -26,26 +27,7 @@ import {
  */
 
 const PAGE_SIZE = 20
-/** Renamed from SEARCH_DEBOUNCE_MS — two inputs use it now. */
-const FILTER_DEBOUNCE_MS = 300
-/** Mirrors Query(le=60) in backend/app/api/v1/jobs.py. */
-const MAX_YEARS = 60
-/** One or two digits, optionally one decimal — the shape Numeric(4,1) accepts. */
-const YEARS_PATTERN = /^\d{1,2}(\.\d)?$/
-
-/**
- * A usable years filter, or nothing.
- *
- * The `^\d` anchor is what actually rejects a negative: `min={0}` on a number
- * input only sets validity.rangeUnderflow and constrains the steppers, it does
- * not stop "-3" being typed.
- */
-function parseYears(text: string): number | null {
-  const trimmed = text.trim()
-  if (!YEARS_PATTERN.test(trimmed)) return null
-  const value = Number(trimmed)
-  return value <= MAX_YEARS ? value : null
-}
+const SEARCH_DEBOUNCE_MS = 300
 
 export function JobsPage() {
   const [jobs, setJobs] = useState<JobSummary[]>([])
@@ -60,36 +42,22 @@ export function JobsPage() {
   const [query, setQuery] = useState('')
   const [workMode, setWorkMode] = useState<WorkMode | ''>('')
   const [employmentType, setEmploymentType] = useState<EmploymentType | ''>('')
-  // Same split as searchText/query: what the box shows, versus what has been
-  // committed and sent.
-  const [yearsText, setYearsText] = useState('')
-  const [years, setYears] = useState<number | null>(null)
+  // '' is "Any"; otherwise '0'…'10'. Kept as the raw option value rather than
+  // converted early, because Number('0') is falsy and any check written on the
+  // converted value would silently drop the "0+ years" filter.
+  const [yearsValue, setYearsValue] = useState('')
 
   const requestId = useRef(0)
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setQuery(searchText.trim()), FILTER_DEBOUNCE_MS)
+    const timer = window.setTimeout(() => setQuery(searchText.trim()), SEARCH_DEBOUNCE_MS)
     return () => window.clearTimeout(timer)
   }, [searchText])
 
-  /**
-   * Debounced for a stronger reason than the search box.
-   *
-   * A partial search term is a narrower query returning a subset. A partial
-   * years value is a *valid, different* filter — typing "12" would fire
-   * years_experience: 1 first, flashing a genuinely different result set before
-   * replacing it.
-   */
-  useEffect(() => {
-    const timer = window.setTimeout(() => setYears(parseYears(yearsText)), FILTER_DEBOUNCE_MS)
-    return () => window.clearTimeout(timer)
-  }, [yearsText])
-
   // Any filter change puts the user back on page one. Without this, narrowing
   // a search while on page three shows an empty list that looks like no
-  // results. Keyed on the committed values, never the raw text — otherwise
-  // every keystroke resets the page and fires a request.
-  useEffect(() => setOffset(0), [query, workMode, employmentType, years])
+  // results. Keyed on `query`, the debounced value, not the raw search text.
+  useEffect(() => setOffset(0), [query, workMode, employmentType, yearsValue])
 
   const load = useCallback(() => {
     const id = ++requestId.current
@@ -101,9 +69,9 @@ export function JobsPage() {
         ...(query ? { q: query } : {}),
         ...(workMode ? { work_mode: workMode } : {}),
         ...(employmentType ? { employment_type: employmentType } : {}),
-        // `years !== null`, not a falsy check: 0 is a real filter, and the
-        // truthiness pattern used above would silently drop it.
-        ...(years !== null ? { years_experience: years } : {}),
+        // Compared against '' rather than tested for truthiness: "0+ years" is
+        // a real filter, and Number('0') is falsy.
+        ...(yearsValue !== '' ? { years_experience: Number(yearsValue) } : {}),
         limit: PAGE_SIZE,
         offset,
       })
@@ -123,21 +91,14 @@ export function JobsPage() {
           setLoadState('error')
         },
       )
-  }, [query, workMode, employmentType, years, offset])
+  }, [query, workMode, employmentType, yearsValue, offset])
 
   useEffect(load, [load])
 
-  // Same reason as the request itself: 0 is a filter. Miss it here and "0
-  // years" renders "No jobs yet." with an Add-a-job button while a filter is
-  // active.
-  const hasFilters = query !== '' || workMode !== '' || employmentType !== '' || years !== null
+  // Same reason as the request itself. Miss it here and "0+ years" renders
+  // "No jobs yet." with an Add-a-job button while a filter is active.
+  const hasFilters = query !== '' || workMode !== '' || employmentType !== '' || yearsValue !== ''
 
-  // Derived, not state, so the message appears on the keystroke while the
-  // request stays debounced.
-  const yearsError =
-    yearsText.trim() !== '' && parseYears(yearsText) === null
-      ? `Enter a number of years between 0 and ${MAX_YEARS}.`
-      : undefined
   const showing = jobs.length > 0 ? `${offset + 1}–${offset + jobs.length} of ${total}` : null
 
   return (
@@ -177,22 +138,21 @@ export function JobsPage() {
             value={employmentType}
             onChange={(e) => setEmploymentType(e.target.value as EmploymentType | '')}
           />
-          <Input
+          {/*
+            A Combobox rather than a native Select: eleven options is short
+            enough for either, but this one supports typing to filter as well as
+            arrowing. It commits on selection, so unlike the free-text box it
+            replaced there is nothing to debounce and no invalid value to guard
+            against — only list options can be chosen. Clearing back to "Any" is
+            the × button.
+          */}
+          <Combobox
             label="Your experience"
-            type="number"
-            inputMode="numeric"
-            min={0}
-            max={MAX_YEARS}
-            step={1}
+            options={EXPERIENCE_YEAR_OPTIONS}
+            value={yearsValue}
+            onChange={setYearsValue}
             placeholder="Any"
-            value={yearsText}
-            onChange={(e) => setYearsText(e.target.value)}
-            // A focused number input increments on the scroll wheel, and every
-            // increment would fire a request 300ms later — on a page whose whole
-            // purpose is scrolling. Blurring on wheel is the standard fix.
-            onWheel={(e) => e.currentTarget.blur()}
-            hint="Years. Shows jobs whose stated range covers your number; postings that don't say are still shown."
-            error={yearsError}
+            hint="Shows jobs whose stated range covers you. Postings that don't say are still shown."
           />
         </div>
       </div>

@@ -106,6 +106,22 @@ export const MAX_DESCRIPTION_CHARS = 60_000
 /** Mirrors MIN_DESCRIPTION_CHARS in backend/app/services/job/pipeline.py. */
 export const MIN_DESCRIPTION_CHARS = 200
 
+/**
+ * Preset choices for the browse filter. `value` is the number sent as
+ * `years_experience`; a job matches when its stated range covers it.
+ *
+ * Generated rather than written out: eleven near-identical entries invite a
+ * typo, and the only irregularity is the singular at 1.
+ *
+ * No `keywords` needed — comboboxCore's normalizeText folds "5+ years" to
+ * "5 years", so typing 5 is already a prefix match, and typing 1 correctly
+ * offers both "1+ year" and "10+ years".
+ */
+export const EXPERIENCE_YEAR_OPTIONS = Array.from({ length: 11 }, (_, years) => ({
+  value: String(years),
+  label: years === 1 ? '1+ year' : `${years}+ years`,
+}))
+
 const EDUCATION_LABELS: Record<EducationLevel, string> = {
   NONE: 'No formal requirement',
   HIGH_SCHOOL: 'High school',

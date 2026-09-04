@@ -118,47 +118,58 @@ describe('JobsPage', () => {
      * types, so a typo would pass mypy and satisfy a spy like this one.
      */
 
-    it('sends the years as a number', async () => {
+    async function pick(user: ReturnType<typeof userEvent.setup>, option: string) {
+      await user.click(screen.getByLabelText('Your experience'))
+      await user.click(screen.getByRole('option', { name: option }))
+    }
+
+    it('sends the selection as a number', async () => {
       const user = userEvent.setup()
       const list = mockList([jobFixture()])
       renderPage()
       await screen.findByRole('listitem')
 
-      await user.type(screen.getByLabelText('Your experience'), '5')
+      await pick(user, '5+ years')
 
       await waitFor(() =>
         expect(list).toHaveBeenCalledWith(expect.objectContaining({ years_experience: 5 })),
       )
     })
 
-    it('debounces rather than firing per keystroke', async () => {
-      // Matters more here than for the search box: the intermediate "1" is a
-      // valid, different filter returning a different page, not a wider version
-      // of the same one.
+    it('filters the options as you type, without firing a request', async () => {
+      // The reason this is a Combobox rather than a native select. Nothing is
+      // sent until an option is committed, which is also why the free-text
+      // version's debounce is gone.
       const user = userEvent.setup()
       const list = mockList([jobFixture()])
       renderPage()
       await screen.findByRole('listitem')
       list.mockClear()
 
-      await user.type(screen.getByLabelText('Your experience'), '12')
+      await user.type(screen.getByLabelText('Your experience'), '1')
+
+      // "1" matches both, in authored order.
+      expect(screen.getByRole('option', { name: '1+ year' })).toBeInTheDocument()
+      expect(screen.getByRole('option', { name: '10+ years' })).toBeInTheDocument()
+      expect(list).not.toHaveBeenCalled()
+
+      await user.keyboard('{Enter}')
 
       await waitFor(() =>
-        expect(list).toHaveBeenCalledWith(expect.objectContaining({ years_experience: 12 })),
+        expect(list).toHaveBeenCalledWith(expect.objectContaining({ years_experience: 1 })),
       )
-      expect(list).toHaveBeenCalledTimes(1)
     })
 
     it('treats zero as a filter, not as no filter', async () => {
-      // 0 is falsy, so the truthiness pattern the other filters use would drop
-      // it — from the request, and from hasFilters, which decides whether the
-      // empty state offers to add a job or to widen the search.
+      // Number('0') is falsy, so a check written on the converted value would
+      // drop it — from the request, and from hasFilters, which decides whether
+      // the empty state offers to add a job or to widen the search.
       const user = userEvent.setup()
       const list = mockList([])
       renderPage()
       await screen.findByText('No jobs yet.')
 
-      await user.type(screen.getByLabelText('Your experience'), '0')
+      await pick(user, '0+ years')
 
       await waitFor(() =>
         expect(list).toHaveBeenCalledWith(expect.objectContaining({ years_experience: 0 })),
@@ -166,26 +177,24 @@ describe('JobsPage', () => {
       expect(await screen.findByText('No jobs match those filters.')).toBeInTheDocument()
     })
 
-    it('never sends an unusable value', async () => {
-      // -3 rather than "abc": a number input silently drops non-numeric
-      // characters, so an "abc" test would pass against a completely unguarded
-      // implementation. A negative genuinely reaches the parser.
+    it('clears back to no filter', async () => {
+      // The Combobox has no "Any" row, unlike the native selects beside it, so
+      // the clear button is the only way back.
       const user = userEvent.setup()
-      const list = mockList([jobFixture()])
+      const list = mockList([])
       renderPage()
-      await screen.findByRole('listitem')
+      await screen.findByText('No jobs yet.')
 
-      const input = screen.getByLabelText('Your experience')
-      await user.type(input, '-3')
-      expect(await screen.findByText(/between 0 and 60/)).toBeInTheDocument()
+      await pick(user, '5+ years')
+      await screen.findByText('No jobs match those filters.')
 
-      // A valid entry afterwards: any bad request would already have fired.
-      await user.clear(input)
-      await user.type(input, '4')
-      await waitFor(() =>
-        expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ years_experience: 4 })),
-      )
-      expect(list.mock.calls.flat().some((f) => f?.years_experience === -3)).toBe(false)
+      await user.click(screen.getByRole('button', { name: 'Clear Your experience' }))
+
+      await waitFor(() => {
+        const sent = list.mock.calls.at(-1)?.[0]
+        expect(sent).not.toHaveProperty('years_experience')
+      })
+      expect(await screen.findByText('No jobs yet.')).toBeInTheDocument()
     })
   })
 
@@ -222,13 +231,13 @@ describe('JobsPage', () => {
       ),
     )
 
-    // The years input is the third site that reads the committed value — after
-    // the request itself and hasFilters. If it were keyed on the raw text
-    // instead, the page would reset on every keystroke.
+    // The experience filter is the third site that reads the selection — after
+    // the request itself and hasFilters.
     await user.click(screen.getByRole('button', { name: 'Next' }))
     await waitFor(() => expect(list).toHaveBeenCalledWith(expect.objectContaining({ offset: 20 })))
 
-    await user.type(screen.getByLabelText('Your experience'), '5')
+    await user.click(screen.getByLabelText('Your experience'))
+    await user.click(screen.getByRole('option', { name: '5+ years' }))
 
     await waitFor(() =>
       expect(list).toHaveBeenLastCalledWith(
