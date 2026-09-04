@@ -16,6 +16,7 @@ import {
   type SuggestedSkill,
 } from '@/types/resume'
 import { cn } from '@/utils/cn'
+import { formatDateTime } from '@/utils/datetime'
 
 /**
  * Client-side pre-check.
@@ -481,7 +482,7 @@ export function ResumePage() {
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-slate-900">{resume.title}</p>
                     <p className="text-xs text-slate-500">
-                      Added {new Date(resume.created_at).toLocaleDateString()}
+                      Added {formatDateTime(resume.created_at)}
                     </p>
                     {/* Without this a resume whose parse failed reads exactly
                         like a healthy one, and the user has no idea why it

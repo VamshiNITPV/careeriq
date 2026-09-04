@@ -172,6 +172,19 @@ describe('ResumePage', () => {
     })
   })
 
+  it('shows when a resume was uploaded, with the time', async () => {
+    // Structure, not an exact string: the suite pins no TZ, so the rendered
+    // clock time depends on the machine. A named month and a time separator
+    // are what was asked for, and they hold in every timezone.
+    mockLoad({ resumes: [resumeFixture()] })
+    render(<ResumePage />)
+
+    const added = within(await screen.findByRole('listitem')).getByText(/^Added /)
+    // Day before the month, month as a name, then a time. The day number can
+    // shift with the machine's timezone, so it is not asserted.
+    expect(added).toHaveTextContent(/Added \d{1,2} Sept? 2026, \d{1,2}:\d{2}/)
+  })
+
   describe('upload', () => {
     it('explains a duplicate instead of appearing to do nothing', async () => {
       const user = userEvent.setup()
