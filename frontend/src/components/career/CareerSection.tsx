@@ -3,6 +3,7 @@ import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Input } from '@/components/ui/Input'
+import { MonthPicker } from '@/components/ui/MonthPicker'
 import { Select } from '@/components/ui/Select'
 import { Textarea } from '@/components/ui/Textarea'
 import { ApiError } from '@/services/apiClient'
@@ -29,6 +30,19 @@ export interface FieldSpec {
   required?: boolean
   /** Half-width on wide screens. */
   half?: boolean
+  /**
+   * Key of a checkbox field that hides this one while it is ticked — how
+   * "Ended" disappears once a role is marked current.
+   *
+   * A key rather than a predicate: the specs are static data read top to
+   * bottom, and a function in the middle of them is harder to scan.
+   */
+  hiddenWhen?: string
+}
+
+/** Not applicable right now, because the checkbox it depends on is ticked. */
+function isHidden(field: FieldSpec, draft: Record<string, string | boolean>): boolean {
+  return field.hiddenWhen !== undefined && draft[field.hiddenWhen] === true
 }
 
 /**
@@ -93,7 +107,12 @@ function toPayload(
 ): Record<string, unknown> {
   const payload: Record<string, unknown> = {}
   for (const field of fields) {
-    const value = draft[field.key]
+    // A hidden field is not "unchanged", it is *not applicable*: the server
+    // rejects an end date on something marked ongoing, and omitting the key
+    // would leave the stored one in place — exactly the CHECK violation.
+    // Treating it as blank routes it through each type's own emptiness rule
+    // below, so month becomes null, lines becomes [], and so on.
+    const value = isHidden(field, draft) ? '' : draft[field.key]
     if (field.type === 'checkbox') {
       payload[field.key] = value === true
     } else if (field.type === 'month') {
@@ -231,29 +250,41 @@ export function CareerSection<T extends CareerEntry>({
       )
     }
 
+    // Its own branch rather than a `type` on Input: MonthPicker's onChange
+    // emits the value, not a DOM event.
+    if (field.type === 'month') {
+      return (
+        <MonthPicker
+          key={field.key}
+          {...common}
+          onChange={(next) => setDraft((prev) => ({ ...prev, [field.key]: next }))}
+        />
+      )
+    }
+
     return (
       <Input
         key={field.key}
         {...common}
-        // type="month" is the control that matches the data: these dates are
-        // month precision, and a day picker would invite the user to state a
-        // day the resume never gave.
-        type={field.type === 'month' ? 'month' : 'text'}
+        type="text"
         onChange={(e) => setDraft((prev) => ({ ...prev, [field.key]: e.target.value }))}
       />
     )
   }
 
+  // Derived once, so the two filters below cannot disagree about what is shown.
+  const visible = fields.filter((field) => !isHidden(field, draft))
+
   const form = (
     <form onSubmit={(e) => void save(e)} className="space-y-4" noValidate>
       <div className="grid gap-4 sm:grid-cols-2">
-        {fields
+        {visible
           .filter((f) => f.half === true)
           .map((f) => (
             <div key={f.key}>{renderField(f)}</div>
           ))}
       </div>
-      {fields.filter((f) => f.half !== true).map(renderField)}
+      {visible.filter((f) => f.half !== true).map(renderField)}
 
       <div className="flex items-center gap-3 pt-1">
         <Button type="submit" size="sm" isLoading={busy}>

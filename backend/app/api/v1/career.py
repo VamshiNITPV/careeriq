@@ -29,7 +29,7 @@ from fastapi import APIRouter, status
 from pydantic import BaseModel
 
 from app.api.deps import CurrentUser, DbSession
-from app.core.exceptions import ResourceNotFoundError
+from app.core.exceptions import ResourceNotFoundError, ValidationError
 from app.core.ids import uuid7
 from app.core.logging import get_logger
 from app.models.career import Certification, EducationRecord, Project, WorkExperience
@@ -54,6 +54,8 @@ from app.schemas.career import (
     WorkExperienceCreate,
     WorkExperienceRead,
     WorkExperienceUpdate,
+    certification_span_problem,
+    span_problem,
 )
 from app.schemas.common import ErrorResponse, MessageResponse
 from app.services.resume.entities import (
@@ -78,6 +80,7 @@ def _register(
     create: type[BaseModel],
     update: type[BaseModel],
     key_for: Callable[[dict[str, Any]], str],
+    check: Callable[[Any], tuple[str, str] | None],
 ) -> None:
     """Add list / create / update / delete for one entity type."""
 
@@ -133,6 +136,23 @@ def _register(
         for key, value in payload.model_dump(exclude_unset=True).items():  # type: ignore[attr-defined]
             setattr(entity, key, value)
 
+        # The date rules, re-run against the *merged* row.
+        #
+        # A validator on the Update schema cannot do this: exclude_unset means a
+        # PATCH can carry only an end date while the start date stays in the
+        # row, so the body alone is not enough to judge. Without this the CHECK
+        # constraint fires instead, and its IntegrityError reaches the client as
+        # an opaque 500 rather than a 422 naming the field — which is what the
+        # comment on the create-time validator has been claiming was impossible.
+        #
+        # Raising here rolls the dirty session back; see core/database.py.
+        problem = check(entity)
+        if problem is not None:
+            field, message = problem
+            raise ValidationError(
+                message, details={"fields": [{"field": field, "message": message}]}
+            )
+
         # content_key is deliberately NOT recomputed. It identifies the entity
         # to the parser, not to the reader: changing it because the user tidied
         # a company name would leave the next parse with no match, and it would
@@ -181,6 +201,7 @@ _register(
     create=WorkExperienceCreate,
     update=WorkExperienceUpdate,
     key_for=lambda d: experience_key(d["title"], d.get("company_name"), d.get("start_date")),
+    check=lambda e: span_problem(e.start_date, e.end_date, e.is_current),
 )
 
 _register(
@@ -192,6 +213,7 @@ _register(
     create=EducationCreate,
     update=EducationUpdate,
     key_for=lambda d: education_key(d["institution"], d.get("degree"), d.get("end_date")),
+    check=lambda e: span_problem(e.start_date, e.end_date, e.is_current),
 )
 
 _register(
@@ -203,6 +225,7 @@ _register(
     create=ProjectCreate,
     update=ProjectUpdate,
     key_for=lambda d: project_key(d["name"]),
+    check=lambda e: span_problem(e.start_date, e.end_date, e.is_current),
 )
 
 _register(
@@ -214,6 +237,7 @@ _register(
     create=CertificationCreate,
     update=CertificationUpdate,
     key_for=lambda d: certification_key(d["name"], d.get("issuer")),
+    check=lambda e: certification_span_problem(e.issued_date, e.expires_date),
 )
 
 

@@ -1,5 +1,6 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/services/apiClient'
 import { careerService } from '@/services/careerService'
@@ -65,6 +66,21 @@ function summary(overrides: Partial<CareerSummary> = {}): CareerSummary {
 const workHistory = () =>
   screen.getByRole('heading', { name: 'Work history' }).closest('section')!
 
+const educationSection = () =>
+  screen.getByRole('heading', { name: 'Education' }).closest('section')!
+
+/**
+ * Wrapped in a Router because every date field is a MonthPicker, which closes
+ * its popover on navigation and so reads the location. Same reason
+ * ProfilePage.test.tsx and Combobox.test.tsx do it.
+ */
+const renderProfile = () =>
+  render(
+    <MemoryRouter>
+      <CareerProfile />
+    </MemoryRouter>,
+  )
+
 describe('CareerProfile', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
@@ -72,7 +88,7 @@ describe('CareerProfile', () => {
 
   it('shows what was extracted', async () => {
     vi.spyOn(careerService, 'summary').mockResolvedValue(summary())
-    render(<CareerProfile />)
+    renderProfile()
 
     expect(await screen.findByText('Backend Engineer')).toBeInTheDocument()
     expect(screen.getByText('Zenith Systems')).toBeInTheDocument()
@@ -83,7 +99,7 @@ describe('CareerProfile', () => {
   it('distinguishes a parser reading from the user’s own words', async () => {
     // Presenting them identically would hide that one is a guess.
     vi.spyOn(careerService, 'summary').mockResolvedValue(summary())
-    render(<CareerProfile />)
+    renderProfile()
 
     await screen.findByText('Backend Engineer')
     expect(within(workHistory()).getByText('Read from your resume')).toBeInTheDocument()
@@ -94,7 +110,7 @@ describe('CareerProfile', () => {
     // Telling someone their work history is empty when the request merely
     // failed is a lie they may act on by re-typing all of it.
     vi.spyOn(careerService, 'summary').mockRejectedValue(new Error('offline'))
-    render(<CareerProfile />)
+    renderProfile()
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/couldn't load/i)
     expect(screen.queryByText(/Nothing yet/)).not.toBeInTheDocument()
@@ -106,7 +122,7 @@ describe('CareerProfile', () => {
       .spyOn(careerService, 'summary')
       .mockRejectedValueOnce(new Error('offline'))
       .mockResolvedValue(summary())
-    render(<CareerProfile />)
+    renderProfile()
 
     await user.click(await screen.findByRole('button', { name: 'Try again' }))
 
@@ -121,7 +137,7 @@ describe('CareerProfile', () => {
       const user = userEvent.setup()
       vi.spyOn(careerService, 'summary').mockResolvedValue(summary())
       const update = vi.spyOn(careerService, 'update').mockResolvedValue(experience())
-      render(<CareerProfile />)
+      renderProfile()
 
       await screen.findByText('Backend Engineer')
       await user.click(within(workHistory()).getByRole('button', { name: 'Edit' }))
@@ -140,31 +156,51 @@ describe('CareerProfile', () => {
       expect(payload.title).toBe('Backend Engineer')
     })
 
-    it('converts a month input back to the date the API stores', async () => {
+    it('keeps a date at month precision through an edit', async () => {
       const user = userEvent.setup()
       vi.spyOn(careerService, 'summary').mockResolvedValue(summary())
       const update = vi.spyOn(careerService, 'update').mockResolvedValue(experience())
-      render(<CareerProfile />)
+      renderProfile()
 
       await screen.findByText('Backend Engineer')
-      await user.click(within(workHistory()).getByRole('button', { name: 'Edit' }))
+      const section = within(workHistory())
+      await user.click(section.getByRole('button', { name: 'Edit' }))
 
-      // The control is a month picker, because the day was never known.
-      const started = screen.getByLabelText('Started')
-      expect(started).toHaveAttribute('type', 'month')
-      expect(started).toHaveValue('2023-06')
+      // Two segments reading MM / YYYY, because the day was never known.
+      expect(section.getByRole('button', { name: 'Started month' })).toHaveTextContent('06')
+      expect(section.getByRole('button', { name: 'Started year' })).toHaveTextContent('2023')
 
-      await user.click(within(workHistory()).getByRole('button', { name: 'Save' }))
+      await user.click(section.getByRole('button', { name: 'Save' }))
 
       await waitFor(() => expect(update).toHaveBeenCalled())
+      // The day the API stores is an artefact, and it is put back on the way out.
       expect(update.mock.calls[0]![2].start_date).toBe('2023-06-01')
+    })
+
+    it('sets a date by picking a year and then a month', async () => {
+      const user = userEvent.setup()
+      vi.spyOn(careerService, 'summary').mockResolvedValue(summary())
+      const update = vi.spyOn(careerService, 'update').mockResolvedValue(experience())
+      renderProfile()
+
+      await screen.findByText('Backend Engineer')
+      const section = within(workHistory())
+      await user.click(section.getByRole('button', { name: 'Edit' }))
+
+      await user.click(section.getByRole('button', { name: 'Started year' }))
+      await user.click(section.getByRole('option', { name: '2020' }))
+      await user.click(section.getByRole('option', { name: 'Mar' }))
+      await user.click(section.getByRole('button', { name: 'Save' }))
+
+      await waitFor(() => expect(update).toHaveBeenCalled())
+      expect(update.mock.calls[0]![2].start_date).toBe('2020-03-01')
     })
 
     it('turns highlights back into a list', async () => {
       const user = userEvent.setup()
       vi.spyOn(careerService, 'summary').mockResolvedValue(summary())
       const update = vi.spyOn(careerService, 'update').mockResolvedValue(experience())
-      render(<CareerProfile />)
+      renderProfile()
 
       await screen.findByText('Backend Engineer')
       await user.click(within(workHistory()).getByRole('button', { name: 'Edit' }))
@@ -193,7 +229,7 @@ describe('CareerProfile', () => {
           ],
         }),
       )
-      render(<CareerProfile />)
+      renderProfile()
 
       await screen.findByText('Backend Engineer')
       await user.click(within(workHistory()).getByRole('button', { name: 'Edit' }))
@@ -208,13 +244,75 @@ describe('CareerProfile', () => {
       const user = userEvent.setup()
       const load = vi.spyOn(careerService, 'summary').mockResolvedValue(summary())
       vi.spyOn(careerService, 'update').mockResolvedValue(experience())
-      render(<CareerProfile />)
+      renderProfile()
 
       await screen.findByText('Backend Engineer')
       await user.click(within(workHistory()).getByRole('button', { name: 'Edit' }))
       await user.click(within(workHistory()).getByRole('button', { name: 'Save' }))
 
       await waitFor(() => expect(load).toHaveBeenCalledTimes(2))
+    })
+  })
+
+  describe('an ongoing entry', () => {
+    it('hides the end date while the entry is current', async () => {
+      // The experience fixture is is_current: true. "Ended" is not merely
+      // blank, it does not apply.
+      const user = userEvent.setup()
+      vi.spyOn(careerService, 'summary').mockResolvedValue(summary())
+      renderProfile()
+
+      await screen.findByText('Backend Engineer')
+      const section = within(workHistory())
+      await user.click(section.getByRole('button', { name: 'Edit' }))
+
+      expect(section.queryByRole('button', { name: 'Ended year' })).not.toBeInTheDocument()
+
+      await user.click(section.getByLabelText('I still work here'))
+
+      expect(section.getByRole('button', { name: 'Ended year' })).toBeInTheDocument()
+    })
+
+    it('sends a null end date alongside the tick', async () => {
+      // Education's fixture carries a real end date, so this is the case that
+      // matters: sending it beside is_current violates the CHECK constraint,
+      // and the database's refusal arrives as an unreadable 500.
+      const user = userEvent.setup()
+      vi.spyOn(careerService, 'summary').mockResolvedValue(summary())
+      const update = vi.spyOn(careerService, 'update').mockResolvedValue(education())
+      renderProfile()
+
+      await screen.findByText('B.Tech')
+      const section = within(educationSection())
+      await user.click(section.getByRole('button', { name: 'Edit' }))
+      expect(section.getByRole('button', { name: 'Finished year' })).toHaveTextContent('2023')
+
+      await user.click(section.getByLabelText('I am still studying here'))
+      await user.click(section.getByRole('button', { name: 'Save' }))
+
+      await waitFor(() => expect(update).toHaveBeenCalled())
+      const payload = update.mock.calls[0]![2]
+      expect(payload.end_date).toBeNull()
+      expect(payload.is_current).toBe(true)
+    })
+
+    it('gives the date back if the tick was a misclick', async () => {
+      // The draft deliberately keeps the value while the field is hidden; only
+      // the payload nulls it. Clearing the draft too would break undo and buy
+      // nothing.
+      const user = userEvent.setup()
+      vi.spyOn(careerService, 'summary').mockResolvedValue(summary())
+      renderProfile()
+
+      await screen.findByText('B.Tech')
+      const section = within(educationSection())
+      await user.click(section.getByRole('button', { name: 'Edit' }))
+
+      await user.click(section.getByLabelText('I am still studying here'))
+      await user.click(section.getByLabelText('I am still studying here'))
+
+      expect(section.getByRole('button', { name: 'Finished year' })).toHaveTextContent('2023')
+      expect(section.getByRole('button', { name: 'Finished month' })).toHaveTextContent('01')
     })
   })
 
@@ -225,7 +323,7 @@ describe('CareerProfile', () => {
         summary({ experiences: [], education: [] }),
       )
       const create = vi.spyOn(careerService, 'create').mockResolvedValue(experience())
-      render(<CareerProfile />)
+      renderProfile()
 
       await screen.findByRole('heading', { name: 'Work history' })
       await user.click(within(workHistory()).getByRole('button', { name: 'Add' }))
@@ -244,7 +342,7 @@ describe('CareerProfile', () => {
       vi.spyOn(careerService, 'summary').mockResolvedValue(
         summary({ experiences: [], education: [] }),
       )
-      render(<CareerProfile />)
+      renderProfile()
 
       // Scoping needs the section to exist, so wait for the load first.
       await screen.findByRole('heading', { name: 'Work history' })
@@ -257,7 +355,7 @@ describe('CareerProfile', () => {
       // Surprising otherwise: the user would think the delete failed.
       const user = userEvent.setup()
       vi.spyOn(careerService, 'summary').mockResolvedValue(summary())
-      render(<CareerProfile />)
+      renderProfile()
 
       await screen.findByText('Backend Engineer')
       await user.click(within(workHistory()).getAllByRole('button', { name: 'Remove' })[0]!)
@@ -272,7 +370,7 @@ describe('CareerProfile', () => {
       vi.spyOn(careerService, 'summary').mockResolvedValue(
         summary({ experiences: [experience({ source_version_id: null })] }),
       )
-      render(<CareerProfile />)
+      renderProfile()
 
       await screen.findByText('Backend Engineer')
       await user.click(within(workHistory()).getAllByRole('button', { name: 'Remove' })[0]!)
@@ -285,7 +383,7 @@ describe('CareerProfile', () => {
       const user = userEvent.setup()
       const load = vi.spyOn(careerService, 'summary').mockResolvedValue(summary())
       const remove = vi.spyOn(careerService, 'remove').mockResolvedValue({ message: 'Removed.' })
-      render(<CareerProfile />)
+      renderProfile()
 
       await screen.findByText('Backend Engineer')
       await user.click(within(workHistory()).getAllByRole('button', { name: 'Remove' })[0]!)

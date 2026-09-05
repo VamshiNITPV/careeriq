@@ -183,6 +183,114 @@ class TestEditing:
         assert response.status_code == 422
 
 
+class TestEditingCannotBreakTheDateRules:
+    """The same two rules as on create, which a PATCH used to walk straight past.
+
+    The Update schemas carry no validator, so until the router checked the
+    merged row these all reached the CHECK constraints and came back as an
+    opaque 500 — with no field named, and nothing the interface could render.
+    """
+
+    async def _created(self, client: AsyncClient, auth_headers: dict[str, str]) -> str:
+        response = await client.post(
+            f"{API}/profile/experience",
+            headers=auth_headers,
+            json={**EXPERIENCE, "is_current": False, "start_date": "2022-01-01"},
+        )
+        assert response.status_code == 201
+        return str(response.json()["id"])
+
+    async def test_patch_rejects_an_incoherent_date_range(
+        self, client: AsyncClient, auth_headers: dict[str, str]
+    ) -> None:
+        entity_id = await self._created(client, auth_headers)
+
+        response = await client.patch(
+            f"{API}/profile/experience/{entity_id}",
+            headers=auth_headers,
+            json={"start_date": "2022-01-01", "end_date": "2020-01-01"},
+        )
+
+        assert response.status_code == 422
+        # The field is named, so the form can say which one to fix.
+        assert response.json()["error"]["details"]["fields"][0]["field"] == "end_date"
+
+    async def test_patch_rejects_something_both_current_and_ended(
+        self, client: AsyncClient, auth_headers: dict[str, str]
+    ) -> None:
+        entity_id = await self._created(client, auth_headers)
+
+        response = await client.patch(
+            f"{API}/profile/experience/{entity_id}",
+            headers=auth_headers,
+            json={"is_current": True, "end_date": "2024-01-01"},
+        )
+
+        assert response.status_code == 422
+
+    async def test_patch_is_judged_against_the_date_already_stored(
+        self, client: AsyncClient, auth_headers: dict[str, str]
+    ) -> None:
+        """The case a validator on the Update schema could never catch.
+
+        Only `end_date` is sent; `start_date` stays in the row. The body alone
+        looks perfectly valid, so the merged entity is the only thing that can
+        be judged.
+        """
+        entity_id = await self._created(client, auth_headers)
+
+        response = await client.patch(
+            f"{API}/profile/experience/{entity_id}",
+            headers=auth_headers,
+            json={"end_date": "2020-01-01"},
+        )
+
+        assert response.status_code == 422
+
+    async def test_marking_a_role_current_clears_its_end_date(
+        self, client: AsyncClient, auth_headers: dict[str, str]
+    ) -> None:
+        # What the form now sends when "I still work here" is ticked: both keys
+        # together, the end date nulled.
+        entity_id = await self._created(client, auth_headers)
+        await client.patch(
+            f"{API}/profile/experience/{entity_id}",
+            headers=auth_headers,
+            json={"end_date": "2024-01-01"},
+        )
+
+        response = await client.patch(
+            f"{API}/profile/experience/{entity_id}",
+            headers=auth_headers,
+            json={"is_current": True, "end_date": None},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["is_current"] is True
+        assert response.json()["end_date"] is None
+
+    async def test_patch_rejects_a_certification_expiring_before_it_was_issued(
+        self, client: AsyncClient, auth_headers: dict[str, str]
+    ) -> None:
+        # The one entity whose dates are named differently, so it takes its own
+        # predicate and would be the easy one to leave unchecked.
+        created = await client.post(
+            f"{API}/profile/certifications",
+            headers=auth_headers,
+            json={"name": "AWS Solutions Architect", "issued_date": "2023-01-01"},
+        )
+        assert created.status_code == 201
+
+        response = await client.patch(
+            f"{API}/profile/certifications/{created.json()['id']}",
+            headers=auth_headers,
+            json={"expires_date": "2021-01-01"},
+        )
+
+        assert response.status_code == 422
+        assert response.json()["error"]["details"]["fields"][0]["field"] == "expires_date"
+
+
 class TestAddingByHand:
     async def test_creates_a_verified_entry_with_no_source(
         self, client: AsyncClient, auth_headers: dict[str, str]

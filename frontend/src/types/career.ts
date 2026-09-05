@@ -70,8 +70,8 @@ export type CareerKind = 'experience' | 'education' | 'projects' | 'certificatio
  * Dates are month precision, and the interface must not pretend otherwise.
  *
  * The API stores "2020-01-01" because the column is a DATE, but the day is an
- * artefact — the resume said "Jan 2020". `<input type="month">` is the control
- * that matches, so these convert between the two forms.
+ * artefact — the resume said "Jan 2020". MonthPicker is the control that
+ * matches, and it speaks "YYYY-MM", so these convert between the two forms.
  */
 export function toMonthInput(value: string | null): string {
   return value === null ? '' : value.slice(0, 7)

@@ -30,8 +30,15 @@ const EXPERIENCE_FIELDS: readonly FieldSpec[] = [
   { key: 'location', label: 'Location', type: 'text', half: true },
   { key: 'employment_type', label: 'Employment type', type: 'select', options: EMPLOYMENT_TYPES, half: true },
   { key: 'work_mode', label: 'Work mode', type: 'select', options: WORK_MODES, half: true },
+  // The date pair comes last among the half fields, in every spec that has an
+  // `is_current`. That is what puts the checkbox — a non-half field, so it
+  // renders below the grid — directly under the end date it controls, and what
+  // makes hiding the end date delete a whole grid row rather than shuffle an
+  // unrelated field up beside "Started".
   { key: 'start_date', label: 'Started', type: 'month', half: true },
-  { key: 'end_date', label: 'Ended', type: 'month', hint: 'Leave blank if this is your current role', half: true },
+  // No "leave blank if this is your current role" hint any more: with the
+  // checkbox below, that is now the wrong advice.
+  { key: 'end_date', label: 'Ended', type: 'month', half: true, hiddenWhen: 'is_current' },
   { key: 'is_current', label: 'I still work here', type: 'checkbox' },
   { key: 'highlights', label: 'Highlights', type: 'lines', hint: 'One per line, as they appear on your resume' },
 ]
@@ -41,9 +48,12 @@ const EDUCATION_FIELDS: readonly FieldSpec[] = [
   { key: 'degree', label: 'Degree', type: 'text', hint: 'As written, e.g. B.Tech', half: true },
   { key: 'field_of_study', label: 'Field of study', type: 'text', half: true },
   { key: 'education_level', label: 'Level', type: 'select', options: EDUCATION_LEVELS, half: true },
-  { key: 'start_date', label: 'Started', type: 'month', half: true },
-  { key: 'end_date', label: 'Finished', type: 'month', half: true },
+  // Grade sits above the dates so the date pair stays last — see the note in
+  // EXPERIENCE_FIELDS. Left where it was, hiding "Finished" would jump Grade up
+  // beside "Started", moving a field the user never touched.
   { key: 'grade', label: 'Grade', type: 'text', hint: 'However your transcript states it', half: true },
+  { key: 'start_date', label: 'Started', type: 'month', half: true },
+  { key: 'end_date', label: 'Finished', type: 'month', half: true, hiddenWhen: 'is_current' },
   { key: 'is_current', label: 'I am still studying here', type: 'checkbox' },
 ]
 

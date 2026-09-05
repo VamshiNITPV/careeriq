@@ -34,6 +34,32 @@ class _EntityRead(BaseModel):
     updated_at: datetime
 
 
+def span_problem(
+    start: date | None, end: date | None, is_current: bool
+) -> tuple[str, str] | None:
+    """The CHECK constraints on a dated entity, as (field, message) or None.
+
+    A function rather than only a validator because the two write paths need it
+    at different moments. A POST can be judged from the body alone; a PATCH
+    cannot, since `exclude_unset` lets it carry one date and leave the other in
+    the row — so the router re-runs this against the merged entity. Both call
+    here so the rules cannot drift, which is exactly what had happened: only the
+    create path was ever checked.
+    """
+    if start is not None and end is not None and end < start:
+        return ("end_date", "The end date cannot be before the start date.")
+    if is_current and end is not None:
+        return ("end_date", "Something ongoing cannot also have an end date.")
+    return None
+
+
+def certification_span_problem(issued: date | None, expires: date | None) -> tuple[str, str] | None:
+    """As span_problem, for the one entity whose dates are named differently."""
+    if issued is not None and expires is not None and expires < issued:
+        return ("expires_date", "The expiry date cannot be before the issue date.")
+    return None
+
+
 class _DatedBase(BaseModel):
     start_date: date | None = None
     end_date: date | None = None
@@ -41,13 +67,11 @@ class _DatedBase(BaseModel):
 
     @model_validator(mode="after")
     def _check_dates(self):
-        # Mirrors the CHECK constraints. Without these the database raises an
-        # IntegrityError, which the catch-all turns into an opaque 500 instead
-        # of naming the field.
-        if self.start_date and self.end_date and self.end_date < self.start_date:
-            raise ValueError("The end date cannot be before the start date.")
-        if self.is_current and self.end_date is not None:
-            raise ValueError("Something ongoing cannot also have an end date.")
+        # Without this the database raises an IntegrityError, which the
+        # catch-all turns into an opaque 500 instead of naming the field.
+        problem = span_problem(self.start_date, self.end_date, self.is_current)
+        if problem is not None:
+            raise ValueError(problem[1])
         return self
 
 
@@ -185,8 +209,9 @@ class CertificationBase(BaseModel):
 
     @model_validator(mode="after")
     def _check_dates(self):
-        if self.issued_date and self.expires_date and self.expires_date < self.issued_date:
-            raise ValueError("The expiry date cannot be before the issue date.")
+        problem = certification_span_problem(self.issued_date, self.expires_date)
+        if problem is not None:
+            raise ValueError(problem[1])
         return self
 
 
