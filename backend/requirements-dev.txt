@@ -5,7 +5,9 @@
 pytest>=8.3
 pytest-asyncio>=0.24
 pytest-cov>=6.0
-# httpx powers FastAPI's ASGI test transport — requests never touch the network.
+# httpx is a runtime dependency now (requirements.txt). Kept listed here
+# because the test suite uses it directly, as FastAPI's ASGI transport and
+# as MockTransport for the jobs adapter — neither touches the network.
 httpx>=0.28
 
 # --- quality ---

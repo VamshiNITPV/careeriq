@@ -21,7 +21,7 @@ export type EducationLevel =
 
 export type SalaryPeriod = 'YEARLY' | 'MONTHLY' | 'HOURLY'
 export type SkillRequirement = 'REQUIRED' | 'PREFERRED'
-export type JobSource = 'USER_SUBMITTED' | 'DATASET_IMPORT'
+export type JobSource = 'USER_SUBMITTED' | 'DATASET_IMPORT' | 'PARTNER_API'
 export type JobStatus = 'ACTIVE' | 'DUPLICATE'
 
 export interface CompanyRead {

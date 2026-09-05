@@ -15,16 +15,15 @@ from decimal import Decimal
 from typing import Any
 
 from pydantic import (
-    AnyHttpUrl,
     BaseModel,
     ConfigDict,
     Field,
-    ValidationError,
     field_validator,
     model_validator,
 )
 
 from app.models.enums import EducationLevel, EmploymentType, ExperienceLevel, WorkMode
+from app.schemas.urls import normalize_url
 
 # Bounds matching the column definitions.
 MAX_NAME = 200
@@ -32,7 +31,6 @@ MAX_HEADLINE = 300
 MAX_LOCATION = 200
 MAX_PHONE = 50
 MAX_SUMMARY = 5000
-MAX_URL = 500
 # A preference list long enough for any real answer, short enough that nobody
 # can push a megabyte of text into an unbounded array.
 MAX_LIST_ITEMS = 20
@@ -48,36 +46,6 @@ def _blank_to_none(value: Any) -> Any:
     if isinstance(value, str) and not value.strip():
         return None
     return value
-
-
-def _normalize_url(value: Any) -> Any:
-    """Validate a URL and return it as a plain string.
-
-    Deliberately not typed as `HttpUrl` on the field. Pydantic normalises that
-    type on serialisation — lowercasing the host, appending a trailing slash —
-    so the value echoed back would differ from what the user typed, and the
-    input would appear to change itself on save.
-
-    A missing scheme is added rather than rejected: people write
-    "linkedin.com/in/priya", and 422-ing that is pedantry.
-    """
-    if value is None or not isinstance(value, str):
-        return value
-
-    candidate = value.strip()
-    if not candidate:
-        return None
-    if not candidate.startswith(("http://", "https://")):
-        candidate = f"https://{candidate}"
-
-    try:
-        AnyHttpUrl(candidate)
-    except ValidationError as exc:
-        raise ValueError("Enter a valid URL.") from exc
-
-    if len(candidate) > MAX_URL:
-        raise ValueError(f"URL must be at most {MAX_URL} characters.")
-    return candidate
 
 
 def _clean_list(values: list[str]) -> list[str]:
@@ -135,7 +103,7 @@ class ProfilePersonalUpdate(BaseModel):
     @field_validator("linkedin_url", "github_url", "portfolio_url", mode="before")
     @classmethod
     def _urls(cls, value: Any) -> Any:
-        return _normalize_url(value)
+        return normalize_url(value)
 
     @field_validator("country_code")
     @classmethod

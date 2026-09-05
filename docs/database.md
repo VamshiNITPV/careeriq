@@ -69,7 +69,8 @@ CREATE TYPE education_level    AS ENUM ('NONE','HIGH_SCHOOL','DIPLOMA','BACHELOR
 CREATE TYPE employment_type    AS ENUM ('FULL_TIME','PART_TIME','CONTRACT','INTERNSHIP','TEMPORARY');
 CREATE TYPE work_mode          AS ENUM ('ONSITE','HYBRID','REMOTE');
 CREATE TYPE processing_status  AS ENUM ('PENDING','EXTRACTING','PARSING','EMBEDDING','COMPLETE','FAILED');
-CREATE TYPE job_source         AS ENUM ('USER_SUBMITTED','DATASET_IMPORT','PARTNER_API','ADMIN_ENTRY');
+-- ADMIN_ENTRY was designed here and never built. Do not restore it without a use.
+CREATE TYPE job_source         AS ENUM ('USER_SUBMITTED','DATASET_IMPORT','PARTNER_API');
 CREATE TYPE job_status         AS ENUM ('ACTIVE','EXPIRED','DUPLICATE','ARCHIVED');
 CREATE TYPE proficiency_level  AS ENUM ('BEGINNER','INTERMEDIATE','ADVANCED','EXPERT');
 CREATE TYPE skill_requirement  AS ENUM ('REQUIRED','PREFERRED','NICE_TO_HAVE');
@@ -304,7 +305,8 @@ Each also carries a `_skills` join to `skills` where relevant (e.g. `project_ski
 | `company_id` | `UUID` | FK → `companies.id` RESTRICT, NULL |
 | `submitted_by_user_id` | `UUID` | FK → `users.id` SET NULL |
 | `source` | `job_source` | NOT NULL |
-| `source_url`, `external_id` | `TEXT` | |
+| `source_url` | `TEXT` | The application link. Required on user submission, optional on import — nullable because imported and pre-existing rows may have none. Settable once, only while NULL |
+| `external_id` | `TEXT` | The upstream source's own id. `PARTNER_API` rows namespace it as `provider:id`, so two providers cannot collide and one provider's rows can be removed in a single DELETE if its terms change (ADR-019) |
 | `title` | `TEXT` | NOT NULL |
 | `normalized_title` | `TEXT` | Grouping for analytics |
 | `description_raw` | `TEXT` | NOT NULL — original text, never mutated |

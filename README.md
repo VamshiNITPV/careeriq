@@ -5,7 +5,7 @@ parses job descriptions, ranks jobs by personalized fit using hybrid semantic + 
 identifies skill gaps, suggests grounded resume improvements, tracks application outcomes, and
 conducts adaptive AI mock interviews.
 
-> **Status:** Phases 1–5.5 complete. Phase 6 (AI matching) is next.
+> **Status:** Phases 1–5.6 complete. Phase 6 (AI matching) is next.
 
 ---
 
@@ -104,6 +104,7 @@ Read these in order:
 | 4 | Resume intelligence — upload, parsing, NLP, structured profile | ✅ Done |
 | 5 | Job intelligence — ingestion, JD parsing, skill extraction, dedup | ✅ Done¹ |
 | 5.5 | Resume entity extraction — work history, education, projects, certifications | ✅ Done |
+| 5.6 | Live job ingestion — jobs API provider, admin fetch, `PARTNER_API` source | ✅ Done² |
 | 6 | AI matching — embeddings, pgvector, semantic search, hybrid ranking | ⬜ |
 | 7 | Career intelligence — skill gaps, learning paths, resume optimization | ⬜ |
 | 8 | Application system — tracking, analytics, outcome analysis | ⬜ |
@@ -117,6 +118,17 @@ reformatted re-posts (US-3.2 AC1, first half). The near-duplicate pass — the s
 role reworded, or posted by both an agency and the employer — compares embedding
 cosine similarity and cannot exist before Phase 6 builds the embeddings.
 `jobs.status = 'DUPLICATE'` and `canonical_job_id` are in place for it.
+
+² **A jobs API, not a job board.** The corpus grows by fetching from a permitted API
+(ADR-019), so it is bounded by that provider's free tier — on the order of a couple of thousand
+postings a month before duplicates, against NFR-2's 10k target. It is deliberately *not* "every
+posting worldwide": nobody has that, scraping is out of scope, and there is no scheduled refresh
+until Phase 10 brings a queue. Live ingestion is off unless `JOBS_PROVIDER` and `JOBS_API_KEY` are
+set; without them the app runs exactly as before and `POST /admin/jobs/fetch` answers 503.
+
+One thing to expect the first time you fetch: the list is ordered by `posted_at DESC NULLS LAST`,
+and fetched postings carry a real date while hand-entered ones mostly do not — so every existing job
+drops below the fetched ones. That is correct, not data loss.
 
 ---
 
@@ -141,6 +153,21 @@ docker compose run --rm backend alembic upgrade head
 # 5. Start the API and the web app
 docker compose up -d
 ```
+
+**6. Optional — make yourself an admin.** Required for `/admin/jobs/*` (bulk
+import and live fetch). Register in the web app first, then:
+
+```bash
+docker compose exec postgres psql -U careeriq -d careeriq \
+  -c "UPDATE users SET role = 'ADMIN' WHERE email = 'you@example.com';"
+```
+
+There is deliberately no in-app way to do this. The role is changed by whoever
+already owns the database, which is the honest description of what is happening —
+an endpoint or a first-user-is-admin rule would be a privilege-escalation path
+inside an application whose registration is open. No re-login is needed:
+`get_current_user` loads the row on every request precisely so a role change
+takes effect immediately.
 
 | | URL |
 |---|---|

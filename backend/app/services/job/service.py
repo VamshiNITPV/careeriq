@@ -5,8 +5,11 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
+from urllib.parse import urlsplit
 
-from app.core.exceptions import ResourceNotFoundError, ValidationError
+from sqlalchemy.exc import IntegrityError
+
+from app.core.exceptions import ConflictError, ResourceNotFoundError, ValidationError
 from app.core.ids import uuid7
 from app.core.logging import get_logger
 from app.models.enums import JobSource, ProcessingStatus
@@ -18,6 +21,22 @@ from app.services.job.pipeline import ParsedJob, UnparseableJobError, parse_desc
 from app.services.resume.skill_extraction import build_matcher
 
 log = get_logger(__name__)
+
+
+#: PostgreSQL SQLSTATE for a unique violation. Anything else reaching an
+#: IntegrityError — a CHECK violation from an impossible salary range, a foreign
+#: key problem — is a genuine failure, not a duplicate.
+_UNIQUE_VIOLATION = "23505"
+
+
+def is_duplicate_row(exc: IntegrityError) -> bool:
+    """Whether an IntegrityError means "this row already exists".
+
+    Reporting every integrity error as a duplicate tells an operator "you
+    already have these" when in fact nothing was written and something else is
+    wrong — the one reading of the report that stops them investigating.
+    """
+    return getattr(exc.orig, "sqlstate", None) == _UNIQUE_VIOLATION
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +86,14 @@ class JobService:
         title: str | None = None,
         company_name: str | None = None,
         source_url: str | None = None,
+        # Structured metadata a caller already holds, applied with the same
+        # precedence as title/company: supplied wins over parsed. A jobs API
+        # gives these as fields, while find_location only matches a labelled
+        # "Location:" line in the header that API prose never has — and
+        # country_code has no parser at all, so it is hint-only and is NULL on
+        # every row written before this existed.
+        location: str | None = None,
+        country_code: str | None = None,
         source: JobSource = JobSource.USER_SUBMITTED,
         external_id: str | None = None,
         posted_at: datetime | None = None,
@@ -101,6 +128,27 @@ class JobService:
 
         canonical = await self.jobs.find_by_content_hash(parsed.content_hash)
         if canonical is not None:
+            # A duplicate submission is the cheapest moment the corpus ever gets
+            # to improve. The submitter had to give a link, and the row we are
+            # about to hand back may have none — an imported one usually does
+            # not. Without this the user lands on a detail page saying "no
+            # application link was given" holding the link they just typed.
+            #
+            # Through the repository, not `canonical.source_url = ...`. A
+            # read-then-write here is the very race attach_source_url exists to
+            # close, and two people submitting the same posting at once is
+            # exactly when it would bite. The `is not None` guard matters: the
+            # importer reaches this same code with no link at all.
+            if source_url is not None and await self.jobs.attach_source_url(
+                job_id=canonical.id, source_url=source_url
+            ):
+                await self.jobs.refresh(canonical)
+                log.info(
+                    "job application link added by a duplicate submission",
+                    job_id=str(canonical.id),
+                    actor_user_id=str(user_id) if user_id else None,
+                    host=urlsplit(source_url).hostname,
+                )
             log.info(
                 "job submission matched an existing posting",
                 job_id=str(canonical.id),
@@ -128,7 +176,8 @@ class JobService:
             responsibilities=parsed.responsibilities,
             requirements=parsed.requirements,
             benefits=parsed.benefits,
-            location=parsed.location,
+            location=location or parsed.location,
+            country_code=_country_code(country_code),
             work_mode=parsed.work_mode,
             employment_type=parsed.employment_type,
             experience_level=parsed.experience_level,
@@ -215,6 +264,48 @@ class JobService:
             raise ResourceNotFoundError("Job")
         return job
 
+    async def set_application_link(
+        self, *, job_id: uuid.UUID, source_url: str, actor_user_id: uuid.UUID
+    ) -> Job:
+        """Attach an application link to a job that has none.
+
+        Set-only-when-null, and deliberately not general editing. The corpus is
+        shared, so this is the one write path where one user changes what every
+        other user sees — behind a button reading "Apply for this job", in the
+        context where people hand over a CV and a phone number. Refusing to
+        replace a link that is already there is most of what keeps that safe: a
+        correct link can never be swapped for a hostile one.
+
+        The actor is logged because nothing else records who did this. Be clear
+        about the limit of that: the structured log is the *only* record, there
+        is no in-app audit trail, and undoing one person's link means editing
+        the database by hand.
+        """
+        if not await self.jobs.attach_source_url(job_id=job_id, source_url=source_url):
+            # Zero rows updated means one of two things, and they are different
+            # answers to the caller: the job is gone, or somebody got there
+            # first. get_job raises ResourceNotFoundError for the former.
+            await self.get_job(job_id)
+            raise ConflictError("This job already has an application link.")
+
+        job = await self.get_job(job_id)
+        # Not defensive. That was a Core UPDATE, so `updated_at` — which
+        # PostgreSQL recomputes via onupdate — is expired on the loaded
+        # instance, and reading it during serialisation is a MissingGreenlet
+        # rather than an extra query. Without this the response can also echo
+        # back the pre-update source_url for a write that succeeded.
+        await self.jobs.refresh(job)
+
+        log.info(
+            "job application link added",
+            job_id=str(job_id),
+            actor_user_id=str(actor_user_id),
+            # Host, not the whole URL: the link may carry a referral token, and
+            # the host is what an abuse report actually needs.
+            host=urlsplit(source_url).hostname,
+        )
+        return job
+
     async def list_jobs(self, **filters: object) -> tuple[list[Job], int]:
         return await self.jobs.list_active(**filters)  # type: ignore[arg-type]
 
@@ -241,19 +332,44 @@ class JobService:
                 if not isinstance(description, str) or not description.strip():
                     raise ValidationError("Record has no description.")
 
-                result = await self.submit(
-                    raw_text=description,
-                    title=_optional_str(record.get("title")),
-                    company_name=_optional_str(record.get("company")),
-                    source_url=_optional_str(record.get("url")),
-                    source=JobSource.DATASET_IMPORT,
-                    external_id=_optional_str(external_id),
-                    posted_at=_optional_datetime(record.get("posted_at")),
-                )
+                # A savepoint per record, because the try/except alone does not
+                # deliver AC2. It catches a record that fails *before* the
+                # flush — too short to parse — but a failure *inside* it (an
+                # over-long external_id, a check violation, a unique race)
+                # leaves the session unusable, so every later record dies of
+                # PendingRollbackError and the request then 500s at commit.
+                async with self.jobs.savepoint():
+                    result = await self.submit(
+                        raw_text=description,
+                        title=_optional_str(record.get("title")),
+                        company_name=_optional_str(record.get("company")),
+                        source_url=_optional_str(record.get("url")),
+                        location=_optional_str(record.get("location")),
+                        country_code=_optional_str(record.get("country_code")),
+                        source=JobSource.DATASET_IMPORT,
+                        external_id=_optional_str(external_id),
+                        posted_at=_optional_datetime(record.get("posted_at")),
+                    )
                 if result.is_duplicate:
                     duplicates += 1
                 else:
                     created += 1
+            except IntegrityError as exc:
+                # A unique violation means two imports raced to insert the same
+                # (source, external_id): the savepoint rolled this one back and
+                # the other's row is canonical, so it is a duplicate. Any other
+                # integrity error is a real failure and must say so.
+                if is_duplicate_row(exc):
+                    duplicates += 1
+                else:
+                    log.exception("job import record violated a constraint", index=index)
+                    failures.append(
+                        ImportFailure(
+                            index=index,
+                            external_id=_optional_str(external_id),
+                            reason=f"Rejected by the database: {_constraint_of(exc)}",
+                        )
+                    )
             except (UnparseableJobError, ValidationError) as exc:
                 failures.append(
                     ImportFailure(
@@ -282,6 +398,26 @@ class JobService:
             failed=len(failures),
         )
         return ImportResult(created=created, duplicates=duplicates, failed=failures)
+
+
+def _constraint_of(exc: IntegrityError) -> str:
+    """The constraint an integrity error names, for a report an operator can act on."""
+    return getattr(exc.orig, "constraint_name", None) or "constraint violated"
+
+
+def _country_code(value: str | None) -> str | None:
+    """An ISO-3166 alpha-2 code, or nothing.
+
+    Guarded here rather than trusted, because the value arrives from a third
+    party and `country_code_is_iso3166` is a CHECK constraint — a bad one is an
+    IntegrityError mid-flush, which poisons the session for the rest of the
+    batch. Dropping an unrecognisable code costs one filterable field; letting
+    it through costs the batch.
+    """
+    if value is None:
+        return None
+    candidate = value.strip().upper()
+    return candidate if len(candidate) == 2 and candidate.isalpha() else None
 
 
 def _optional_str(value: object) -> str | None:

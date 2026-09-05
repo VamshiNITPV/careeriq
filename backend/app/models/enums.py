@@ -135,10 +135,17 @@ class JobSource(StrEnum):
     one person's copy of a posting and may be truncated or edited, while an
     imported dataset row is uniform and carries an `external_id` that makes
     re-import idempotent (US-3.3 AC1).
+
+    PARTNER_API is also half the dedup key — `ux_jobs_external` is
+    `(source, external_id)` — which is what keeps one provider's ids out of
+    another's namespace and makes "remove everything from provider X, their
+    terms changed" a single DELETE. A licensing obligation that cannot be
+    expressed as a query is a liability (ADR-019).
     """
 
     USER_SUBMITTED = "USER_SUBMITTED"
     DATASET_IMPORT = "DATASET_IMPORT"
+    PARTNER_API = "PARTNER_API"
 
 
 class JobStatus(StrEnum):

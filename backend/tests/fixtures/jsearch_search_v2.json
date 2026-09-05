@@ -1,0 +1,104 @@
+{
+  "status": "OK",
+  "parameters": {
+    "query": "python developer in India",
+    "num_pages": 1,
+    "country": "in",
+    "language": "en"
+  },
+  "data": {
+    "jobs": [
+      {
+        "job_id": "SzRCUWxITG5fTzJxQjZ1M0FBQUFBQT09OkVzd0JDb3dCUVVwcFZEUjBTbWhaTlRab05IRlNTa2s1YldKVGJUSmhVMGxTU25GdE1HOW5ZMFU1UmtOSFdXNDJTMGsxT1ZabmJFTmFUa2xCVURaRGExODVWWHBtUkdacFVtUllkRTEyV0ZWdE4xbHJVWEZ5Vkc0M2VVcEpNakJGUmxBd2QycDFZWEZZVUZCUFlsTk9ObmRZUzBnNFJUZEpXSGxXTWxSclZWWnlPSFZ0VEhGb1VVMVBNRFU1WnpCM05sVVNGMkppY1dKaGMzWnVRMUJITTNKMVJWQjRZbXBUTFZGRkdpSkJSSE55T1daVGJERllOM0l0TTBOTlgzUlFlVWxXYVRKV1lVTmhZVlJqWkZKQg",
+        "job_title": "Python Backend Developer",
+        "employer_name": "Quest Global",
+        "employer_logo": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQZHaMCdGGIK0oanecRqJSp1PlotM6YGnhF9VC2&s=0",
+        "employer_website": "https://www.questglobal.com",
+        "job_publisher": "Quest Global",
+        "job_employment_type": "Full–time",
+        "job_employment_types": [
+          "FULLTIME"
+        ],
+        "job_apply_link": "https://careers.quest-global.com/global/en/job/P-120209/Python-Backend-Developer",
+        "job_apply_is_direct": false,
+        "apply_options": [
+          {
+            "apply_link": "https://careers.quest-global.com/global/en/job/P-120209/Python-Backend-Developer",
+            "is_direct": false,
+            "publisher": "Quest Global"
+          }
+        ],
+        "job_description": "Job Requirements\n\nPython Backend Developer\n\nExperience: 5–8 years\n\nRole Overview:\n\nThe engineer will work on developing Python backend services, supporting ETL workflows, and deploying applications in Kubernetes as part of a distributed cloud engineering team.\n\nKey Responsibilities:\n• Develop Python backend services and REST APIs.\n• Build and maintain ETL workflows.\n• Deploy applications on Kubernetes.\n• Participate in Agile development and code reviews.\n• Work closely with US-based engineering teams.\n\nWork Experience\n\nRequired Skills:\n• Strong Python programming.\n• Backend API development.\n• Kubernetes.\n• ETL concepts.\n• Docker.\n• Git.\n\nPreferred Skills:\n• AWS.\n• Amazon EKS.\n• Amazon S3.\n• Cloud-native development experience.\n\nNote: This is not a DevOps role. Strong backend development experience is mandatory.",
+        "job_is_remote": false,
+        "job_posted_at": "23 days ago",
+        "job_posted_at_timestamp": 1786579200,
+        "job_posted_at_datetime_utc": "2026-08-13T00:00:00.000Z",
+        "job_location": "Bengaluru, Karnataka",
+        "job_city": "Bengaluru",
+        "job_state": "Karnataka",
+        "job_country": "IN",
+        "job_latitude": 12.962895699999999,
+        "job_longitude": 77.57754,
+        "job_benefits": null,
+        "job_benefits_strings": null,
+        "job_google_link": "https://www.google.com/search?q=jobs&gl=in&hl=en&udm=8#vhid=vt%3D20/docid%3DK4BQlHLn_O2qB6u3AAAAAA%3D%3D&vssid=jobs-detail-viewer",
+        "job_salary": null,
+        "job_salary_string": null,
+        "job_min_salary": null,
+        "job_max_salary": null,
+        "job_salary_period": null,
+        "job_highlights": {},
+        "job_onet_soc": null,
+        "job_onet_job_zone": null,
+        "employer_reviews": null,
+        "job_uid": "K4BQlHLn_O2qB6u3AAAAAA=="
+      },
+      {
+        "job_id": "ckYwWVp0QUQ2TFZQRTNlV0FBQUFBQT09OkVzd0JDb3dCUVVwcFZEUjBTVUpXVTBaeGR6RTBWMnAwUVRGU1ZVdE9ibWRDYkhaM05XOXJRbTVQVDA4Mk1ERjFVMjVpVkVOMFkyUk9abFI1ZVdzNWMycHlkM0puZGtOUWRXeHFSM1V3UTE5RmFHbFZjRGhGTm5wdFpIRk9kVVJEYjJkc1VHdHJjSHBYY2pkakxVODNXbWRQTkVrNVYyVjRUMUoxYlVKMmFESlRZakZTVDA5WFpteE1NMHBFYVVKd01rY1NGMkppY1dKaGMzWnVRMUJITTNKMVJWQjRZbXBUTFZGRkdpSkJSSE55T1daVFVrWkZaVWxPVFhwdlRIcEhha2t5WkhsRFMwRmpZa2hwUWxOQg",
+        "job_title": "Python / ML Developer",
+        "employer_name": "Sharedpro",
+        "employer_logo": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQHA-bY15tzn61RZR8jaxlIND_xSpA0JdWC6tuQ&s=0",
+        "employer_website": null,
+        "job_publisher": "LinkedIn",
+        "job_employment_type": "Full–time",
+        "job_employment_types": [
+          "FULLTIME"
+        ],
+        "job_apply_link": "https://in.linkedin.com/jobs/view/python-ml-developer-at-sharedpro-4455868421",
+        "job_apply_is_direct": false,
+        "apply_options": [
+          {
+            "apply_link": "https://in.linkedin.com/jobs/view/python-ml-developer-at-sharedpro-4455868421",
+            "is_direct": false,
+            "publisher": "LinkedIn"
+          }
+        ],
+        "job_description": "About Sharedpro -\n\nSharedpro is an AI platform company building AI-native products on a shared foundation of computer vision, audio-ML, real-time inference, vector search, and GPU model serving. Our products include AutoPilot Interview, Emotions API, TrueFace, Emotion Quest, and Pediatric Developmental Screening. We're a small, fast-moving team where engineers take end-to-end ownership and ship real products every week.\n\nThe Role -\n\nWe are looking for a hands-on Python / ML Developer with 4–6 years of experience to build the ML core of our AI products: a live AI voice interviewer, a facial expression / emotion measurement API, communication-delivery scoring for interviews, and integrity / proctoring signals. You will own real-time ML pipelines end-to-end — from data preparation and model training to low-latency inference services running in production on our own GPU infrastructure. This is a hands-on individual-contributor role; you will work closely with the Technical Lead, product, and the frontend and backend teams. Prior experience in a startup or fast-moving product environment is strongly preferred\n\nWhat You'll Do -\n\n• Build and maintain production ML services in Python using FastAPI — REST APIs, WebSockets, and async pipelines designed around real-time latency budgets. • Develop real-time audio/speech pipelines: ASR with Whisper / faster-whisper, voice-activity detection (Silero VAD), prosody and speech features (praat-parselmouth, librosa), and TTS integration. • Train, fine-tune, and evaluate computer-vision models with PyTorch — facial expression / emotion recognition, face detection with YOLOv8 / OpenCV / MediaPipe. • Integrate LLMs into products: prompt engineering, structured outputs, and resilient provider handling across Groq, Mistral, and OpenAI-compatible endpoints (fallbacks, rate limits, cost and latency optimization). • Build retrieval and memory layers: embeddings, vector search with Qdrant, semantic matching across sessions. • Serve and optimize models on in-house GPU infrastructure — Triton Inference Server / vLLM, fp16, batching, and throughput/latency tuning. • Design honest, evidence-based scoring: calibration, bias checks, and explainable signals; treat privacy and PII handling as first-class requirements. • Write well-tested production code (pytest), add logging and monitoring, and take part in code reviews. • Own features end-to-end: prototype → production → measurement → iteration.\n\nMust-Have • 6 + years of strong hands-on Python development for production systems (not just notebooks or scripts). • Solid FastAPI experience (or Flask / Django) — REST APIs, WebSockets, async programming, and concurrency. • Hands-on ML with PyTorch (training and inference) and computer vision with OpenCV. • Experience integrating LLM APIs (OpenAI-compatible endpoints) and practical prompt engineering. • Audio/speech ML exposure — ASR (Whisper), VAD, audio feature extraction — or demonstrated ability to go deep quickly. • SQL databases (PostgreSQL / MySQL) and comfort working on Linux servers. • Docker, Git, and CI/CD experience. • Testing discipline with pytest. • Strong problem-solving, debugging, and communication skills. • Startup or fast-moving product experience preferred.\n\nGood to Have • Model serving: Triton Inference Server, vLLM, ONNX, or TensorRT; GPU inference optimization, CUDA. • Vector databases (Qdrant), embeddings, and RAG pipelines. • MediaPipe, YOLO (ultralytics), and face-analysis models. • praat-parselmouth prosody analysis and speech-feature engineering. • Responsible-AI practices: calibration, bias mitigation, explainability; awareness of EU AI Act / NYC LL144. • Basic React / TypeScript for demo frontends; Streamlit or Gradio for internal tools. • Kafka / RabbitMQ / Celery / Redis / Kubernetes. • AWS / Azure / GCP.\n\nWhy Sharedpro • In-house GPU infrastructure — train, serve, and optimize your own models. • Real-world AI problems: voice agents, emotion recognition, speech scoring, and proctoring — not toy projects. • Small team with high ownership; ship real products every week. • End-to-end responsibility from data to model to production service. • Modern stack: PyTorch, Whisper, LLMs, Qdrant, Triton, FastAPI. • Freedom to make meaningful technical decisions in a fast-moving startup environment.",
+        "job_is_remote": false,
+        "job_posted_at": "12 days ago",
+        "job_posted_at_timestamp": 1787529600,
+        "job_posted_at_datetime_utc": "2026-08-24T00:00:00.000Z",
+        "job_location": "Vadodara, Gujarat",
+        "job_city": "Vadodara",
+        "job_state": "Gujarat",
+        "job_country": "IN",
+        "job_latitude": 22.3001515,
+        "job_longitude": 73.2105012,
+        "job_benefits": null,
+        "job_benefits_strings": null,
+        "job_google_link": "https://www.google.com/search?q=jobs&gl=in&hl=en&udm=8#vhid=vt%3D20/docid%3DrF0YZtAD6LVPE3eWAAAAAA%3D%3D&vssid=jobs-detail-viewer",
+        "job_salary": null,
+        "job_salary_string": null,
+        "job_min_salary": null,
+        "job_max_salary": null,
+        "job_salary_period": null,
+        "job_highlights": {},
+        "job_onet_soc": null,
+        "job_onet_job_zone": null,
+        "employer_reviews": null,
+        "job_uid": "rF0YZtAD6LVPE3eWAAAAAA=="
+      }
+    ],
+    "cursor": "EvcDCrcDQUppVDR0Slg5Sl9zNlJXcWpQV0VwY1hp...TRUNCATED"
+  }
+}

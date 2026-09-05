@@ -730,6 +730,103 @@ Two smaller gaps in the same area, recorded so they are not rediscovered:
 
 ---
 
+### ADR-019 — Job data sourcing
+
+**Context.** The corpus had exactly one way in: a user pasting one posting at a time, plus an
+admin endpoint taking a hand-built JSON batch. Nothing fetched anything. `PARTNER_API` was
+specified in `database.md` and then dropped when the enum shipped, and no ADR ever recorded a
+sourcing decision — which is precisely why the feature never got built. Phase 6 ranks candidates
+against this corpus, and ranking seven hand-entered jobs demonstrates nothing.
+
+**Decision.** Ingest from **permitted job APIs**, behind a provider interface, triggered by an
+admin endpoint.
+
+1. **An API, not scraping.** `requirements.md` §Out of scope rules out sites whose terms forbid
+   it; C4 permits "APIs that permit programmatic access". The load-bearing consequence: **fetching
+   the full text by following an apply URL is scraping, so it is not available as a fallback** —
+   which is what makes the next point a hard constraint rather than a preference.
+2. **A complete description is the first selection criterion, ahead of quota and coverage.**
+   `MIN_DESCRIPTION_CHARS` is 200, and REQUIRED-vs-PREFERRED comes *only* from the
+   Requirements / Nice-to-have split that a snippet does not contain. Adzuna, Jooble and Careerjet
+   truncate **by design** — their APIs exist to route traffic back to the aggregator, so this is
+   vendor policy and not a parameter anyone can flip. **A provider that truncates is unusable, not
+   degraded.**
+3. **A posting too short to parse is reported as a failure and no row is written.** Never silently
+   skipped, never stored unparsed: an unparsed row has no requirements and no skills, and the
+   ranker would still score it against every candidate — a claim about fit made on no evidence
+   (ADR-012). It is also the signal that a provider truncates, arriving as `created: 0` with a page
+   of identical reasons rather than as a quietly short result.
+4. **The provider is swappable at one seam.** `JobProvider`, `JobPosting`, `JobSearchPage`, an
+   opaque pagination cursor the caller only echoes, and exactly two exceptions
+   (`JobProviderError`, `JobProviderQuotaError`) — because the caller makes exactly one decision on
+   the difference. Vendor field names, status codes and header names live in one adapter module.
+
+   **This earned its keep immediately.** The provider's documented `/search` endpoint returns 404 on
+   the current version, which paginates by opaque cursor at `/search-v2` instead. Absorbing that
+   meant editing one adapter and nothing else — the cursor is opaque precisely so a page-number
+   scheme can become a cursor scheme without the service noticing.
+5. **`PARTNER_API` restored as a distinct source.** It is half of `ux_jobs_external`
+   `(source, external_id)`, and `external_id` is namespaced `provider:id`. That is what keeps two
+   providers' ids apart and makes *"remove everything from provider X, their terms changed"* one
+   `DELETE`. A licensing obligation that cannot be expressed as a query is a liability.
+6. **An application link is required on this path**, unlike `JobImportRecord.url`. A live
+   posting's only advantages over a dataset row are currency and a link that works; there is no
+   operator to inconvenience and no file to bisect; and nobody hand-repairs hundreds of rows.
+7. **No retries.** On a free tier measured in a few hundred calls a month, a retry spends a scarce
+   unit to re-ask a question that just failed, and on a 429 makes it worse. A failed page stops the
+   walk and is reported. This is a decision, not an omission — do not "fix" it.
+
+**Alternatives rejected.**
+- *Bulk public dataset (Kaggle and similar).* Gives volume without a key, and is the better answer
+  for ranking experiments at scale. Rejected as the primary source because the postings are a
+  historical snapshot whose apply links are largely dead, and a working link was the requirement.
+- *Scraping job boards.* Out of scope by `requirements.md`, and the reason (2) has no fallback.
+- *Reusing `DATASET_IMPORT` for fetched rows.* Cheaper by one migration, and it forfeits per-provider
+  removal — see (5).
+- *A scheduled refresh.* There is no scheduler; the queue is Phase 10 (ADR-008, ADR-018). A cron
+  built for this alone would be the second half-implemented task runner in the codebase.
+
+**Consequences.**
+- **Quota is the binding constraint, and it is small.** Measured, not estimated: JSearch's free
+  tier reports `x-ratelimit-requests-limit: 200` per month and returns 10 postings per request, so
+  the ceiling is **2,000 postings/month before duplicates**, against NFR-2's 10,000. This does not
+  scale to a product, and saying so plainly is the point of writing it down.
+- **A timed-out request still spends quota.** Observed: a call that ran past a 20-second client
+  timeout was billed and returned nothing. The timeout is therefore set generously (45s) rather
+  than tightly — no user waits on an admin fetch, and giving up early is strictly worse than
+  waiting, because it costs the scarce resource *and* yields nothing.
+- **What is deliberately not promised:** not "all jobs worldwide" — nobody has that. One query and
+  one country per call. No scheduled refresh. No expiry sweep: `expires_at` is set only when the
+  provider states one, so the corpus is a snapshot whose links rot. No cross-source deduplication
+  beyond `content_hash`.
+- **A posting pasted by hand and later fetched will produce two rows.** `content_hash` matches only
+  byte-identical cleaned text, and a site's rendering differs from a provider's normalised text.
+  This is exactly what Phase 6's near-duplicate pass exists for. It will be reported as a bug; it is
+  not one, and `content_hash` must not be loosened to paper over it.
+- **Attribution and terms are per provider and must be checked before first use.** Remotive requires
+  explicit attribution and link-back; an aggregator binds you to both its own terms and its
+  publishers'. Record the finding here when a provider is adopted.
+- **Vendor ids are not automatically usable as `external_id`.** JSearch's `job_id` is ~400
+  characters against a `String(200)` column, and truncating it would risk collisions and silently
+  break the `(source, external_id)` idempotency AC1 depends on. Its `job_uid` — a 24-character
+  Google docid, the posting's stable identity — is used instead, with a hash of `job_id` as the
+  fallback. Any new adapter must answer the same question before it is trusted.
+- **Verified against a real response, not documentation.** The adapter's unit tests run against a
+  saved live body (`backend/tests/fixtures/jsearch_search_v2.json`), because the published docs
+  describe the retired endpoint and its older response shape. Descriptions came back 822–7,817
+  characters, plain text, none truncated, with a Requirements-style heading in 8 of 10 — which is
+  what made the provider acceptable under (2). The current version publishes no expiry field, so
+  `expires_at` is always null and fetched rows never age out.
+- **Structured salary is not consumed.** `submit()` has no salary parameters, and adding them means
+  a precedence rule against the parser's reading of the same text plus handling a
+  `salary_range_ordered` violation. The parser already reads salary from the description. Revisit
+  when Phase 6's salary dimension shows it missing.
+- Live ingestion is **off by default**. With no `JOBS_PROVIDER`, the app runs exactly as before and
+  the endpoint answers 503. No fallback provider exists, because anything that "worked" would write
+  invented postings into a corpus real candidates are ranked against.
+
+---
+
 ## 4. Cross-cutting conventions
 
 **Errors.** A single error envelope across the API:
@@ -772,6 +869,7 @@ production value. Missing required config fails loudly at startup, not at first 
 | Cold starts on Cloud Run | Slow first request | Keep ML models out of the API container's import path; consider min-instances if it matters |
 | Scope is large for one developer | Never finishing | Strict phase gates; each phase is independently demonstrable |
 | Embedding model change invalidates vectors | All matches break | `model_name`/`model_version` stored per vector; re-embedding is a supported migration |
+| Jobs API quota exhausted, or its terms change | Corpus stops growing; stored rows keep their links | Provider behind `JobProvider` (ADR-019); `PARTNER_API` + namespaced `external_id` makes per-provider removal one query |
 
 ---
 
@@ -782,3 +880,4 @@ production value. Missing required config fails loudly at startup, not at first 
 | 2026-09-01 | Initial record — ADR-001 through ADR-016. |
 | 2026-09-02 | ADR-017 added. Transactional email, password reset and email verification, after review found that a forgotten password left a user permanently locked out. |
 | 2026-09-02 | ADR-018 added. Resume ingestion, object storage, and the interim background task runner. |
+| 2026-09-04 | ADR-019 added. Job data sourcing from permitted APIs, after the corpus reached Phase 6 with seven hand-entered postings and no way to grow. |

@@ -32,8 +32,19 @@ export const jobService = {
     description: string
     title?: string
     company?: string
-    source_url?: string
+    /** Required: this becomes the "Apply for this job" link on the detail page. */
+    source_url: string
   }): Promise<JobSubmitResponse> {
     return api.post<JobSubmitResponse>('/jobs', input)
+  },
+
+  /**
+   * Attach an application link to a job that has none.
+   *
+   * Set-only-when-null server-side, so this rejects with 409 rather than
+   * replacing a link someone else already added.
+   */
+  setApplicationLink(jobId: string, sourceUrl: string): Promise<JobDetail> {
+    return api.patch<JobDetail>(`/jobs/${jobId}/application-link`, { source_url: sourceUrl })
   },
 }

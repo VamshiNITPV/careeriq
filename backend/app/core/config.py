@@ -11,7 +11,7 @@ import sys
 from enum import StrEnum
 from functools import lru_cache
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -61,6 +61,26 @@ class Settings(BaseSettings):
     # (ADR-014). Cloud Run has no persistent disk, so production must not be
     # local (enforced in the production check below).
     storage_local_path: str = "/var/lib/careeriq/uploads"
+
+    # ---------------------------------------------------------------- jobs api
+    # none    -> no live ingestion; POST /admin/jobs/fetch answers 503 (default)
+    # jsearch -> a real provider, needs JOBS_API_KEY
+    # fake    -> synthetic postings for a local walkthrough; refused in prod
+    #
+    # The default is "none" rather than a working fallback, unlike email's
+    # "console". Console delivery costs a log line; a jobs fallback would write
+    # invented postings into the shared corpus Phase 6 ranks against (ADR-019).
+    jobs_provider: str = "none"
+    jobs_api_key: str = ""
+    jobs_api_host: str = "jsearch.p.rapidapi.com"
+    jobs_api_base_url: str = "https://jsearch.p.rapidapi.com"
+    # Far longer than SMTP's 5, and deliberately generous. A job search is a
+    # real cross-continent round trip that aggregates upstream sources, and it
+    # has been measured taking over 20 seconds. Nobody is waiting on it — an
+    # admin triggered it — while a timeout is expensive: the request still
+    # counts against a quota measured in a few hundred per month, so giving up
+    # early spends the scarce resource and returns nothing for it.
+    jobs_api_timeout_seconds: int = Field(default=45, ge=5, le=120)
 
     # ---------------------------------------------------------------- email
     # console  -> render to the log, send nothing (default; no setup required)
@@ -154,6 +174,18 @@ class Settings(BaseSettings):
             raise ValueError(f"LOG_LEVEL must be one of {sorted(allowed)}")
         return upper
 
+    @model_validator(mode="after")
+    def _jobs_provider_is_usable(self) -> Settings:
+        allowed = {"none", "jsearch", "fake"}
+        if self.jobs_provider not in allowed:
+            raise ValueError(f"JOBS_PROVIDER must be one of {sorted(allowed)}")
+        # Fail at startup, not at the first fetch. A provider configured without
+        # its key would otherwise look fine until an admin spends a request on
+        # it and gets a 401 from the vendor.
+        if self.jobs_provider == "jsearch" and not self.jobs_api_key.strip():
+            raise ValueError("JOBS_API_KEY is required when JOBS_PROVIDER is 'jsearch'.")
+        return self
+
     def _check_production_hardening(self) -> None:
         """Settings that are merely unwise in development are fatal in production."""
         if not self.is_production:
@@ -171,6 +203,10 @@ class Settings(BaseSettings):
             # Console delivery in production means password reset silently never
             # arrives, locking users out with no error anywhere.
             problems.append("EMAIL_PROVIDER must not be 'console' in production.")
+        if self.jobs_provider == "fake":
+            # Synthetic postings in a live corpus are invented market data that
+            # real candidates would be ranked against (ADR-012, ADR-019).
+            problems.append("JOBS_PROVIDER must not be 'fake' in production.")
         if self.frontend_base_url.startswith("http://"):
             problems.append("FRONTEND_BASE_URL must use https in production.")
         if self.storage_provider == "local":

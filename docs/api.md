@@ -221,12 +221,56 @@ code `UNEXTRACTABLE_DOCUMENT` (requirements.md §6).
 | `GET` | `/jobs` | Browse/search. Filters: `q`, `work_mode`, `employment_type`, `experience_level`, `years_experience`, `country_code`, `min_salary`, `posted_after`, `skill_ids` |
 | `POST` | `/jobs` | Submit a job by pasting a description → `202` (parsing is async) |
 | `GET` | `/jobs/{id}` | Detail with parsed structure and extracted skills |
+| `PATCH` | `/jobs/{id}/application-link` | Attach an application link to a job that has none |
 | `GET` | `/jobs/{id}/match` | **This caller's** score breakdown for this job |
 | `POST` | `/jobs/{id}/save` | Create an application in `SAVED` |
 | `GET` | `/jobs/{id}/similar` | Nearest neighbours by embedding |
 | `POST` | `/admin/jobs/import` | 🔒 `ADMIN` — bulk dataset import → `202` |
+| `POST` | `/admin/jobs/fetch` | 🔒 `ADMIN` — pull current postings from the configured jobs provider |
 
-> **As built in Phase 5, three of these differ from the sketch above.**
+> **As built, several of these differ from the sketch above.**
+>
+> `POST /admin/jobs/fetch` is new and not in the sketch above. It pulls live postings from a
+> permitted jobs API (US-3.4, ADR-019) and returns **200 with a per-page and per-posting report** —
+> `created`, `duplicates`, `failed[]`, `pages_fetched`, `postings_seen`, `stopped_early`,
+> `stop_reason`, `quota_remaining` — for the same reason `/import` does: a partial result is the
+> normal outcome, and the count of rejected postings *is* the signal about provider quality.
+>
+> It answers **503** when no provider is configured, which is the default. That is a configuration
+> error rather than a fetch outcome; with a provider configured it always answers 200, even when
+> nothing was created, because rows may have been written and an error status would say otherwise.
+>
+> **An application link is required here, unlike on `/import`.** The leniency documented above for
+> imported records does not transfer: a live posting's only advantages over a dataset row are
+> currency and a working link, there is no operator to inconvenience and no file to bisect, and
+> nobody hand-repairs hundreds of fetched rows through `PATCH /jobs/{id}/application-link`. A
+> posting without a usable link is reported as a failure and not stored.
+>
+> `max_pages` is capped at 5 and **defaults to 1**. Free tiers are measured in a few hundred calls a
+> month, so a double-click must cost one request rather than five. Section 1.8 specifies an
+> `Idempotency-Key` header for this class of endpoint and nothing implements one yet (Redis is
+> configured but unused — Phase 10); the interim is that default plus `(source, external_id)` dedup,
+> which means a repeat spends quota but creates no rows.
+>
+> `POST /jobs` **requires `source_url`**. It is the link the interface offers as
+> "Apply for this job", and a posting somebody pasted always came from a page.
+> It is normalised (a missing scheme becomes `https://`) and must resolve to
+> http or https — anything else is a `422` naming `source_url`, which also
+> keeps `javascript:` out of an `href`. `POST /admin/jobs/import` deliberately
+> does **not** require its `url`: a dataset row's value to the ranking formula
+> does not depend on a link, and failing a whole record over one would make an
+> operator bisect the file for a non-reason.
+>
+> `PATCH /jobs/{id}/application-link` fills that gap for a job that has none —
+> an imported one, usually. Any signed-in user may do it, for the same reason
+> `GET /jobs/{id}` has no ownership check: the corpus is shared. It is
+> **set-only-when-null**, so a link already there is never replaced; that case
+> is a `409` rather than a silent overwrite, and refusing replacement is most of
+> what keeps a shared, unmoderated field behind an "Apply" button from being
+> worth abusing. The actor is logged. There is no rate limit, no report
+> affordance and no moderation queue — if this corpus is ever exposed beyond a
+> trusted user set, restricting this endpoint to the job's submitter is the
+> first thing to do.
 >
 > `POST /jobs` returns **`201` with the parsed job**, not `202`. Parsing a
 > description is regex over text with no I/O — single-digit milliseconds — so

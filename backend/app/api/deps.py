@@ -21,6 +21,7 @@ from app.core.exceptions import (
 )
 from app.core.security import decode_access_token
 from app.integrations.email import get_email_provider
+from app.integrations.jobs import JobProvider, get_job_provider
 from app.integrations.storage import ObjectStorage, get_object_storage
 from app.models.user import User
 from app.repositories.career import (
@@ -140,6 +141,13 @@ def get_storage() -> ObjectStorage:
     return get_object_storage()
 
 
+def get_jobs_provider() -> JobProvider | None:
+    # Overridden in tests with a fake, so the suite never reaches the internet —
+    # which matters because Settings reads .env regardless of ENVIRONMENT=test,
+    # so a developer's real API key is present while the tests run.
+    return get_job_provider()
+
+
 def get_career_repositories(session: DbSession) -> list[CareerEntityRepository[Any]]:
     """Every entity type a resume can produce.
 
@@ -209,6 +217,7 @@ CandidateSkillRepositoryDep = Annotated[
 ]
 JobServiceDep = Annotated[JobService, Depends(get_job_service)]
 JobSkillRepositoryDep = Annotated[JobSkillRepository, Depends(get_job_skill_repository)]
+JobProviderDep = Annotated[JobProvider | None, Depends(get_jobs_provider)]
 
 
 # ---------------------------------------------------------------- current user

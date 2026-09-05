@@ -51,12 +51,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine  # noqa: E4
 from sqlalchemy.pool import NullPool  # noqa: E402
 
 from app.api.deps import (  # noqa: E402
+    get_jobs_provider,
     get_notification_service,
     get_pipeline_runner,
     get_storage,
 )
 from app.core.database import dispose_engine, get_db_session  # noqa: E402
 from app.integrations.email import CapturingEmailProvider  # noqa: E402
+from app.integrations.jobs.fake import FakeJobProvider  # noqa: E402
 from app.integrations.storage import LocalObjectStorage  # noqa: E402
 from app.main import create_app  # noqa: E402
 from app.services.notifications import NotificationService  # noqa: E402
@@ -141,6 +143,17 @@ async def _dispose_global_engine() -> AsyncGenerator[None]:
 
 
 @pytest.fixture
+def job_provider() -> FakeJobProvider:
+    """A jobs provider that makes no network calls.
+
+    Overriding the dependency is what keeps the suite offline even when the
+    developer's .env holds a real API key. A test that needs different pages or
+    a quota error builds its own FakeJobProvider and overrides again.
+    """
+    return FakeJobProvider()
+
+
+@pytest.fixture
 def storage(tmp_path: Path) -> LocalObjectStorage:
     """Object storage rooted in a per-test temporary directory.
 
@@ -193,6 +206,7 @@ async def client(
     db_session: AsyncSession,
     emails: CapturingEmailProvider,
     storage: LocalObjectStorage,
+    job_provider: FakeJobProvider,
 ) -> AsyncGenerator[AsyncClient]:
     """HTTP client wired to the app, sharing the test's rolled-back session.
 
@@ -221,6 +235,10 @@ async def client(
     app.dependency_overrides[get_db_session] = override_session
     app.dependency_overrides[get_notification_service] = lambda: NotificationService(emails)
     app.dependency_overrides[get_storage] = lambda: storage
+    # The suite must never reach the internet. This override is what
+    # guarantees it even on a machine whose .env holds a real JOBS_API_KEY —
+    # Settings reads .env regardless of ENVIRONMENT=test.
+    app.dependency_overrides[get_jobs_provider] = lambda: job_provider
 
     # Tests drive the pipeline explicitly via the run_pipeline fixture, which
     # injects this test's session and storage. Left in place, the real

@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.models.enums import JobStatus, SkillRequirement
@@ -41,6 +41,33 @@ class JobRepository(BaseRepository[Job]):
             .order_by(Job.created_at.asc())
             .limit(1)
         )
+
+    async def attach_source_url(self, *, job_id: uuid.UUID, source_url: str) -> bool:
+        """Attach an application link, unless the job already has a usable one.
+
+        The condition lives in the WHERE clause rather than in a read-then-write.
+        The corpus is shared: two people can reach the same job at the same
+        moment, and a read-then-write lets the second silently overwrite the
+        first.
+
+        "Usable" and not merely "present". A row can hold a value that is not a
+        link at all — rows predate any validation, and the importer accepts
+        whatever a dataset supplied. Those render as no-link in the interface,
+        so keying purely on NULL would make them permanently unfixable: the
+        page offers a repair form whose every submission conflicts. Matching on
+        the same http(s) rule the interface applies is what keeps the offer
+        honest, and it preserves the property that matters — a link that
+        actually works can never be replaced from here.
+
+        Returns whether a row was updated.
+        """
+        usable = Job.source_url.ilike("http://%") | Job.source_url.ilike("https://%")
+        result = await self.session.execute(
+            update(Job)
+            .where(Job.id == job_id, (Job.source_url.is_(None)) | ~usable)
+            .values(source_url=source_url)
+        )
+        return result.rowcount == 1
 
     async def find_by_external_id(self, source: str, external_id: str) -> Job | None:
         """What makes a re-run of an import create nothing new (US-3.3 AC1)."""

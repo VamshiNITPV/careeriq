@@ -167,6 +167,11 @@ Each story carries acceptance criteria (AC) that become test cases.
 - AC1: Import is idempotent — re-running the same batch creates no duplicates.
 - AC2: A failed record does not abort the batch; failures are collected and reported.
 
+**US-3.4** As an admin, I want to pull current postings from a permitted jobs API, so that the corpus contains live roles with working application links.
+- AC1: Re-running the same fetch creates no duplicate jobs.
+- AC2: A posting that cannot be parsed, or that has no application link, is reported as a failure with a reason and is not stored.
+- AC3: Provider quota exhaustion stops the fetch and reports what was created, rather than failing the whole operation.
+
 ### Epic 4 — Matching & Ranking
 
 **US-4.1** As a user, I want jobs ranked by fit, so that I apply where I have a real chance.

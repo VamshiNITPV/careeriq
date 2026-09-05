@@ -42,6 +42,19 @@ function detailFixture(overrides: Partial<JobDetail> = {}): JobDetail {
   }
 }
 
+const APPLY_URL = 'https://example.com/careers/apply/1'
+
+/**
+ * `delay: null` removes user-event's inter-keystroke pause.
+ *
+ * Typing the URL and the overrides character by character is pure overhead —
+ * nothing here asserts on timing, and at the default delay these tests were
+ * exceeding the 5s timeout under a loaded full-suite run. The description is
+ * pasted rather than typed for the same reason, and because pasting a posting
+ * is what this page is actually for.
+ */
+const setup = () => userEvent.setup({ delay: null })
+
 /** Renders the page plus a stand-in for the detail route it navigates to. */
 function renderPage() {
   return render(
@@ -67,7 +80,7 @@ describe('AddJobPage', () => {
   it('says how much more is needed rather than failing after a round trip', async () => {
     // The server enforces the same minimum. Finding out after a request is
     // worse than being told while typing.
-    const user = userEvent.setup()
+    const user = setup()
     const submit = vi.spyOn(jobService, 'submit')
     renderPage()
 
@@ -79,13 +92,15 @@ describe('AddJobPage', () => {
   })
 
   it('submits the description and navigates to the parsed job', async () => {
-    const user = userEvent.setup()
+    const user = setup()
     const submit = vi
       .spyOn(jobService, 'submit')
       .mockResolvedValue({ job: detailFixture(), is_duplicate: false })
     renderPage()
 
-    await user.type(screen.getByLabelText(/Job description/), LONG_ENOUGH)
+    await user.click(screen.getByLabelText(/Job description/))
+    await user.paste(LONG_ENOUGH)
+    await user.type(screen.getByLabelText(/Link to apply/), APPLY_URL)
     await user.click(screen.getByRole('button', { name: 'Add job' }))
 
     await waitFor(() => expect(submit).toHaveBeenCalled())
@@ -96,30 +111,35 @@ describe('AddJobPage', () => {
   it('sends the optional overrides only when filled in', async () => {
     // A blank override would otherwise overrule the parser with an empty
     // string and produce a job titled "".
-    const user = userEvent.setup()
+    const user = setup()
     const submit = vi
       .spyOn(jobService, 'submit')
       .mockResolvedValue({ job: detailFixture(), is_duplicate: false })
     renderPage()
 
-    await user.type(screen.getByLabelText(/Job description/), LONG_ENOUGH)
+    await user.click(screen.getByLabelText(/Job description/))
+    await user.paste(LONG_ENOUGH)
     await user.type(screen.getByLabelText('Company'), 'Zeta Labs')
+    await user.type(screen.getByLabelText(/Link to apply/), APPLY_URL)
     await user.click(screen.getByRole('button', { name: 'Add job' }))
 
     await waitFor(() => expect(submit).toHaveBeenCalled())
     const sent = submit.mock.calls[0]![0]
     expect(sent.company).toBe('Zeta Labs')
+    expect(sent.source_url).toBe(APPLY_URL)
     expect(sent).not.toHaveProperty('title')
   })
 
   it('surfaces a server refusal with its correlation id', async () => {
-    const user = userEvent.setup()
+    const user = setup()
     vi.spyOn(jobService, 'submit').mockRejectedValue(
       new ApiError(422, 'VALIDATION_ERROR', 'That description is too short to parse.', {}, 'corr-9'),
     )
     renderPage()
 
-    await user.type(screen.getByLabelText(/Job description/), LONG_ENOUGH)
+    await user.click(screen.getByLabelText(/Job description/))
+    await user.paste(LONG_ENOUGH)
+    await user.type(screen.getByLabelText(/Link to apply/), APPLY_URL)
     await user.click(screen.getByRole('button', { name: 'Add job' }))
 
     const alert = await screen.findByRole('alert')
@@ -127,5 +147,46 @@ describe('AddJobPage', () => {
     expect(alert).toHaveTextContent('corr-9')
     // Still on the form, with the text intact, so nothing has to be re-pasted.
     expect(screen.getByLabelText(/Job description/)).toHaveValue(LONG_ENOUGH)
+  })
+
+  describe('the link to apply', () => {
+    it('will not submit without one', async () => {
+      // The link is the deliverable. Without it the job has no Apply button and
+      // nobody can act on the posting.
+      const user = setup()
+      const submit = vi.spyOn(jobService, 'submit')
+      renderPage()
+
+      await user.click(screen.getByLabelText(/Job description/))
+    await user.paste(LONG_ENOUGH)
+
+      expect(screen.getByRole('button', { name: 'Add job' })).toBeDisabled()
+      expect(submit).not.toHaveBeenCalled()
+    })
+
+    it('says so when it is not a link', async () => {
+      const user = setup()
+      renderPage()
+
+      await user.click(screen.getByLabelText(/Job description/))
+    await user.paste(LONG_ENOUGH)
+      await user.type(screen.getByLabelText(/Link to apply/), 'not a url')
+
+      expect(screen.getByText(/doesn't look like a link/)).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Add job' })).toBeDisabled()
+    })
+
+    it('accepts one typed without https, as the server does', async () => {
+      // The button's rule and the save's outcome have to agree, or the form
+      // refuses something the API would have taken.
+      const user = setup()
+      renderPage()
+
+      await user.click(screen.getByLabelText(/Job description/))
+    await user.paste(LONG_ENOUGH)
+      await user.type(screen.getByLabelText(/Link to apply/), 'careers.acme.com/jobs/1')
+
+      expect(screen.getByRole('button', { name: 'Add job' })).toBeEnabled()
+    })
   })
 })

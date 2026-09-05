@@ -8,8 +8,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query, status
 
-from app.api.deps import AdminUser, CurrentUser, JobServiceDep
-from app.core.exceptions import ValidationError
+from app.api.deps import AdminUser, CurrentUser, JobProviderDep, JobServiceDep
+from app.core.exceptions import ServiceUnavailableError, ValidationError
 from app.core.logging import get_logger
 from app.models.enums import EmploymentType, ExperienceLevel, WorkMode
 from app.models.job import Job
@@ -17,7 +17,10 @@ from app.schemas.common import ErrorResponse
 from app.schemas.job import (
     CompanyRead,
     ImportFailureRead,
+    JobApplicationLinkUpdate,
     JobDetail,
+    JobFetchRequest,
+    JobFetchResponse,
     JobImportRequest,
     JobImportResponse,
     JobListResponse,
@@ -26,6 +29,7 @@ from app.schemas.job import (
     JobSubmitResponse,
     JobSummary,
 )
+from app.services.job.fetch import fetch_and_import
 from app.services.job.pipeline import UnparseableJobError
 
 log = get_logger(__name__)
@@ -191,6 +195,111 @@ async def get_job(job_id: uuid.UUID, user: CurrentUser, service: JobServiceDep) 
     against, which is stated on the submission form.
     """
     return _detail(await service.get_job(job_id))
+
+
+@router.patch(
+    "/{job_id}/application-link",
+    response_model=JobDetail,
+    summary="Attach an application link to a job that has none",
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse, "description": "It already has one"},
+    },
+)
+async def set_application_link(
+    job_id: uuid.UUID,
+    payload: JobApplicationLinkUpdate,
+    user: CurrentUser,
+    service: JobServiceDep,
+) -> JobDetail:
+    """Fill in a missing "Apply for this job" link.
+
+    A sub-resource rather than a general `PATCH /jobs/{id}`: the corpus is
+    shared, and a generic job PATCH is an invitation to grow into an editor of
+    everyone else's data. This one field, and only while it is empty.
+
+    Any signed-in user may do it, for the same reason `GET /{job_id}` has no
+    ownership check — the corpus belongs to everybody. 409, not 404, when a link
+    is already there: the 403-confirms-existence rule is about ownership, and
+    there is none here, so hiding the conflict would only stop the client doing
+    the useful thing, which is re-fetching and showing the link that now exists.
+
+    Returns the whole job so the client updates from this response rather than
+    firing a second GET, as `PATCH /profile` does.
+    """
+    return _detail(
+        await service.set_application_link(
+            job_id=job_id, source_url=payload.source_url, actor_user_id=user.id
+        )
+    )
+
+
+@admin_router.post(
+    "/fetch",
+    response_model=JobFetchResponse,
+    summary="Pull current postings from the configured jobs provider",
+    responses={
+        403: {"model": ErrorResponse, "description": "Admin only"},
+        503: {"model": ErrorResponse, "description": "No jobs provider configured"},
+    },
+)
+async def fetch_jobs(
+    payload: JobFetchRequest,
+    admin: AdminUser,
+    service: JobServiceDep,
+    provider: JobProviderDep,
+) -> JobFetchResponse:
+    """Ingest live postings from a permitted jobs API (US-3.4).
+
+    200 with a per-page-and-per-posting report, for the same reason
+    `/import` does it: a partial result is the normal outcome, and the count of
+    rejected postings *is* the signal about provider quality. A provider that
+    truncates descriptions shows up here as `created: 0` with a page of
+    identical "too short" reasons, rather than as a quietly short result.
+
+    Synchronous because the work is bounded and predictable — at most five
+    network round trips, each parse single-digit milliseconds. Anything larger
+    needs the queue that does not exist until Phase 10 (ADR-008, ADR-018).
+
+    Re-running the same fetch creates nothing (AC1): every posting carries the
+    provider's own id, namespaced as `provider:id`, and `(source, external_id)`
+    is unique. A repeat therefore costs quota but not correctness — which is
+    also the interim answer to the `Idempotency-Key` header api.md section 1.8
+    specifies and nothing yet implements.
+
+    Note `created` under-reports in one case: when a fetched posting matches an
+    existing linkless row by content hash, its link is attached to that row and
+    it is counted as a duplicate. That is a quiet improvement to the corpus, not
+    a lost posting.
+    """
+    if provider is None:
+        raise ServiceUnavailableError(
+            "No jobs provider is configured. Set JOBS_PROVIDER and JOBS_API_KEY."
+        )
+
+    result = await fetch_and_import(
+        provider=provider,
+        service=service,
+        query=payload.query,
+        country=payload.country,
+        max_pages=payload.max_pages,
+    )
+
+    return JobFetchResponse(
+        provider=result.provider,
+        created=result.created,
+        duplicates=result.duplicates,
+        failed=[
+            ImportFailureRead(index=f.index, external_id=f.external_id, reason=f.reason)
+            for f in result.failed
+        ],
+        processed=result.processed,
+        pages_fetched=result.pages_fetched,
+        postings_seen=result.postings_seen,
+        stopped_early=result.stopped_early,
+        stop_reason=result.stop_reason,
+        quota_remaining=result.quota_remaining,
+    )
 
 
 @admin_router.post(

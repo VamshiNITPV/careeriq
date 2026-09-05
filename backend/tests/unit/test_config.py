@@ -187,3 +187,64 @@ class TestProductionHardening:
     def test_development_skips_hardening_checks(self) -> None:
         # Must not raise: DEBUG and readable logs are the point of local dev.
         build(environment="development", debug=True, log_json=False)._check_production_hardening()
+
+
+class TestJobsProvider:
+    """Live ingestion is opt-in, and the default must stay inert.
+
+    The app has to start with no JOBS_API_KEY, or every developer needs a
+    third-party account before the project runs at all.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _no_jobs_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Ignore any JOBS_* the developer has configured.
+
+        `_env_file=None` is not enough on its own. docker-compose loads .env via
+        `env_file:`, which puts every entry into the container's real
+        environment, and pydantic-settings reads environment variables whether
+        or not a dotenv file is in play. Without this, these tests pass on a
+        machine with no key and fail on one that has one — which is exactly
+        backwards, since having a key is the configured state we ship.
+        """
+        for name in (
+            "JOBS_PROVIDER",
+            "JOBS_API_KEY",
+            "JOBS_API_HOST",
+            "JOBS_API_BASE_URL",
+            "JOBS_API_TIMEOUT_SECONDS",
+        ):
+            monkeypatch.delenv(name, raising=False)
+
+    def test_no_provider_by_default(self) -> None:
+        assert build().jobs_provider == "none"
+
+    def test_an_unknown_provider_is_rejected(self) -> None:
+        with pytest.raises(PydanticValidationError, match="JOBS_PROVIDER"):
+            build(jobs_provider="linkedin")
+
+    def test_a_real_provider_without_a_key_fails_at_startup(self) -> None:
+        # Not at the first fetch: an admin would otherwise spend a request to
+        # discover the vendor rejecting it.
+        with pytest.raises(PydanticValidationError, match="JOBS_API_KEY"):
+            build(jobs_provider="jsearch")
+
+    def test_a_real_provider_with_a_key_is_accepted(self) -> None:
+        assert build(jobs_provider="jsearch", jobs_api_key="k").jobs_provider == "jsearch"
+
+    def test_fake_needs_no_key(self) -> None:
+        assert build(jobs_provider="fake").jobs_provider == "fake"
+
+    def test_fake_is_refused_in_production(self) -> None:
+        # Synthetic postings in a live corpus are invented market data that real
+        # candidates would then be ranked against.
+        with pytest.raises(ValueError, match="JOBS_PROVIDER"):
+            build(
+                environment="production",
+                debug=False,
+                log_json=True,
+                email_provider="smtp",
+                storage_provider="gcs",
+                frontend_base_url="https://app.example.com",
+                jobs_provider="fake",
+            )._check_production_hardening()

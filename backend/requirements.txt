@@ -41,6 +41,12 @@ python-docx>=1.1
 # duration of every send (ADR-004).
 aiosmtplib>=3.0
 
+# --- outbound http ---
+# The first real outbound HTTP in the app: live job ingestion (ADR-019). It was
+# already a dev dependency as FastAPI's ASGI test transport, which never touches
+# the network — that comment in requirements-dev.txt now covers only the tests.
+httpx>=0.28
+
 # --- misc ---
 structlog>=24.4
 python-multipart>=0.0.20

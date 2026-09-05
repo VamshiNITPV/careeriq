@@ -17,7 +17,7 @@ import uuid
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, AsyncSessionTransaction
 
 from app.models.base import Base
 
@@ -53,6 +53,21 @@ class BaseRepository[ModelT: Base]:
         database-generated default back.
         """
         await self.session.flush()
+
+    def savepoint(self) -> AsyncSessionTransaction:
+        """A SAVEPOINT around one unit of work inside a larger transaction.
+
+        Needed wherever a loop must survive a failure that reaches the database.
+        `except Exception: continue` is not sufficient on its own: once a flush
+        raises, the session is in a failed state, every later statement dies of
+        PendingRollbackError, and the request then fails at commit — so one bad
+        record takes the whole batch down, not just itself.
+
+        Used as `async with repo.savepoint():`. Leaving the block by exception
+        rolls back to the savepoint and leaves the outer transaction usable, so
+        the caller's `except` can record the failure and carry on.
+        """
+        return self.session.begin_nested()
 
     async def refresh(self, entity: ModelT) -> None:
         """Reload an instance after a flush that touched server-side defaults.

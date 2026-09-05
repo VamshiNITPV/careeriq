@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/Textarea'
 import { ApiError } from '@/services/apiClient'
 import { jobService } from '@/services/jobService'
 import { MIN_DESCRIPTION_CHARS } from '@/types/job'
+import { externalLink } from '@/utils/externalUrl'
 
 /**
  * Paste a job description (US-3.1).
@@ -29,6 +30,12 @@ export function AddJobPage() {
   const trimmed = description.trim()
   const tooShort = trimmed.length > 0 && trimmed.length < MIN_DESCRIPTION_CHARS
 
+  // Checked with the same rule the server applies, so the button's state and
+  // the save's outcome agree. assumeHttps because "careers.acme.com/jobs/1" is
+  // what people paste and the API accepts it.
+  const applyLink = externalLink(sourceUrl, { assumeHttps: true })
+  const linkIsBad = sourceUrl.trim() !== '' && applyLink === null
+
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setError(null)
@@ -38,7 +45,7 @@ export function AddJobPage() {
         description: trimmed,
         ...(title.trim() ? { title: title.trim() } : {}),
         ...(company.trim() ? { company: company.trim() } : {}),
-        ...(sourceUrl.trim() ? { source_url: sourceUrl.trim() } : {}),
+        source_url: sourceUrl.trim(),
       })
       // A duplicate returns the job that already existed, so navigating there
       // is right either way. The banner on the detail page explains which
@@ -125,15 +132,30 @@ export function AddJobPage() {
         </div>
 
         <Input
-          label="Link to the posting"
+          label="Link to apply"
           type="url"
+          required
           placeholder="https://…"
           value={sourceUrl}
           onChange={(e) => setSourceUrl(e.target.value)}
+          hint={
+            linkIsBad
+              ? undefined
+              : "The page where the application is actually submitted — not the company's careers homepage."
+          }
+          // Same reason as the description's: the server enforces this too, and
+          // finding out after a round trip is worse.
+          error={linkIsBad ? "That doesn't look like a link." : undefined}
         />
 
         <div className="flex items-center gap-3 pt-2">
-          <Button type="submit" isLoading={isSaving} disabled={trimmed.length === 0 || tooShort}>
+          <Button
+            type="submit"
+            isLoading={isSaving}
+            // The link is part of the deliverable, not an extra: without it the
+            // job has no Apply button and nobody can act on it.
+            disabled={trimmed.length === 0 || tooShort || applyLink === null}
+          >
             Add job
           </Button>
           <Link to="/jobs" className="text-sm text-slate-600 hover:text-slate-900">

@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -121,14 +121,23 @@ describe('JobDetailPage', () => {
     expect(await screen.findByText('Python · 4+ yrs')).toBeInTheDocument()
   })
 
-  it('keeps the original posting available', async () => {
-    // Everything above is derived from it, so this is what to check when the
-    // parse looks wrong.
-    vi.spyOn(jobService, 'get').mockResolvedValue(detailFixture())
+  it('keeps the original posting available when there is no link', async () => {
+    // The fallback, and the reason it is one: the application link is usually
+    // somewhere inside the text.
+    vi.spyOn(jobService, 'get').mockResolvedValue(detailFixture({ source_url: null }))
     renderPage()
 
     await screen.findByRole('heading', { name: 'Senior Data Engineer' })
     expect(screen.getByText('The original pasted posting.')).toBeInTheDocument()
+  })
+
+  it('hides the raw description when there is a link to apply through', async () => {
+    vi.spyOn(jobService, 'get').mockResolvedValue(detailFixture())
+    renderPage()
+
+    await screen.findByRole('heading', { name: 'Senior Data Engineer' })
+    expect(screen.queryByText('The original pasted posting.')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Show the original description/)).not.toBeInTheDocument()
   })
 
   it('explains a duplicate submission', async () => {
@@ -167,13 +176,89 @@ describe('JobDetailPage', () => {
     expect(get).toHaveBeenCalledTimes(2)
   })
 
-  it('opens the source link safely', async () => {
-    // Without noreferrer the opened page can read where it was linked from.
-    vi.spyOn(jobService, 'get').mockResolvedValue(detailFixture())
-    renderPage()
+  describe('applying', () => {
+    const applyLinks = () => screen.getAllByRole('link', { name: /Apply for this job/ })
 
-    const link = await screen.findByRole('link', { name: /View the original posting/ })
-    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
-    expect(link).toHaveAttribute('target', '_blank')
+    it('offers the same link at the top and at the bottom', async () => {
+      // Without noreferrer the opened page can read where it was linked from,
+      // and both copies need it — not just whichever one was written first.
+      vi.spyOn(jobService, 'get').mockResolvedValue(detailFixture())
+      renderPage()
+
+      await screen.findByRole('heading', { name: 'Senior Data Engineer' })
+      const links = applyLinks()
+      expect(links).toHaveLength(2)
+      for (const link of links) {
+        expect(link).toHaveAttribute('href', 'https://example.com/jobs/1')
+        expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+        expect(link).toHaveAttribute('target', '_blank')
+      }
+      // Where it goes, before the click.
+      expect(screen.getByText(/Opens example.com\/jobs\/1/)).toBeInTheDocument()
+    })
+
+    it('does not turn a stored javascript: link into an apply button', async () => {
+      // These rows predate any validation, and the corpus is shared, so one
+      // user's stored value renders on everyone's screen. Refusing it here is
+      // the last line — and refusing means falling back, not failing.
+      vi.spyOn(jobService, 'get').mockResolvedValue(
+        detailFixture({ source_url: 'javascript:alert(1)' }),
+      )
+      renderPage()
+
+      await screen.findByRole('heading', { name: 'Senior Data Engineer' })
+      expect(screen.queryByRole('link', { name: /Apply for this job/ })).not.toBeInTheDocument()
+      expect(screen.getByText('The original pasted posting.')).toBeInTheDocument()
+    })
+
+    it('says plainly when no link was given', async () => {
+      // Never invents one — not a careers-page guess, not a search.
+      vi.spyOn(jobService, 'get').mockResolvedValue(detailFixture({ source_url: null }))
+      renderPage()
+
+      expect(await screen.findByText(/No application link was given/)).toBeInTheDocument()
+      expect(
+        screen.getByRole('button', { name: 'Add the application link' }),
+      ).toBeInTheDocument()
+    })
+
+    it('adds a missing link and switches to the apply view', async () => {
+      const user = userEvent.setup()
+      vi.spyOn(jobService, 'get').mockResolvedValue(detailFixture({ source_url: null }))
+      const save = vi
+        .spyOn(jobService, 'setApplicationLink')
+        .mockResolvedValue(detailFixture({ source_url: 'https://acme.example/apply/9' }))
+      renderPage()
+
+      await user.click(await screen.findByRole('button', { name: 'Add the application link' }))
+      await user.type(screen.getByLabelText('Application link'), 'acme.example/apply/9')
+      await user.click(screen.getByRole('button', { name: 'Save' }))
+
+      await waitFor(() => expect(save).toHaveBeenCalledWith('j1', 'acme.example/apply/9'))
+      // No refetch — the page re-renders from the response.
+      expect(applyLinks()).toHaveLength(2)
+      expect(screen.queryByText('The original pasted posting.')).not.toBeInTheDocument()
+    })
+
+    it('recovers when someone else added a link first', async () => {
+      // The corpus is shared, so this is a real race. A raw "conflict" would
+      // be useless; reloading lands the user where they wanted to be anyway.
+      const user = userEvent.setup()
+      const get = vi
+        .spyOn(jobService, 'get')
+        .mockResolvedValueOnce(detailFixture({ source_url: null }))
+        .mockResolvedValue(detailFixture({ source_url: 'https://someone.example/apply' }))
+      vi.spyOn(jobService, 'setApplicationLink').mockRejectedValue(
+        new ApiError(409, 'CONFLICT', 'This job already has an application link.'),
+      )
+      renderPage()
+
+      await user.click(await screen.findByRole('button', { name: 'Add the application link' }))
+      await user.type(screen.getByLabelText('Application link'), 'https://mine.example/apply')
+      await user.click(screen.getByRole('button', { name: 'Save' }))
+
+      await waitFor(() => expect(get).toHaveBeenCalledTimes(2))
+      expect(applyLinks()[0]).toHaveAttribute('href', 'https://someone.example/apply')
+    })
   })
 })
