@@ -7,7 +7,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from 'react'
-import { useLocation } from 'react-router-dom'
+import { usePopoverDismiss } from '@/components/ui/popoverDismiss'
 import { cn } from '@/utils/cn'
 
 /**
@@ -51,7 +51,16 @@ export function DropdownMenu({
   const panelRef = useRef<HTMLDivElement>(null)
   const panelId = useId()
   const triggerId = useId()
-  const location = useLocation()
+
+  // One ref on the wrapper covers the trigger and the panel together. The
+  // trigger must be inside it: otherwise the document handler closes the menu
+  // in the same gesture that the trigger's onClick opens it, and the menu
+  // appears completely broken.
+  const rootRef = usePopoverDismiss<HTMLDivElement>({
+    open,
+    onOutsidePointer: () => setOpen(false),
+    onRouteChange: () => setOpen(false),
+  })
 
   const items = useCallback(
     () => Array.from(panelRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []),
@@ -84,28 +93,6 @@ export function DropdownMenu({
     focusItem(pendingFocus)
     setPendingFocus(null)
   }, [open, pendingFocus, focusItem])
-
-  // Close on navigation, so the menu is not left hanging over the page the user
-  // just asked for.
-  useEffect(() => setOpen(false), [location.pathname])
-
-  useEffect(() => {
-    if (!open) return
-
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target as Node
-      // The trigger is excluded deliberately. Without this the document
-      // handler closes the menu in the same gesture that the trigger's onClick
-      // opens it, and the menu appears completely broken.
-      if (panelRef.current?.contains(target) || triggerRef.current?.contains(target)) return
-      setOpen(false)
-    }
-
-    // pointerdown, not click: click fires after mouseup and races with the
-    // re-render, and pointerdown covers touch as well.
-    document.addEventListener('pointerdown', onPointerDown)
-    return () => document.removeEventListener('pointerdown', onPointerDown)
-  }, [open])
 
   function onTriggerKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') {
@@ -157,7 +144,7 @@ export function DropdownMenu({
   }
 
   return (
-    <div className="relative">
+    <div ref={rootRef} className="relative">
       <button
         ref={triggerRef}
         id={triggerId}

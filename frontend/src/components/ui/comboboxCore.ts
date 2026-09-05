@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
-import { useLocation } from 'react-router-dom'
+import { usePopoverDismiss } from '@/components/ui/popoverDismiss'
 import { normalizeText } from '@/utils/normalizeText'
 
 /**
@@ -158,10 +158,8 @@ export function useComboboxNav({
 }: UseComboboxNavArgs) {
   const [open, setOpen] = useState(false)
   const [highlighted, setHighlighted] = useState(-1)
-  const rootRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const listboxId = useId()
-  const location = useLocation()
 
   const optionId = useCallback((index: number) => `${listboxId}-opt-${index}`, [listboxId])
 
@@ -176,6 +174,17 @@ export function useComboboxNav({
     onDismiss()
   }, [onDismiss])
 
+  // The input is both the trigger and inside rootRef, so the one containment
+  // check inside the hook covers the trigger and the panel together.
+  const rootRef = usePopoverDismiss<HTMLDivElement>({
+    open,
+    // Full dismiss: an outside pointer also resets the typed query, otherwise
+    // the box is left showing text that matches nothing selected.
+    onOutsidePointer: dismiss,
+    // Close only. The query does not need resetting — the page is going away.
+    onRouteChange: () => setOpen(false),
+  })
+
   useEffect(() => {
     if (!open || highlighted < 0) return
     // getElementById, not querySelector: React 19's useId produces ids like
@@ -187,28 +196,6 @@ export function useComboboxNav({
     // keyboard test throw. It costs nothing in a browser.
     element?.scrollIntoView?.({ block: 'nearest' })
   }, [open, highlighted, optionId])
-
-  // Close on navigation, so the list is not left hanging over the new page.
-  useEffect(() => setOpen(false), [location.pathname])
-
-  useEffect(() => {
-    if (!open) return
-
-    const onPointerDown = (event: PointerEvent) => {
-      // The input is both the trigger and inside rootRef, so one containment
-      // check covers the trigger and the panel. Without it the document handler
-      // closes the list in the same gesture that opens it, and the picker looks
-      // completely broken. pointerdown rather than click: click fires after
-      // mouseup and races the re-render, and pointerdown covers touch.
-      if (rootRef.current?.contains(event.target as Node)) return
-      setOpen(false)
-      setHighlighted(-1)
-      onDismiss()
-    }
-
-    document.addEventListener('pointerdown', onPointerDown)
-    return () => document.removeEventListener('pointerdown', onPointerDown)
-  }, [open, onDismiss])
 
   function move(delta: number) {
     if (count === 0) return
