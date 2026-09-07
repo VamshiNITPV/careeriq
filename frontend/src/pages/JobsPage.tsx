@@ -14,6 +14,7 @@ import { EXPERIENCE_YEAR_OPTIONS, POSTED_WITHIN_OPTIONS, type JobSummary } from 
 import { EMPLOYMENT_TYPES, WORK_MODES } from '@/types/profile'
 import { cn } from '@/utils/cn'
 import {
+  clearJobListFilters,
   countActiveJobFilters,
   PAGE_SIZE,
   readJobListParams,
@@ -129,6 +130,18 @@ export function JobsPage() {
       setSearchParams((previous) => setJobListFilter(previous, key, value), { replace: true }),
     [setSearchParams],
   )
+
+  const clearFilters = useCallback(() => {
+    // Emptying the box is not redundant, though it looks it: usually the
+    // render-phase sync above does it, because `q` changes and the box follows.
+    //
+    // It does not when the typed term has not settled yet. Type "python" with
+    // another filter already on, then clear within the debounce window: `q` is
+    // still '' so it does not change, the sync never fires, and 300ms later the
+    // debounce writes `?q=python` into the URL that was just cleared.
+    setSearchText('')
+    setSearchParams(clearJobListFilters, { replace: true })
+  }, [setSearchParams])
 
   // Pushed, unlike the filters: a page is a real position in a list, it is one
   // deliberate click, and it cannot flood history the way keystrokes can.
@@ -339,6 +352,23 @@ export function JobsPage() {
             />
           </div>
         </div>
+
+        {/*
+          Outside the collapsing panel, so clearing is one tap whether the panel
+          is open or shut — which is the whole point of it on a narrow screen,
+          where the filters being cleared are not even visible.
+
+          Rendered only when there is something to clear, rather than sitting
+          there disabled: a permanently greyed-out button is noise on a page
+          that is mostly controls already.
+        */}
+        {hasFilters && (
+          <div className="mt-4 flex justify-end">
+            <Button variant="ghost" size="sm" onClick={clearFilters}>
+              Clear all filters
+            </Button>
+          </div>
+        )}
       </div>
 
       {error !== null && (

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  clearJobListFilters,
   countActiveJobFilters,
+  JOB_FILTER_KEYS,
   PAGE_SIZE,
   readJobListParams,
   setJobListFilter,
@@ -150,6 +152,37 @@ describe('setJobListFilter', () => {
     // change the current location's params underneath the render.
     const previous = new URLSearchParams('q=python')
     setJobListFilter(previous, 'q', 'java')
+
+    expect(previous.get('q')).toBe('python')
+  })
+})
+
+describe('clearJobListFilters', () => {
+  it('drops every filter and the page', () => {
+    const next = clearJobListFilters(
+      new URLSearchParams(
+        'q=python&work_mode=REMOTE&employment_type=FULL_TIME' +
+          '&years_experience=5&posted_within_days=7&offset=40',
+      ),
+    )
+
+    // toString rather than five has() calls: this is the one place that must
+    // leave nothing behind, and an assertion listing the keys would pass while
+    // missing a sixth one added later.
+    expect(next.toString()).toBe('')
+  })
+
+  it('clears whatever JOB_FILTER_KEYS says a filter is', () => {
+    // The reason the keys are an array with the type derived from it. Add a
+    // sixth filter and it is cleared without anyone remembering to.
+    const all = new URLSearchParams(JOB_FILTER_KEYS.map((key) => [key, 'x']))
+
+    expect(clearJobListFilters(all).toString()).toBe('')
+  })
+
+  it('leaves the params it was given alone', () => {
+    const previous = new URLSearchParams('q=python')
+    clearJobListFilters(previous)
 
     expect(previous.get('q')).toBe('python')
   })

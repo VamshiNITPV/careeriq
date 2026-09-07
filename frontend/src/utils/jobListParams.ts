@@ -33,13 +33,22 @@ export const PAGE_SIZE = 20
  */
 const MAX_OFFSET = 10_000
 
-/** The five filters, named as the API names them. */
-export type JobFilterKey =
-  | 'q'
-  | 'work_mode'
-  | 'employment_type'
-  | 'years_experience'
-  | 'posted_within_days'
+/**
+ * The five filters, named as the API names them.
+ *
+ * An array with the type derived from it, rather than the other way round, so
+ * "clear every filter" can iterate the list instead of restating it — a sixth
+ * filter added here is then cleared without anyone remembering to.
+ */
+export const JOB_FILTER_KEYS = [
+  'q',
+  'work_mode',
+  'employment_type',
+  'years_experience',
+  'posted_within_days',
+] as const
+
+export type JobFilterKey = (typeof JOB_FILTER_KEYS)[number]
 
 export interface JobListParams {
   q: string
@@ -142,6 +151,28 @@ export function setJobListFilter(
   // with `?work_mode=&years_experience=` as filters are cleared.
   if (value === '') next.delete(key)
   else next.set(key, value)
+  next.delete('offset')
+  return next
+}
+
+/**
+ * Drop every filter, and the page with them.
+ *
+ * One write, not five calls to `setJobListFilter` — that would be five
+ * navigations, five history entries and five refetches for one tap.
+ *
+ * The page goes for the same reason it goes on any single filter change:
+ * clearing filters while on page three would otherwise show an empty page three
+ * of a list that now has one page.
+ *
+ * **The caller must reset the search box in the same handler.** The input is
+ * controlled by local state that the URL does not own, and its debounce writes
+ * whatever it still holds — so clearing the URL alone gets `?q=python` written
+ * straight back 300ms later.
+ */
+export function clearJobListFilters(previous: URLSearchParams): URLSearchParams {
+  const next = new URLSearchParams(previous)
+  for (const key of JOB_FILTER_KEYS) next.delete(key)
   next.delete('offset')
   return next
 }

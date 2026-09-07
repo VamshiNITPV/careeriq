@@ -498,6 +498,91 @@ describe('JobsPage', () => {
     })
   })
 
+  describe('clearing every filter at once', () => {
+    const clearAll = () => screen.getByRole('button', { name: 'Clear all filters' })
+
+    it('is offered only when there is something to clear', async () => {
+      mockList([jobFixture()])
+      renderPage()
+      await screen.findByRole('listitem')
+
+      // Not a permanently greyed-out button: this page is mostly controls
+      // already, and a disabled one is noise.
+      expect(screen.queryByRole('button', { name: 'Clear all filters' })).not.toBeInTheDocument()
+    })
+
+    it('clears everything and returns to page one in one tap', async () => {
+      const user = userEvent.setup()
+      const list = mockList([jobFixture()], 50)
+      renderPage(
+        '/jobs?q=python&work_mode=REMOTE&employment_type=FULL_TIME' +
+          '&years_experience=5&posted_within_days=7&offset=20',
+      )
+      await screen.findByRole('listitem')
+
+      await user.click(clearAll())
+
+      await waitFor(() => expect(currentUrl()).toBe('/jobs'))
+      expect(list).toHaveBeenLastCalledWith({ limit: 20, offset: 0 })
+    })
+
+    it('empties the search box too', async () => {
+      const user = userEvent.setup()
+      mockList([jobFixture()])
+      renderPage('/jobs?q=python')
+      await screen.findByRole('listitem')
+      expect(screen.getByLabelText('Search')).toHaveValue('python')
+
+      await user.click(clearAll())
+
+      expect(screen.getByLabelText('Search')).toHaveValue('')
+      await waitFor(() => expect(currentUrl()).toBe('/jobs'))
+    })
+
+    it('does not let a half-typed search write itself back afterwards', async () => {
+      /*
+       * The trap this feature would otherwise ship with, and the reason
+       * clearFilters empties the box itself rather than leaving it to the
+       * render-phase sync.
+       *
+       * That sync only fires when `q` changes. Here it never does: the typed
+       * term has not settled, so `q` is already '' before the clear and stays
+       * ''. Without the explicit reset the box keeps "x", and 300ms later the
+       * debounce writes it into the URL that was just cleared.
+       *
+       * One character, and a filter already set so the button is on screen —
+       * both so the click lands inside the debounce window.
+       */
+      const user = userEvent.setup()
+      mockList([jobFixture()])
+      renderPage('/jobs?work_mode=REMOTE')
+      await screen.findByRole('listitem')
+
+      await user.type(screen.getByLabelText('Search'), 'x')
+      await user.click(clearAll())
+
+      expect(currentUrl()).toBe('/jobs')
+      // Past the debounce window, and still clear.
+      await new Promise((resolve) => setTimeout(resolve, 500))
+      expect(currentUrl()).toBe('/jobs')
+    })
+
+    it('can be reached without opening the filters panel', async () => {
+      // The point of it on a narrow screen: the filters being cleared are not
+      // even on screen, so the control must not be inside the thing that hides
+      // them.
+      mockList([jobFixture()])
+      renderPage('/jobs?work_mode=REMOTE')
+      await screen.findByRole('listitem')
+
+      const trigger = screen.getByRole('button', { name: /^Filters/ })
+      const panel = document.getElementById(trigger.getAttribute('aria-controls') ?? '')!
+
+      expect(trigger).toHaveAttribute('aria-expanded', 'false')
+      expect(panel).not.toContainElement(clearAll())
+    })
+  })
+
   describe('years of experience', () => {
     /**
      * These prove what is *requested*. The filtering itself is server-side and
