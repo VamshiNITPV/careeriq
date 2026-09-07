@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import func, select, update
@@ -86,6 +86,7 @@ class JobRepository(BaseRepository[Job]):
         experience_level: str | None = None,
         years_experience: Decimal | None = None,
         country_code: str | None = None,
+        posted_within_days: int | None = None,
         company_id: uuid.UUID | None = None,
         limit: int = 20,
         offset: int = 0,
@@ -142,6 +143,20 @@ class JobRepository(BaseRepository[Job]):
             )
         if country_code:
             conditions.append(Job.country_code == country_code)
+        if posted_within_days is not None:
+            # Undated postings are kept, the same reading `years_experience`
+            # gives a missing bound: nothing here says the posting is old, only
+            # that the provider did not say when it was published.
+            #
+            # This is load-bearing, not a nicety. Measured on 2026-09-07: 97 of
+            # 183 active postings carry no date at all, and 90 of those came
+            # from the provider rather than from hand entry — so excluding them
+            # would hide over half the corpus, most of it fetched and possibly
+            # recent, to make the filter read more strictly than the data
+            # supports. The cards say "date not given" so the gap is visible
+            # rather than silently folded into "recent".
+            cutoff = now - timedelta(days=posted_within_days)
+            conditions.append((Job.posted_at.is_(None)) | (Job.posted_at >= cutoff))
         if company_id is not None:
             conditions.append(Job.company_id == company_id)
 

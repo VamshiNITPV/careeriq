@@ -111,6 +111,31 @@ describe('JobsPage', () => {
     )
   })
 
+  describe('posted within', () => {
+    it('sends the chosen window as a number of days', async () => {
+      const user = userEvent.setup()
+      const list = mockList([jobFixture()])
+      renderPage()
+      await screen.findByRole('listitem')
+
+      await user.selectOptions(screen.getByLabelText('Posted within'), '7')
+
+      await waitFor(() =>
+        expect(list).toHaveBeenCalledWith(expect.objectContaining({ posted_within_days: 7 })),
+      )
+    })
+
+    it('sends nothing at all when the window is "Any time"', async () => {
+      // An always-present default window would quietly hide the older half of
+      // the corpus from anyone who never touched this control.
+      const list = mockList([jobFixture()])
+      renderPage()
+      await screen.findByRole('listitem')
+
+      expect(list.mock.calls[0]?.[0]).not.toHaveProperty('posted_within_days')
+    })
+  })
+
   describe('years of experience', () => {
     /**
      * These prove what is *requested*. The filtering itself is server-side and

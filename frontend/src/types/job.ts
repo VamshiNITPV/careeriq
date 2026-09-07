@@ -109,6 +109,12 @@ export interface JobFilters {
   /** Show jobs whose stated range covers this many years. */
   years_experience?: number
   country_code?: string
+  /**
+   * Show postings published within this many days. Undated postings are
+   * included — over half the corpus has no stated date, and a missing date says
+   * nothing about age.
+   */
+  posted_within_days?: number
   limit?: number
   offset?: number
 }
@@ -133,6 +139,21 @@ export const EXPERIENCE_YEAR_OPTIONS = Array.from({ length: 11 }, (_, years) => 
   value: String(years),
   label: years === 1 ? '1+ year' : `${years}+ years`,
 }))
+
+/**
+ * Preset windows for the "Posted within" filter. `value` is the day count sent
+ * as `posted_within_days`.
+ *
+ * Deliberately coarse. The provider reports whole days and often no date at
+ * all, so offering "last 24 hours" would imply a resolution the data has not
+ * got. Thirty days is the widest because a posting older than that is rarely
+ * still open, and the default — no window — already shows everything.
+ */
+export const POSTED_WITHIN_OPTIONS = [
+  { value: '7', label: 'Last 7 days' },
+  { value: '14', label: 'Last 14 days' },
+  { value: '30', label: 'Last 30 days' },
+]
 
 const EDUCATION_LABELS: Record<EducationLevel, string> = {
   NONE: 'No formal requirement',

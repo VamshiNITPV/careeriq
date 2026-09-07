@@ -31,6 +31,30 @@ function jobFixture(overrides: Partial<JobSummary> = {}): JobSummary {
   }
 }
 
+describe('JobCard posting age', () => {
+  function renderCard(job: Partial<JobSummary>) {
+    render(
+      <MemoryRouter>
+        <JobCard job={jobFixture(job)} />
+      </MemoryRouter>,
+    )
+  }
+
+  it('states that no date was given rather than showing nothing', () => {
+    // 97 of 183 active postings carry no date. Silence there reads as recent.
+    renderCard({ posted_at: null })
+
+    expect(screen.getByText('Posting date not given')).toBeInTheDocument()
+  })
+
+  it('shows how old a dated posting is', () => {
+    const threeDaysAgo = new Date(Date.now() - 3 * 86_400_000).toISOString()
+    renderCard({ posted_at: threeDaysAgo })
+
+    expect(screen.getByText('Posted 3 days ago')).toBeInTheDocument()
+  })
+})
+
 function saved(status: 'SAVED' | 'APPLIED' = 'SAVED'): ApplicationRead {
   return {
     id: 'a1',

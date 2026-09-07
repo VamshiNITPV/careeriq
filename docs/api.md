@@ -218,7 +218,7 @@ code `UNEXTRACTABLE_DOCUMENT` (requirements.md §6).
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/jobs` | Browse/search. Filters: `q`, `work_mode`, `employment_type`, `experience_level`, `years_experience`, `country_code`, `min_salary`, `posted_after`, `skill_ids` |
+| `GET` | `/jobs` | Browse/search. Filters: `q`, `work_mode`, `employment_type`, `experience_level`, `years_experience`, `country_code`, `posted_within_days`, `min_salary`, `skill_ids` |
 | `POST` | `/jobs` | Submit a job by pasting a description → `202` (parsing is async) |
 | `GET` | `/jobs/{id}` | Detail with parsed structure and extracted skills |
 | `PATCH` | `/jobs/{id}/application-link` | Attach an application link to a job that has none |
@@ -294,8 +294,17 @@ code `UNEXTRACTABLE_DOCUMENT` (requirements.md §6).
 > 4.1); `experience_level` remains supported but the browse UI no longer sends
 > it.
 >
+> **`posted_after` shipped as `posted_within_days`** — a window in days rather
+> than an absolute timestamp, because that is what the control offers and what
+> the provider's own data supports. **A posting with no stated date is included
+> by the filter, never hidden by it.** Measured on 2026-09-07: 97 of 183 active
+> postings carry no date, and 90 of those came from the provider rather than
+> from hand entry. Excluding them would hide over half the corpus — most of it
+> freshly fetched — to make the filter read more strictly than the data allows.
+> The same reading `years_experience` gives a missing bound.
+>
 > `GET /jobs` paginates by **`limit`/`offset`**, not a cursor, and does not yet
-> implement the `min_salary`, `posted_after` or `skill_ids` filters. The list is
+> implement the `min_salary` or `skill_ids` filters. The list is
 > ordered by a non-unique timestamp, so a stable cursor would have to encode a
 > composite key — worth doing for `/recommendations` in Phase 6, where the
 > ordering is expensive to recompute per page, and not before.

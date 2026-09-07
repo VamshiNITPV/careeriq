@@ -3,6 +3,7 @@ import { JobSaveControls, UnsaveConfirmation } from '@/components/JobSaveControl
 import { useJobApplication } from '@/hooks/useJobApplication'
 import type { ApplicationRead } from '@/types/application'
 import { formatExperience, formatSalary, humanise, type JobSummary } from '@/types/job'
+import { formatPostedAge } from '@/utils/datetime'
 
 /**
  * One row in the browse list.
@@ -88,6 +89,14 @@ export function JobCard({
           </span>
         )}
       </div>
+
+      {/*
+        Stated plainly rather than dressed as a tag, and shown even when the
+        posting carries no date. Over half of them do not, and a card that
+        simply says nothing there reads as "posted recently" — a claim the
+        employer never made.
+      */}
+      <p className="mt-2 text-xs text-slate-500">{formatPostedAge(job.posted_at)}</p>
     </li>
   )
 }

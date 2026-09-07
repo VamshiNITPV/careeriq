@@ -10,7 +10,7 @@ import { Select } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
 import { ApiError } from '@/services/apiClient'
 import { jobService } from '@/services/jobService'
-import { EXPERIENCE_YEAR_OPTIONS, type JobSummary } from '@/types/job'
+import { EXPERIENCE_YEAR_OPTIONS, POSTED_WITHIN_OPTIONS, type JobSummary } from '@/types/job'
 import {
   EMPLOYMENT_TYPES,
   WORK_MODES,
@@ -46,6 +46,8 @@ export function JobsPage() {
   // converted early, because Number('0') is falsy and any check written on the
   // converted value would silently drop the "0+ years" filter.
   const [yearsValue, setYearsValue] = useState('')
+  // '' is "Any time"; otherwise a day count as a string.
+  const [postedWithin, setPostedWithin] = useState('')
 
   const requestId = useRef(0)
 
@@ -57,7 +59,7 @@ export function JobsPage() {
   // Any filter change puts the user back on page one. Without this, narrowing
   // a search while on page three shows an empty list that looks like no
   // results. Keyed on `query`, the debounced value, not the raw search text.
-  useEffect(() => setOffset(0), [query, workMode, employmentType, yearsValue])
+  useEffect(() => setOffset(0), [query, workMode, employmentType, yearsValue, postedWithin])
 
   const load = useCallback(() => {
     const id = ++requestId.current
@@ -72,6 +74,7 @@ export function JobsPage() {
         // Compared against '' rather than tested for truthiness: "0+ years" is
         // a real filter, and Number('0') is falsy.
         ...(yearsValue !== '' ? { years_experience: Number(yearsValue) } : {}),
+        ...(postedWithin !== '' ? { posted_within_days: Number(postedWithin) } : {}),
         limit: PAGE_SIZE,
         offset,
       })
@@ -91,13 +94,18 @@ export function JobsPage() {
           setLoadState('error')
         },
       )
-  }, [query, workMode, employmentType, yearsValue, offset])
+  }, [query, workMode, employmentType, yearsValue, postedWithin, offset])
 
   useEffect(load, [load])
 
   // Same reason as the request itself. Miss it here and "0+ years" renders
   // "No jobs yet." with an Add-a-job button while a filter is active.
-  const hasFilters = query !== '' || workMode !== '' || employmentType !== '' || yearsValue !== ''
+  const hasFilters =
+    query !== '' ||
+    workMode !== '' ||
+    employmentType !== '' ||
+    yearsValue !== '' ||
+    postedWithin !== ''
 
   const showing = jobs.length > 0 ? `${offset + 1}–${offset + jobs.length} of ${total}` : null
 
@@ -116,7 +124,7 @@ export function JobsPage() {
       </div>
 
       <div className="rounded-lg bg-white p-4 shadow-sm ring-1 ring-slate-200">
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
           <Input
             label="Search"
             type="search"
@@ -153,6 +161,19 @@ export function JobsPage() {
             onChange={setYearsValue}
             placeholder="Any"
             hint="Shows jobs whose stated range covers you. Postings that don't say are still shown."
+          />
+          {/*
+            A native Select, unlike the years Combobox beside it: four options
+            is too few to be worth typing through, and the Combobox's filtering
+            earns nothing here.
+          */}
+          <Select
+            label="Posted within"
+            placeholder="Any time"
+            options={POSTED_WITHIN_OPTIONS}
+            value={postedWithin}
+            onChange={(e) => setPostedWithin(e.target.value)}
+            hint="Postings with no stated date are still shown."
           />
         </div>
       </div>

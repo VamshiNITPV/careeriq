@@ -40,3 +40,38 @@ export function formatDateTime(iso: string): string {
     minute: '2-digit',
   })
 }
+
+/**
+ * How long ago a posting went up — "Posted 3 days ago", or that nobody said.
+ *
+ * **Why an explicit "not given" rather than nothing.** Measured on the corpus
+ * on 2026-09-07: 97 of 183 active postings carry no date, and 90 of those came
+ * from the provider rather than from hand entry. Rendering silence for over
+ * half the list would read as "recently posted" by default, which is a claim
+ * nobody made (ADR-012). The gap is stated instead.
+ *
+ * Days, not hours: the corpus is refreshed on a daily schedule and the provider
+ * reports whole days, so "4 hours ago" would be precision the data has not got.
+ *
+ * A future date renders as "today". Clock skew between the provider, the server
+ * and the viewer's machine is real, and "Posted in 2 days" reads as a bug.
+ */
+export function formatPostedAge(iso: string | null, now: Date = new Date()): string {
+  if (iso === null) return 'Posting date not given'
+
+  const posted = new Date(iso)
+  if (Number.isNaN(posted.getTime())) return 'Posting date not given'
+
+  // Whole days between calendar dates, not between instants: a job posted at
+  // 11pm yesterday is "yesterday" at 1am, not "1 day ago" for one hour and
+  // "2 days ago" after. Both sides are floored to local midnight first.
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  const days = Math.floor((startOfDay(now) - startOfDay(posted)) / 86_400_000)
+
+  if (days <= 0) return 'Posted today'
+  if (days === 1) return 'Posted yesterday'
+  if (days < 30) return `Posted ${days} days ago`
+
+  const months = Math.floor(days / 30)
+  return months === 1 ? 'Posted about a month ago' : `Posted about ${months} months ago`
+}

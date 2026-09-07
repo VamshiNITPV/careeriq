@@ -170,6 +170,18 @@ async def list_jobs(
         ),
     ] = None,
     country_code: Annotated[str | None, Query(min_length=2, max_length=2)] = None,
+    posted_within_days: Annotated[
+        int | None,
+        Query(
+            ge=1,
+            le=365,
+            description=(
+                "Show postings published within this many days. Postings with no stated "
+                "date are included — the provider often omits one, and a missing date "
+                "says nothing about age."
+            ),
+        ),
+    ] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> JobListResponse:
@@ -189,6 +201,7 @@ async def list_jobs(
         experience_level=experience_level.value if experience_level else None,
         years_experience=years_experience,
         country_code=country_code.upper() if country_code else None,
+        posted_within_days=posted_within_days,
         limit=limit,
         offset=offset,
     )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from httpx import AsyncClient
@@ -540,6 +541,62 @@ class TestBrowse:
             "Bounded Engineer",
             "Unstated Engineer",
         }
+
+    async def test_filters_by_how_recently_a_job_was_posted(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+    ) -> None:
+        """A window on the posting date — and an undated posting is never hidden by it.
+
+        Measured on the live corpus (2026-09-07): 97 of 183 active postings
+        carry no date, and 90 of those came from the provider rather than from
+        hand entry. Excluding them would hide more than half the corpus,
+        including fetched postings that may well be recent, to make the filter
+        look stricter than the data can support.
+        """
+        ages = {"Fresh Engineer": 2, "Stale Engineer": 45, "Undated Engineer": None}
+        for title in ages:
+            response = await client.post(
+                f"{API}/jobs",
+                headers=auth_headers,
+                json=submission(posting(title=title), title=title),
+            )
+            assert response.status_code == 201, response.text
+
+        # Submitted jobs are stored undated, so the dates are set here rather
+        # than through the API — there is no endpoint that backdates a posting.
+        now = datetime.now(UTC)
+        for title, days in ages.items():
+            job = await db_session.scalar(select(Job).where(Job.title == title))
+            assert job is not None
+            job.posted_at = None if days is None else now - timedelta(days=days)
+        await db_session.commit()
+
+        async def titles(query: str) -> set[str]:
+            body = (await client.get(f"{API}/jobs?{query}", headers=auth_headers)).json()
+            return {item["title"] for item in body["items"]}
+
+        assert await titles("posted_within_days=7") == {"Fresh Engineer", "Undated Engineer"}
+        assert await titles("posted_within_days=60") == {
+            "Fresh Engineer",
+            "Stale Engineer",
+            "Undated Engineer",
+        }
+        # No window means no filtering, not a default window.
+        assert await titles("") == {"Fresh Engineer", "Stale Engineer", "Undated Engineer"}
+
+    async def test_rejects_an_impossible_posted_within_value(
+        self, client: AsyncClient, auth_headers: dict[str, str]
+    ) -> None:
+        assert (
+            await client.get(f"{API}/jobs?posted_within_days=0", headers=auth_headers)
+        ).status_code == 422
+        assert (
+            await client.get(f"{API}/jobs?posted_within_days=900", headers=auth_headers)
+        ).status_code == 422
 
     async def test_rejects_an_impossible_years_value(
         self, client: AsyncClient, auth_headers: dict[str, str]
