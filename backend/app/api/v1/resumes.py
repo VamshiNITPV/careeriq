@@ -161,9 +161,7 @@ async def list_resumes(user: CurrentUser, service: ResumeServiceDep) -> list[Res
     counts = await service.skill_counts(user_id=user.id)
     latest = await service.latest_versions(resume_ids=[r.id for r in resumes])
 
-    return [
-        _to_read(r, skill_count=counts.get(r.id, 0), latest=latest.get(r.id)) for r in resumes
-    ]
+    return [_to_read(r, skill_count=counts.get(r.id, 0), latest=latest.get(r.id)) for r in resumes]
 
 
 @router.get(

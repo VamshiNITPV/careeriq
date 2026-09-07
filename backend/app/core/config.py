@@ -81,6 +81,24 @@ class Settings(BaseSettings):
     # counts against a quota measured in a few hundred per month, so giving up
     # early spends the scarce resource and returns nothing for it.
     jobs_api_timeout_seconds: int = Field(default=45, ge=5, le=120)
+    #: Which country the scheduled fetch searches.
+    jobs_fetch_country: str = "in"
+
+    # ---- automatic fetching
+    # Off by default. With it on, the backend keeps the corpus growing by itself;
+    # with it off nothing fetches unless an admin asks.
+    jobs_auto_fetch_enabled: bool = False
+    # A few hundred requests a month divided by thirty days. Six is the most that
+    # can be spent daily without running dry before the quota resets.
+    jobs_auto_fetch_per_day: int = Field(default=6, ge=1, le=50)
+    # Once every query in the rotation has been tried, repeats yield very little
+    # (see services/job/rotation.py), so it drops to a trickle rather than
+    # spending a full day's budget re-asking questions.
+    jobs_auto_fetch_exhausted_per_day: int = Field(default=1, ge=0, le=10)
+    # A poll, not a clock. The machine is not always on, so a fixed time would
+    # simply be missed; checking the budget hourly spends the day's allowance
+    # whenever the app happens to be running.
+    jobs_auto_fetch_interval_minutes: int = Field(default=60, ge=5, le=1440)
 
     # ---------------------------------------------------------------- email
     # console  -> render to the log, send nothing (default; no setup required)

@@ -98,9 +98,7 @@ def find_title(text: str) -> str | None:
 _COMPANY_LABELS = ("company", "employer", "organisation", "organization", "hiring\\s*company")
 # "at Acme", "with Acme" — but only in the opening line, where it is part of the
 # title. Deeper in the text it is far more likely to be prose.
-_COMPANY_INLINE = re.compile(
-    r"\b(?:at|with|for)\s+([A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})\s*$"
-)
+_COMPANY_INLINE = re.compile(r"\b(?:at|with|for)\s+([A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})\s*$")
 
 # "Acme Technologies Pvt Ltd builds payments infrastructure..." — the opening
 # sentence of an About section. A proper-noun run followed by one of a closed
@@ -446,6 +444,7 @@ def _magnitude_of(raw: str) -> int | None:
         if pattern.match(match.group(1)):
             return value
     return None
+
 
 # Below this, a "salary" is a typo, a headcount or a year. Above it, it is a
 # revenue figure from the company blurb.

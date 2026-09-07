@@ -205,9 +205,16 @@ Each story carries acceptance criteria (AC) that become test cases.
 
 ### Epic 7 — Applications & Analytics
 
+**US-7.0** As a user, I want to save a job and record that I have applied to it, so that I can find it again and know what I have already acted on.
+- AC1: A job can be saved and unsaved from the browse list and from the job page, and the control shows its current state.
+- AC2: A job is marked applied **by the user only** — the system never infers it (see section 3, out of scope).
+- AC3: Removing a job that is marked applied asks for confirmation and names when it was applied.
+- AC4: Saved jobs and applied jobs are listed on the profile page.
+- AC5: Repeating a save, or an applied mark, has no additional effect.
+
 **US-7.1** As a user, I want to track applications through a lifecycle, so that nothing falls through.
 - AC1: Statuses: `saved → applied → assessment → interview → offer`, with `rejected` and `withdrawn` reachable from any active state.
-- AC2: Every transition writes an immutable `application_event` with a timestamp.
+- AC2: Every transition writes an immutable `application_event` with a timestamp. *(Phase 8 — US-7.0 ships the two-state slice without the event log.)*
 
 **US-7.2** As a user, I want funnel analytics, so that I can see what's working.
 - AC1: Reports application count, interview rate, and offer rate.

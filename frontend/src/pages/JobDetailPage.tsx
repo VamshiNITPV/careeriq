@@ -2,9 +2,11 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Link, useLocation, useParams } from 'react-router-dom'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
+import { JobSaveControls, UnsaveConfirmation } from '@/components/JobSaveControls'
 import { buttonClass } from '@/components/ui/buttonStyles'
 import { Input } from '@/components/ui/Input'
 import { Spinner } from '@/components/ui/Spinner'
+import { useJobApplication } from '@/hooks/useJobApplication'
 import { ApiError } from '@/services/apiClient'
 import { jobService } from '@/services/jobService'
 import {
@@ -217,6 +219,31 @@ export function JobDetailPage() {
     )
   }
 
+  return (
+    <JobDetailView job={job} onJobChange={setJob} onReload={load} isDuplicate={isDuplicate} />
+  )
+}
+
+/**
+ * The page once the job is loaded.
+ *
+ * A separate component because `useJobApplication` must not sit behind the
+ * loading and error early-returns above — a hook called only on some renders
+ * breaks the Rules of Hooks the moment the page flips from loading to ready.
+ * Mounting here also means the hook's initial state is the real application
+ * rather than the null that was there while the request was in flight.
+ */
+function JobDetailView({
+  job,
+  onJobChange,
+  onReload,
+  isDuplicate,
+}: {
+  job: JobDetail
+  onJobChange: (job: JobDetail) => void
+  onReload: () => void
+  isDuplicate: boolean
+}) {
   const required = job.skills.filter((s) => s.requirement === 'REQUIRED')
   const preferred = job.skills.filter((s) => s.requirement === 'PREFERRED')
 
@@ -229,6 +256,13 @@ export function JobDetailPage() {
   // null, so the add-a-link form could never fix it, and without this the page
   // would say "no link" forever with no way out.
   const applyLink = externalLink(job.source_url, { assumeHttps: true })
+
+  // Called once, and both JobSaveControls below read it. Two stateful copies
+  // would each hold their own pending flag, and the header and the footer would
+  // disagree the moment a request was in flight.
+  const application = useJobApplication(job.id, job.application, (next) =>
+    onJobChange({ ...job, application: next }),
+  )
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -282,11 +316,26 @@ export function JobDetailPage() {
                 and for an imported posting this may be an aggregator rather
                 than the employer. */}
             <span className="text-sm text-slate-500">Opens {applyLink.label}</span>
+            <JobSaveControls state={application} jobTitle={job.title} />
           </div>
         ) : (
-          <p className="mt-6 text-sm text-slate-600">
-            No application link was given for this job.
-          </p>
+          <div className="mt-6 space-y-3">
+            <p className="text-sm text-slate-600">No application link was given for this job.</p>
+            {/* The controls render here too. "I have applied" is the user's own
+                assertion, and a job with no link on file is exactly one they may
+                have applied to through the posting itself. Keeping them only in
+                the branch above is the easy mistake. */}
+            <JobSaveControls state={application} jobTitle={job.title} />
+          </div>
+        )}
+
+        {/* One alert for both copies of the controls. Alert renders role="alert",
+            so it is announced wherever the page is scrolled — and whichever
+            control was touched also visibly reverts. */}
+        {application.error !== null && (
+          <Alert tone="error" className="mt-3">
+            {application.error}
+          </Alert>
         )}
       </header>
 
@@ -357,7 +406,7 @@ export function JobDetailPage() {
               This job has no usable application link, so there is nothing to apply through here.
               The link is often inside the posting itself.
             </p>
-            <ApplicationLinkForm jobId={job.id} onSaved={setJob} onTaken={load} />
+            <ApplicationLinkForm jobId={job.id} onSaved={onJobChange} onTaken={onReload} />
             {/* The posting as pasted, never reformatted. It stays as the
                 fallback precisely because the application link is usually
                 somewhere inside it. */}
@@ -371,6 +420,18 @@ export function JobDetailPage() {
             </details>
           </section>
         )}
+
+        {/* Below the ternary rather than inside either arm: one instance, no
+            branch to forget, and a job with no link still gets the controls at
+            the end where someone lands after reading the posting. */}
+        <div className="border-t border-slate-200 pt-6">
+          <JobSaveControls state={application} jobTitle={job.title} />
+        </div>
+
+        {/* Once for the page, not once per control: both copies above read the
+            same hook, and a dialog inside each would put two <dialog> elements
+            into showModal() for one event. */}
+        <UnsaveConfirmation state={application} />
       </div>
     </div>
   )

@@ -29,9 +29,7 @@ class CareerEntityRepository[ModelT: (WorkExperience, EducationRecord, Project, 
         # Newest first where there is a date to sort on. Undated rows sort last
         # rather than first, so a row the parser could not date does not head
         # someone's work history.
-        order = getattr(self.model, "start_date", None) or getattr(
-            self.model, "issued_date", None
-        )
+        order = getattr(self.model, "start_date", None) or getattr(self.model, "issued_date", None)
         if order is not None:
             stmt = stmt.order_by(order.desc().nullslast(), self.model.created_at.desc())
         return list((await self.session.scalars(stmt)).all())

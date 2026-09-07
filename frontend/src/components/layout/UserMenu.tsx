@@ -45,6 +45,9 @@ export function UserMenu() {
       <Link role="menuitem" tabIndex={-1} to="/resume" className={menuItemClass}>
         Your resume
       </Link>
+      <Link role="menuitem" tabIndex={-1} to="/saved-jobs" className={menuItemClass}>
+        Saved jobs
+      </Link>
 
       <div className="my-1 border-t border-slate-200" role="presentation" />
 

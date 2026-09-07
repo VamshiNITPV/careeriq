@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.exceptions import ConflictError, ResourceNotFoundError, ValidationError
 from app.core.ids import uuid7
 from app.core.logging import get_logger
+from app.models.application import Application
 from app.models.enums import JobSource, ProcessingStatus
 from app.models.job import Company, Job
 from app.repositories.job import CompanyRepository, JobRepository, JobSkillRepository
@@ -306,7 +307,10 @@ class JobService:
         )
         return job
 
-    async def list_jobs(self, **filters: object) -> tuple[list[Job], int]:
+    async def list_jobs(
+        self, **filters: object
+    ) -> tuple[list[tuple[Job, Application | None]], int]:
+        """Browse, each row paired with the caller's application or None."""
         return await self.jobs.list_active(**filters)  # type: ignore[arg-type]
 
     async def import_batch(self, records: list[dict[str, object]]) -> ImportResult:

@@ -18,6 +18,7 @@ from app.models.enums import (
     SkillRequirement,
     WorkMode,
 )
+from app.schemas.application import ApplicationRead
 from app.schemas.urls import normalize_url
 
 # Generous, because a real posting with a long benefits section runs long, and
@@ -108,6 +109,19 @@ class JobSummary(BaseModel):
     posted_at: datetime | None = None
     created_at: datetime
     skill_count: int = 0
+    #: What the *calling* user has done about this job, or null.
+    #:
+    #: A per-caller field on a shared-corpus row, which is worth justifying: both
+    #: job endpoints already require a caller, there is no anonymous path and no
+    #: cache header anywhere in this API, so the response is per-caller by
+    #: construction and this only makes an existing property visible.
+    #:
+    #: A nullable object rather than `is_saved`/`is_applied` booleans. It reads
+    #: as "a separate entity of yours, possibly absent" instead of as a property
+    #: of the job; it carries applied_at, which the remove-confirmation needs and
+    #: booleans have nowhere to put; and it is the same shape PUT returns, so the
+    #: client swaps one field with no translation either way.
+    application: ApplicationRead | None = None
 
 
 class JobDetail(JobSummary):
@@ -243,6 +257,9 @@ class JobFetchRequest(BaseModel):
     # (Redis is configured but unused), so this plus (source, external_id)
     # dedup is the interim — a repeat spends quota but creates no rows.
     max_pages: int = Field(default=1, ge=1, le=5)
+    #: Only postings this recent. Without it a repeated fetch returns the same
+    #: relevance-ranked results and spends quota on rows already in the corpus.
+    posted_within_days: int | None = Field(default=None, ge=1, le=90)
 
 
 class JobFetchResponse(BaseModel):

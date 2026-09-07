@@ -8,11 +8,19 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query, status
 
-from app.api.deps import AdminUser, CurrentUser, JobProviderDep, JobServiceDep
+from app.api.deps import (
+    AdminUser,
+    ApplicationRepositoryDep,
+    CurrentUser,
+    JobFetchRunRepositoryDep,
+    JobProviderDep,
+    JobServiceDep,
+)
 from app.core.exceptions import ServiceUnavailableError, ValidationError
 from app.core.logging import get_logger
 from app.models.enums import EmploymentType, ExperienceLevel, WorkMode
 from app.models.job import Job
+from app.schemas.application import ApplicationRead, ApplicationStatusUpdate
 from app.schemas.common import ErrorResponse
 from app.schemas.job import (
     CompanyRead,
@@ -43,8 +51,15 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 admin_router = APIRouter(prefix="/admin/jobs", tags=["admin"])
 
 
-def _summary(job: Job) -> JobSummary:
+def summary_of(job: Job, *, application: ApplicationRead | None) -> JobSummary:
+    """A list row, plus what this caller has done about it.
+
+    `application` is passed rather than read off the job: it is per-caller, and
+    a relationship on the model would either need a user filter the ORM cannot
+    express on a plain attribute or would load every user's rows.
+    """
     return JobSummary(
+        application=application,
         id=job.id,
         title=job.title,
         company=CompanyRead.model_validate(job.company) if job.company is not None else None,
@@ -65,9 +80,9 @@ def _summary(job: Job) -> JobSummary:
     )
 
 
-def _detail(job: Job) -> JobDetail:
+def _detail(job: Job, *, application: ApplicationRead | None = None) -> JobDetail:
     return JobDetail(
-        **_summary(job).model_dump(),
+        **summary_of(job, application=application).model_dump(),
         source=job.source,
         source_url=job.source_url,
         status=job.status,
@@ -166,7 +181,8 @@ async def list_jobs(
     `/recommendations` needs it in Phase 6, over a ranking whose order is
     genuinely expensive to recompute per page.
     """
-    jobs, total = await service.list_jobs(
+    rows, total = await service.list_jobs(
+        for_user_id=user.id,
         query=q,
         work_mode=work_mode.value if work_mode else None,
         employment_type=employment_type.value if employment_type else None,
@@ -177,7 +193,13 @@ async def list_jobs(
         offset=offset,
     )
     return JobListResponse(
-        items=[_summary(job) for job in jobs], total=total, limit=limit, offset=offset
+        items=[
+            summary_of(job, application=ApplicationRead.model_validate(app) if app else None)
+            for job, app in rows
+        ],
+        total=total,
+        limit=limit,
+        offset=offset,
     )
 
 
@@ -187,14 +209,87 @@ async def list_jobs(
     summary="Job detail with parsed structure and extracted skills",
     responses={404: {"model": ErrorResponse}},
 )
-async def get_job(job_id: uuid.UUID, user: CurrentUser, service: JobServiceDep) -> JobDetail:
+async def get_job(
+    job_id: uuid.UUID,
+    user: CurrentUser,
+    service: JobServiceDep,
+    applications: ApplicationRepositoryDep,
+) -> JobDetail:
     """One posting.
 
     No ownership check, unlike resumes: the job corpus is shared. Anything a
     user submits becomes part of the market data every other user is ranked
     against, which is stated on the submission form.
     """
-    return _detail(await service.get_job(job_id))
+    job = await service.get_job(job_id)
+    application = await applications.get_for_job(user_id=user.id, job_id=job_id)
+    return _detail(
+        job, application=ApplicationRead.model_validate(application) if application else None
+    )
+
+
+@router.put(
+    "/{job_id}/application",
+    response_model=ApplicationRead,
+    summary="Save this job, or mark that you applied to it",
+    responses={404: {"model": ErrorResponse}},
+)
+async def set_application(
+    job_id: uuid.UUID,
+    payload: ApplicationStatusUpdate,
+    user: CurrentUser,
+    service: JobServiceDep,
+    applications: ApplicationRepositoryDep,
+) -> ApplicationRead:
+    """Record what the caller has done about this job (US-7.0).
+
+    PUT rather than POST, and one endpoint rather than four. This is a singleton
+    sub-resource — "the caller's application to this job" — so save, mark
+    applied and unmark applied are all the same write with a different body,
+    and the verb is idempotent by definition. A POST that 409s on the second tap
+    is exactly the double-tap failure a bookmark on a phone must not have.
+
+    Unmarking applied sends SAVED rather than deleting: the job stays saved.
+
+    200 always, never 201. The caller cannot tell a create from an update and
+    does not need to, and varying the status by which one happened would make an
+    idempotent endpoint's *response* non-idempotent — the property that makes
+    retrying safe.
+
+    The job is fetched first so an unknown id is a clean 404 rather than a
+    RESTRICT violation surfacing through the catch-all as an opaque 500.
+    """
+    await service.get_job(job_id)
+    application = await applications.upsert(user_id=user.id, job_id=job_id, status=payload.status)
+    log.info(
+        "application recorded",
+        job_id=str(job_id),
+        user_id=str(user.id),
+        status=application.status.value,
+    )
+    return ApplicationRead.model_validate(application)
+
+
+@router.delete(
+    "/{job_id}/application",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Remove this job from your saved list",
+)
+async def remove_application(
+    job_id: uuid.UUID,
+    user: CurrentUser,
+    applications: ApplicationRepositoryDep,
+) -> None:
+    """Unsave a job. 204 whether or not there was anything to remove.
+
+    Idempotent for the same reason the PUT is: a second tap on unsave must not
+    become a visible error. That also means no 404 here — and no ownership check
+    to write, because the delete is scoped by `(job_id, caller)` in its WHERE
+    clause and is structurally incapable of touching another user's row.
+
+    Soft, so the record that someone once applied survives them unsaving it.
+    """
+    await applications.soft_delete(user_id=user.id, job_id=job_id)
 
 
 @router.patch(
@@ -248,6 +343,7 @@ async def fetch_jobs(
     admin: AdminUser,
     service: JobServiceDep,
     provider: JobProviderDep,
+    fetch_runs: JobFetchRunRepositoryDep,
 ) -> JobFetchResponse:
     """Ingest live postings from a permitted jobs API (US-3.4).
 
@@ -283,6 +379,22 @@ async def fetch_jobs(
         query=payload.query,
         country=payload.country,
         max_pages=payload.max_pages,
+        posted_within_days=payload.posted_within_days,
+    )
+
+    # Recorded in the same ledger the scheduler reads. A manual fetch spends
+    # from the same monthly quota, so leaving it out would let an admin's run
+    # and the day's automatic runs each believe the budget was untouched.
+    await fetch_runs.record(
+        query=payload.query,
+        country=payload.country,
+        requests_spent=max(result.pages_fetched, 1),
+        created=result.created,
+        duplicates=result.duplicates,
+        failed=len(result.failed),
+        quota_remaining=result.quota_remaining,
+        scheduled=False,
+        stop_reason=result.stop_reason,
     )
 
     return JobFetchResponse(

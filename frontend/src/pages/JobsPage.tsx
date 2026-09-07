@@ -194,7 +194,18 @@ export function JobsPage() {
           </p>
           <ul className="space-y-3">
             {jobs.map((job) => (
-              <JobCard key={job.id} job={job} />
+              <JobCard
+                key={job.id}
+                job={job}
+                // Swap the one row rather than reloading the page. A refetch
+                // would reset scroll and re-run the filters to produce the
+                // same list, and would race the requestId guard above.
+                onApplicationChange={(application) =>
+                  setJobs((previous) =>
+                    previous.map((row) => (row.id === job.id ? { ...row, application } : row)),
+                  )
+                }
+              />
             ))}
           </ul>
 

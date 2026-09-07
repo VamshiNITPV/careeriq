@@ -95,6 +95,7 @@ async def fetch_and_import(
     query: str,
     country: str,
     max_pages: int,
+    posted_within_days: int | None = None,
 ) -> FetchResult:
     """Fetch up to `max_pages` pages and ingest what parses.
 
@@ -122,11 +123,15 @@ async def fetch_and_import(
 
     for page_number in range(1, max_pages + 1):
         try:
-            page = await provider.search(query=query, country=country, cursor=cursor)
+            page = await provider.search(
+                query=query,
+                country=country,
+                posted_within_days=posted_within_days,
+                cursor=cursor,
+            )
         except JobProviderQuotaError as exc:
-            stop_reason = (
-                f"Provider quota exhausted after {pages_fetched} page(s)."
-                + (f" Retry after {exc.retry_after}s." if exc.retry_after else "")
+            stop_reason = f"Provider quota exhausted after {pages_fetched} page(s)." + (
+                f" Retry after {exc.retry_after}s." if exc.retry_after else ""
             )
             break
         except JobProviderError as exc:
@@ -196,9 +201,7 @@ async def fetch_and_import(
                     )
             except UnparseableJobError as exc:
                 failures.append(
-                    ImportFailure(
-                        index=index, external_id=posting.external_id, reason=exc.message
-                    )
+                    ImportFailure(index=index, external_id=posting.external_id, reason=exc.message)
                 )
             except Exception as exc:
                 log.exception("fetched posting failed", index=index, provider=provider.name)

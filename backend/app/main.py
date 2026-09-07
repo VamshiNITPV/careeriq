@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -47,7 +48,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     except Exception as exc:
         log.error("skill taxonomy seeding failed", error=str(exc))
 
+    # Keeps the job corpus growing without anyone pressing a button. Returns
+    # None when switched off or unconfigured, which is the default.
+    from app.workers import job_fetch_scheduler
+
+    fetch_task = job_fetch_scheduler.start(settings)
+
     yield
+
+    if fetch_task is not None:
+        # Cancelled rather than left to die with the process: an in-flight fetch
+        # holds a database session, and dropping it mid-transaction leaves the
+        # connection to time out on the server side.
+        fetch_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await fetch_task
 
     # Return pooled connections deliberately instead of letting the process exit
     # drop them, which leaves sockets in the database's connection table until

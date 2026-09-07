@@ -49,6 +49,24 @@ def _fallback_id(value: Any) -> str | None:
     return hashlib.sha256(text.encode()).hexdigest()[:32] if text else None
 
 
+def _date_posted(days: int | None) -> str | None:
+    """Days onto JSearch's four buckets.
+
+    The vendor takes `today|3days|week|month` and nothing between, so a window
+    is rounded **up** to the next bucket. Rounding down would silently ask for
+    less than the caller wanted and quietly miss postings.
+    """
+    if days is None:
+        return None
+    if days <= 1:
+        return "today"
+    if days <= 3:
+        return "3days"
+    if days <= 7:
+        return "week"
+    return "month"
+
+
 def _moment(value: Any) -> datetime | None:
     """An ISO-8601 instant, or nothing.
 
@@ -91,13 +109,21 @@ class JSearchJobProvider:
         return "jsearch"
 
     async def search(
-        self, *, query: str, country: str, cursor: str | None = None
+        self,
+        *,
+        query: str,
+        country: str,
+        posted_within_days: int | None = None,
+        cursor: str | None = None,
     ) -> JobSearchPage:
         # /search-v2, not /search. v5 retired the page-numbered endpoint — the
         # old one now 404s — and paginates with an opaque cursor instead. This
         # is exactly the change JobProvider's opaque-cursor contract exists to
         # absorb: the adapter moved, nothing above it did.
         params = {"query": query, "country": country}
+        window = _date_posted(posted_within_days)
+        if window is not None:
+            params["date_posted"] = window
         if cursor is not None:
             params["cursor"] = cursor
 
@@ -122,9 +148,7 @@ class JSearchJobProvider:
             # a report reading "request failed: " tells an operator nothing at
             # all about whether to retry, change the query, or check the key.
             detail = str(exc) or "no detail"
-            raise JobProviderError(
-                f"{type(exc).__name__}: {detail}", provider=self.name
-            ) from exc
+            raise JobProviderError(f"{type(exc).__name__}: {detail}", provider=self.name) from exc
 
         # 403 as well as 429: RapidAPI uses it for an exhausted plan, which is a
         # quota problem wearing a permissions status code.

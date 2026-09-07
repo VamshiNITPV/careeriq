@@ -193,9 +193,7 @@ def detect_sections(text: str) -> list[JobSection]:
 
     if not marks:
         body = text.strip()
-        return (
-            [JobSection(JobSectionType.UNKNOWN, "", body, 0, len(text))] if body else []
-        )
+        return [JobSection(JobSectionType.UNKNOWN, "", body, 0, len(text))] if body else []
 
     # Preamble before the first heading.
     preamble = text[: marks[0][1]].strip()

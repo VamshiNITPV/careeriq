@@ -586,6 +586,7 @@ export function ProfilePage() {
         atomicity that does not exist.
       */}
       <CareerProfile />
+
     </div>
   )
 }

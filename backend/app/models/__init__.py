@@ -6,6 +6,7 @@ that metadata — so autogenerate silently emits a migration that drops its tabl
 Importing here makes `from app.models import Base` sufficient to see everything.
 """
 
+from app.models.application import Application
 from app.models.base import (
     Base,
     CreatedAtMixin,
@@ -15,6 +16,7 @@ from app.models.base import (
 )
 from app.models.career import Certification, EducationRecord, Project, WorkExperience
 from app.models.enums import (
+    ApplicationStatus,
     AuthProvider,
     EducationLevel,
     EmploymentType,
@@ -30,6 +32,7 @@ from app.models.enums import (
     WorkMode,
 )
 from app.models.job import Company, Job, JobSkill
+from app.models.job_fetch import JobFetchRun
 from app.models.profile import Profile
 from app.models.resume import Resume, ResumeVersion
 from app.models.skill import CandidateSkill, Skill
@@ -37,6 +40,8 @@ from app.models.user import RefreshToken, User
 from app.models.verification import VerificationToken
 
 __all__ = [
+    "Application",
+    "ApplicationStatus",
     "AuthProvider",
     "Base",
     "CandidateSkill",
@@ -48,6 +53,7 @@ __all__ = [
     "EmploymentType",
     "ExperienceLevel",
     "Job",
+    "JobFetchRun",
     "JobSkill",
     "JobSource",
     "JobStatus",

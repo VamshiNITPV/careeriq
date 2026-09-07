@@ -10,6 +10,7 @@ from decimal import Decimal
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+from app.models.application import Application
 from app.models.enums import JobStatus, SkillRequirement
 from app.models.job import Company, Job, JobSkill
 from app.repositories.base import BaseRepository
@@ -78,6 +79,7 @@ class JobRepository(BaseRepository[Job]):
     async def list_active(
         self,
         *,
+        for_user_id: uuid.UUID,
         query: str | None = None,
         work_mode: str | None = None,
         employment_type: str | None = None,
@@ -87,12 +89,18 @@ class JobRepository(BaseRepository[Job]):
         company_id: uuid.UUID | None = None,
         limit: int = 20,
         offset: int = 0,
-    ) -> tuple[list[Job], int]:
-        """Browse live postings, newest first. Returns `(rows, total)`.
+    ) -> tuple[list[tuple[Job, Application | None]], int]:
+        """Browse live postings, newest first, each with the caller's application.
 
         Expiry is read from `expires_at` rather than from a status value, so
         there is one source of truth about whether a posting is still open and
         nothing has to sweep the table to keep a second one accurate.
+
+        `for_user_id` is required rather than optional-with-a-default. An
+        optional one is a parameter a future caller forgets, and forgetting it
+        would render every job as unsaved with nothing failing. There is no
+        anonymous browse today; if one ever arrives, that needs a deliberate
+        nullable path rather than a default nobody noticed.
         """
         now = datetime.now(UTC)
         conditions = [
@@ -142,7 +150,22 @@ class JobRepository(BaseRepository[Job]):
         ) or 0
 
         stmt = (
-            select(Job)
+            select(Job, Application)
+            .outerjoin(
+                Application,
+                # All three predicates belong in the ON clause. Move any of them
+                # into the WHERE and this LEFT JOIN degrades into an inner join:
+                # every job the caller has *not* saved silently disappears from
+                # browse, with nothing failing anywhere.
+                #
+                # It cannot fan rows out, because ux_applications_user_job
+                # guarantees at most one live application per (user, job) — a
+                # join that could duplicate rows would break limit/offset
+                # invisibly.
+                (Application.job_id == Job.id)
+                & (Application.user_id == for_user_id)
+                & (Application.deleted_at.is_(None)),
+            )
             .where(*conditions)
             # Newest first, with created_at as the tiebreak so an imported batch
             # that shares one posted_at still paginates deterministically.
@@ -150,7 +173,9 @@ class JobRepository(BaseRepository[Job]):
             .limit(limit)
             .offset(offset)
         )
-        rows = list((await self.session.scalars(stmt)).all())
+        # The count above deliberately does not carry the join: it counts jobs,
+        # and joining would make `total` depend on who is asking.
+        rows = [(job, application) for job, application in (await self.session.execute(stmt)).all()]
         return rows, total
 
     async def count_active(self) -> int:
@@ -181,9 +206,7 @@ class JobSkillRepository(BaseRepository[JobSkill]):
         if not rows:
             return 0
 
-        await self.session.execute(
-            JobSkill.__table__.delete().where(JobSkill.job_id == job_id)
-        )
+        await self.session.execute(JobSkill.__table__.delete().where(JobSkill.job_id == job_id))
 
         from app.core.ids import uuid7
 

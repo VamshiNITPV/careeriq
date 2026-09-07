@@ -5,7 +5,7 @@ parses job descriptions, ranks jobs by personalized fit using hybrid semantic + 
 identifies skill gaps, suggests grounded resume improvements, tracks application outcomes, and
 conducts adaptive AI mock interviews.
 
-> **Status:** Phases 1–5.6 complete. Phase 6 (AI matching) is next.
+> **Status:** Phases 1–5.8 complete. Phase 6 (AI matching) is next.
 
 ---
 
@@ -105,6 +105,8 @@ Read these in order:
 | 5 | Job intelligence — ingestion, JD parsing, skill extraction, dedup | ✅ Done¹ |
 | 5.5 | Resume entity extraction — work history, education, projects, certifications | ✅ Done |
 | 5.6 | Live job ingestion — jobs API provider, admin fetch, `PARTNER_API` source | ✅ Done² |
+| 5.7 | Saved jobs and applied tracking — bookmark, applied flag, profile lists | ✅ Done³ |
+| 5.8 | Automatic job fetching — query rotation, request budget, scheduler | ✅ Done⁴ |
 | 6 | AI matching — embeddings, pgvector, semantic search, hybrid ranking | ⬜ |
 | 7 | Career intelligence — skill gaps, learning paths, resume optimization | ⬜ |
 | 8 | Application system — tracking, analytics, outcome analysis | ⬜ |
@@ -125,10 +127,30 @@ postings a month before duplicates, against NFR-2's 10k target. It is deliberate
 posting worldwide": nobody has that, scraping is out of scope, and there is no scheduled refresh
 until Phase 10 brings a queue. Live ingestion is off unless `JOBS_PROVIDER` and `JOBS_API_KEY` are
 set; without them the app runs exactly as before and `POST /admin/jobs/fetch` answers 503.
+*(Superseded in part by 5.8: there is now a scheduled refresh, though not on a queue.)*
 
 One thing to expect the first time you fetch: the list is ordered by `posted_at DESC NULLS LAST`,
 and fetched postings carry a real date while hand-entered ones mostly do not — so every existing job
 drops below the fetched ones. That is correct, not data loss.
+
+³ **The first slice of Phase 8, not Phase 8.** Two statuses — saved and applied — with no event
+log, no lifecycle beyond those two, and no funnel analytics. Applied is always the user's own
+assertion: nothing infers it, and auto-submitting applications is explicitly out of scope. The
+tracker and its analytics remain Phase 8.
+
+⁴ **Variety, not recency.** Measurement settled this: filtering the provider to the last three days
+returned nothing, the last week returned nothing, and an unasked role-and-city combination returned
+ten postings of which all ten were new. It is a large, slowly-changing index rather than a live
+feed, so the corpus grows by working through a matrix of roles × cities and never repeating one
+until the rest have been tried (ADR-019 amendment).
+
+Set `JOBS_AUTO_FETCH_ENABLED=true` and the backend does this by itself — a few requests a day,
+spread across the market, with the day's spending recorded in `job_fetch_runs` so a restart cannot
+double-spend. It is off by default and needs a working `JOBS_PROVIDER`.
+
+**The honest limit:** a 200-request month buys about six fetches a day, and the matrix takes about
+a month to work through. After that, new arrivals slow to a trickle — a property of the free tier,
+not something the design can engineer away.
 
 ---
 

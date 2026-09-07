@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/services/apiClient'
+import { applicationService } from '@/services/applicationService'
 import { jobService } from '@/services/jobService'
 import type { JobDetail } from '@/types/job'
 import { JobDetailPage } from './JobDetailPage'
@@ -26,6 +27,7 @@ function detailFixture(overrides: Partial<JobDetail> = {}): JobDetail {
     posted_at: null,
     created_at: '2026-09-03T00:00:00Z',
     skill_count: 3,
+    application: null,
     source: 'USER_SUBMITTED',
     source_url: 'https://example.com/jobs/1',
     status: 'ACTIVE',
@@ -259,6 +261,142 @@ describe('JobDetailPage', () => {
 
       await waitFor(() => expect(get).toHaveBeenCalledTimes(2))
       expect(applyLinks()[0]).toHaveAttribute('href', 'https://someone.example/apply')
+    })
+  })
+
+  describe('saving and applying', () => {
+    const boxes = () => screen.getAllByRole('checkbox', { name: 'I have applied' })
+
+    function application(status: 'SAVED' | 'APPLIED' = 'SAVED') {
+      return {
+        id: 'a1',
+        job_id: 'j1',
+        status,
+        applied_at: status === 'APPLIED' ? '2026-09-04T09:00:00Z' : null,
+        created_at: '2026-09-04T08:00:00Z',
+      }
+    }
+
+    it('offers the controls at the top and the bottom, in step', async () => {
+      // Two copies, one hook. Two stateful components would each hold their own
+      // pending flag and the header and footer would disagree mid-request.
+      const user = userEvent.setup()
+      vi.spyOn(jobService, 'get').mockResolvedValue(detailFixture())
+      vi.spyOn(applicationService, 'set').mockResolvedValue(application('APPLIED'))
+      renderPage()
+
+      await screen.findByRole('heading', { name: 'Senior Data Engineer' })
+      expect(boxes()).toHaveLength(2)
+
+      await user.click(boxes()[0]!)
+
+      await waitFor(() => expect(boxes().every((box) => (box as HTMLInputElement).checked)).toBe(true))
+    })
+
+    it('shows the controls even when the job has no link to apply through', async () => {
+      // "I have applied" is the user's own assertion, and a job with no link on
+      // file is exactly one they may have applied to through the posting.
+      vi.spyOn(jobService, 'get').mockResolvedValue(detailFixture({ source_url: null }))
+      renderPage()
+
+      await screen.findByRole('heading', { name: 'Senior Data Engineer' })
+      expect(boxes().length).toBeGreaterThan(0)
+    })
+
+    it('unticking keeps the job saved rather than removing it', async () => {
+      const user = userEvent.setup()
+      vi.spyOn(jobService, 'get').mockResolvedValue(
+        detailFixture({ application: application('APPLIED') }),
+      )
+      const set = vi.spyOn(applicationService, 'set').mockResolvedValue(application('SAVED'))
+      const remove = vi.spyOn(applicationService, 'remove')
+      renderPage()
+
+      await screen.findByRole('heading', { name: 'Senior Data Engineer' })
+      await user.click(boxes()[0]!)
+
+      await waitFor(() => expect(set).toHaveBeenCalledWith('j1', 'SAVED'))
+      expect(remove).not.toHaveBeenCalled()
+    })
+
+    it('reverts and explains when the server refuses', async () => {
+      const user = userEvent.setup()
+      vi.spyOn(jobService, 'get').mockResolvedValue(detailFixture())
+      vi.spyOn(applicationService, 'set').mockRejectedValue(
+        new ApiError(500, 'INTERNAL_ERROR', 'Broke.'),
+      )
+      renderPage()
+
+      await screen.findByRole('heading', { name: 'Senior Data Engineer' })
+      await user.click(boxes()[0]!)
+
+      expect(await screen.findByText('Broke.')).toBeInTheDocument()
+      expect(boxes().every((box) => !(box as HTMLInputElement).checked)).toBe(true)
+    })
+
+    it('asks before forgetting that you applied', async () => {
+      // A stray tap on a phone should not silently discard a real event in
+      // someone's job hunt.
+      const user = userEvent.setup()
+      vi.spyOn(jobService, 'get').mockResolvedValue(
+        detailFixture({ application: application('APPLIED') }),
+      )
+      const remove = vi.spyOn(applicationService, 'remove').mockResolvedValue(undefined)
+      renderPage()
+
+      await screen.findByRole('heading', { name: 'Senior Data Engineer' })
+      await user.click(
+        screen.getAllByRole('button', { name: /Remove Senior Data Engineer from saved/ })[0]!,
+      )
+
+      const dialog = await screen.findByRole('dialog')
+      expect(within(dialog).getByText(/marked this as applied/)).toBeInTheDocument()
+      expect(remove).not.toHaveBeenCalled()
+
+      await user.click(within(dialog).getByRole('button', { name: 'Remove' }))
+      await waitFor(() => expect(remove).toHaveBeenCalledWith('j1'))
+    })
+
+    it('cancelling the warning changes nothing', async () => {
+      const user = userEvent.setup()
+      vi.spyOn(jobService, 'get').mockResolvedValue(
+        detailFixture({ application: application('APPLIED') }),
+      )
+      const remove = vi.spyOn(applicationService, 'remove')
+      renderPage()
+
+      await screen.findByRole('heading', { name: 'Senior Data Engineer' })
+      await user.click(
+        screen.getAllByRole('button', { name: /Remove Senior Data Engineer from saved/ })[0]!,
+      )
+      const dialog = await screen.findByRole('dialog')
+      await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+
+      expect(remove).not.toHaveBeenCalled()
+      expect(boxes()[0]).toBeChecked()
+    })
+
+    it('keeps a failed removal visible inside the dialog', async () => {
+      // showModal() makes the rest of the page inert, so a page-level alert
+      // would sit behind the backdrop where nobody can see it.
+      const user = userEvent.setup()
+      vi.spyOn(jobService, 'get').mockResolvedValue(
+        detailFixture({ application: application('APPLIED') }),
+      )
+      vi.spyOn(applicationService, 'remove').mockRejectedValue(
+        new ApiError(500, 'INTERNAL_ERROR', 'Could not remove that.'),
+      )
+      renderPage()
+
+      await screen.findByRole('heading', { name: 'Senior Data Engineer' })
+      await user.click(
+        screen.getAllByRole('button', { name: /Remove Senior Data Engineer from saved/ })[0]!,
+      )
+      const dialog = await screen.findByRole('dialog')
+      await user.click(within(dialog).getByRole('button', { name: 'Remove' }))
+
+      expect(await within(dialog).findByText('Could not remove that.')).toBeInTheDocument()
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
     })
   })
 })

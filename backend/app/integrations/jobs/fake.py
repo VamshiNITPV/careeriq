@@ -76,15 +76,24 @@ class FakeJobProvider:
         self.quota_error_on_call = quota_error_on_call
         self.quota_remaining = quota_remaining
         self.calls = 0
+        self.searches: list[dict[str, object]] = []
 
     @property
     def name(self) -> str:
         return "fake"
 
     async def search(
-        self, *, query: str, country: str, cursor: str | None = None
+        self,
+        *,
+        query: str,
+        country: str,
+        posted_within_days: int | None = None,
+        cursor: str | None = None,
     ) -> JobSearchPage:
         self.calls += 1
+        # Recorded rather than acted on: what a test needs to know is that the
+        # window reached the provider at all.
+        self.searches.append({"query": query, "posted_within_days": posted_within_days})
         if self.quota_error_on_call is not None and self.calls >= self.quota_error_on_call:
             raise JobProviderQuotaError(
                 "Quota exhausted.", provider=self.name, status_code=429, retry_after=60

@@ -24,6 +24,7 @@ from app.integrations.email import get_email_provider
 from app.integrations.jobs import JobProvider, get_job_provider
 from app.integrations.storage import ObjectStorage, get_object_storage
 from app.models.user import User
+from app.repositories.application import ApplicationRepository
 from app.repositories.career import (
     CareerEntityRepository,
     CertificationRepository,
@@ -32,6 +33,7 @@ from app.repositories.career import (
     WorkExperienceRepository,
 )
 from app.repositories.job import CompanyRepository, JobRepository, JobSkillRepository
+from app.repositories.job_fetch import JobFetchRunRepository
 from app.repositories.refresh_token import RefreshTokenRepository
 from app.repositories.resume import ResumeRepository, ResumeVersionRepository
 from app.repositories.skill import CandidateSkillRepository, SkillRepository
@@ -112,6 +114,14 @@ def get_skill_repository(session: DbSession) -> SkillRepository:
 
 def get_candidate_skill_repository(session: DbSession) -> CandidateSkillRepository:
     return CandidateSkillRepository(session)
+
+
+def get_application_repository(session: DbSession) -> ApplicationRepository:
+    return ApplicationRepository(session)
+
+
+def get_job_fetch_run_repository(session: DbSession) -> JobFetchRunRepository:
+    return JobFetchRunRepository(session)
 
 
 def get_job_repository(session: DbSession) -> JobRepository:
@@ -218,6 +228,8 @@ CandidateSkillRepositoryDep = Annotated[
 JobServiceDep = Annotated[JobService, Depends(get_job_service)]
 JobSkillRepositoryDep = Annotated[JobSkillRepository, Depends(get_job_skill_repository)]
 JobProviderDep = Annotated[JobProvider | None, Depends(get_jobs_provider)]
+ApplicationRepositoryDep = Annotated[ApplicationRepository, Depends(get_application_repository)]
+JobFetchRunRepositoryDep = Annotated[JobFetchRunRepository, Depends(get_job_fetch_run_repository)]
 
 
 # ---------------------------------------------------------------- current user

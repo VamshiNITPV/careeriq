@@ -26,6 +26,7 @@ function jobFixture(overrides: Partial<JobSummary> = {}): JobSummary {
     posted_at: null,
     created_at: '2026-09-03T00:00:00Z',
     skill_count: 7,
+    application: null,
     ...overrides,
   }
 }

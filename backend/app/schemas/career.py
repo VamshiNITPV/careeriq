@@ -34,9 +34,7 @@ class _EntityRead(BaseModel):
     updated_at: datetime
 
 
-def span_problem(
-    start: date | None, end: date | None, is_current: bool
-) -> tuple[str, str] | None:
+def span_problem(start: date | None, end: date | None, is_current: bool) -> tuple[str, str] | None:
     """The CHECK constraints on a dated entity, as (field, message) or None.
 
     A function rather than only a validator because the two write paths need it

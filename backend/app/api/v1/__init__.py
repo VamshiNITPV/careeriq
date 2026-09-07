@@ -7,7 +7,7 @@ versioning makes it obvious in every access log which contract was used.
 
 from fastapi import APIRouter
 
-from app.api.v1 import auth, career, health, jobs, profile, resumes, skills
+from app.api.v1 import applications, auth, career, health, jobs, profile, resumes, skills
 
 api_router = APIRouter()
 
@@ -29,6 +29,7 @@ api_router.include_router(skills.profile_skills_router)
 # Safe alongside the two above for the same reason they are safe together:
 # nothing under /profile declares a bare path parameter that would swallow
 # these.
+api_router.include_router(applications.router)
 api_router.include_router(career.router)
 
 __all__ = ["api_router"]

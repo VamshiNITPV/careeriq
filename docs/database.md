@@ -75,7 +75,8 @@ CREATE TYPE job_status         AS ENUM ('ACTIVE','EXPIRED','DUPLICATE','ARCHIVED
 CREATE TYPE proficiency_level  AS ENUM ('BEGINNER','INTERMEDIATE','ADVANCED','EXPERT');
 CREATE TYPE skill_requirement  AS ENUM ('REQUIRED','PREFERRED','NICE_TO_HAVE');
 CREATE TYPE gap_severity       AS ENUM ('CRITICAL','HIGH','MEDIUM','LOW');
-CREATE TYPE application_status AS ENUM ('SAVED','APPLIED','ASSESSMENT','INTERVIEW','OFFER','REJECTED','WITHDRAWN');
+-- As built: only SAVED and APPLIED. The rest arrive with the funnel (see 3.7).
+CREATE TYPE application_status AS ENUM ('SAVED','APPLIED');
 CREATE TYPE interview_status   AS ENUM ('CREATED','IN_PROGRESS','COMPLETED','ABANDONED');
 CREATE TYPE question_difficulty AS ENUM ('EASY','MEDIUM','HARD','EXPERT');
 CREATE TYPE notification_type  AS ENUM ('RESUME_PROCESSED','NEW_MATCHES','APPLICATION_REMINDER','INTERVIEW_READY','SYSTEM');
@@ -472,35 +473,60 @@ Computed per user against a target — a specific job, or an aggregate over thei
 | Column | Type | Notes |
 |---|---|---|
 | `id` | `UUID` | PK |
-| `user_id` | `UUID` | FK → `users.id` CASCADE, NOT NULL |
-| `job_id` | `UUID` | FK → `jobs.id` **RESTRICT**, NOT NULL |
-| `resume_version_id` | `UUID` | FK → `resume_versions.id` **RESTRICT**, NULL |
+| `user_id` | `UUID` | FK -> `users.id` CASCADE, NOT NULL |
+| `job_id` | `UUID` | FK -> `jobs.id` **RESTRICT**, NOT NULL |
 | `status` | `application_status` | NOT NULL, DEFAULT `'SAVED'` |
-| `match_score_at_apply` | `NUMERIC(5,2)` | Frozen snapshot — analytics must not shift under re-ranking |
-| `applied_at`, `last_status_change_at` | `TIMESTAMPTZ` | |
-| `next_action_at` | `TIMESTAMPTZ` | Reminders |
-| `source` | `TEXT` | Where it was submitted |
-| `notes` | `TEXT` | |
-| `outcome_reason` | `TEXT` | |
+| `applied_at` | `TIMESTAMPTZ` | Set when marked applied, cleared when unmarked |
 | `deleted_at` | `TIMESTAMPTZ` | Soft delete |
 | `created_at` / `updated_at` | `TIMESTAMPTZ` | |
 
 ```sql
 CREATE UNIQUE INDEX ux_applications_user_job ON applications (user_id, job_id)
   WHERE deleted_at IS NULL;
-CREATE INDEX ix_applications_status ON applications (user_id, status, last_status_change_at DESC);
+CREATE INDEX ix_applications_job_id ON applications (job_id);
+ALTER TABLE applications ADD CONSTRAINT ck_applications_applied_has_timestamp
+  CHECK ((status = 'APPLIED') = (applied_at IS NOT NULL));
 ```
 
-> **Why `RESTRICT` on `job_id` and `resume_version_id`:** an application is historical fact. If
-> deleting a job silently cascaded away applications, analytics (US-7.2) would quietly lose data
-> and the funnel would be wrong with no error. `RESTRICT` forces the deletion path to deal with it.
+> **Why `RESTRICT` on `job_id`:** an application is historical fact. If deleting a job silently
+> cascaded away applications, analytics (US-7.2) would quietly lose data and the funnel would be
+> wrong with no error. `RESTRICT` forces the deletion path to deal with it.
 >
-> **Why `match_score_at_apply` is denormalized:** ranking weights and the corpus change over time.
-> Answering "do high-match applications convert better?" requires the score *as it was at the time
-> of applying*, not as recomputed today.
+> **As built (US-7.0), this is a slice of what was designed.** `application_status` has two members,
+> `SAVED` and `APPLIED`; the rest of the lifecycle arrives with the funnel that reads it. Four
+> columns are deliberately absent, each waiting on something that does not exist yet:
+> `resume_version_id` needs a version picker in the apply flow; `match_score_at_apply` needs Phase 6
+> ranking, and a permanently-null score reads to analytics as "scored about zero" rather than "we
+> had none"; `next_action_at` needs a scheduler (Phase 10); `source`, `notes` and `outcome_reason`
+> belong to the funnel.
+>
+> `last_status_change_at` is absent too: with two statuses, `applied_at IS NOT NULL` is equivalent
+> to `status = 'APPLIED'` and already dates one transition, while `updated_at` dates the other. It
+> exists in the design because under seven statuses `updated_at` also moves when a note is edited —
+> a reason that does not apply yet, and a third source of truth for the same instant would drift.
+>
+> `ix_applications_status` is not built: it leads on a column that does not exist here, and
+> `ux_applications_user_job` already leads on `user_id` with the same partial predicate. It returns
+> as `(user_id, status, created_at DESC)` when a funnel or real volume arrives.
+>
+> **The partial index is the save toggle's whole idempotency mechanism** — at most one live
+> application per `(user, job)`, enforced by the database rather than by a read-then-write that a
+> double tap can slip between. It also deliberately does not cover tombstones, so unsaving and
+> re-saving inserts a fresh `SAVED` row rather than resurrecting an old `APPLIED` one.
+>
+> **This changes ADR-019's removal path.** `PARTNER_API` exists so that "remove everything from
+> provider X, their terms changed" is one `DELETE`; that statement now fails on this foreign key the
+> moment anyone has saved such a posting. It becomes two, and the first is a **hard** delete,
+> because the obligation is to remove the data:
+>
+> ```sql
+> DELETE FROM applications WHERE job_id IN (SELECT id FROM jobs WHERE source = 'PARTNER_API');
+> DELETE FROM jobs WHERE source = 'PARTNER_API';
+> ```
 
 #### `application_events`
-Immutable audit log (US-7.1 AC2).
+Immutable audit log (US-7.1 AC2). **Not built** — it arrives with the status lifecycle it
+records, which US-7.0 deliberately omits.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -595,6 +621,32 @@ Background task state, mirrored into Redis for fast reads (ADR-008/009).
 > Postgres is the durable record; Redis is the fast path. If Redis is flushed, task state survives —
 > consistent with ADR-008's rule that cache is never authoritative.
 
+#### `job_fetch_runs`
+One row per request made to a jobs provider — scheduled or admin-triggered (ADR-019 amendment).
+`id`, `query`, `country`, `started_at`, `requests_spent`, `created`, `duplicates`, `failed`,
+`quota_remaining`, `scheduled`, `stop_reason`.
+
+```sql
+CREATE INDEX ix_job_fetch_runs_started_at ON job_fetch_runs (started_at);
+CREATE INDEX ix_job_fetch_runs_query      ON job_fetch_runs (query, started_at);
+```
+
+It does three jobs at once, which is why it is one table and not three:
+
+1. **The budget.** `SUM(requests_spent)` since midnight UTC is what the scheduler checks before
+   spending. It is in Postgres rather than in memory because a free tier is a few hundred requests
+   a *month*, and a counter that resets on container restart spends quota that cannot be recovered.
+   `requests_spent` sums rather than counting rows: one run may page more than once.
+2. **The rotation.** `MAX(started_at) GROUP BY query` says which question has been left longest.
+   Asking a provider a question it has already answered returns the same postings, so remembering
+   what was asked is the entire mechanism by which the corpus grows.
+3. **The audit.** A run that spent a request and created nothing is still recorded — especially
+   then, because "the corpus stopped growing" and "fetching stopped" are different problems and
+   only these rows tell them apart.
+
+`scheduled` distinguishes an automatic run from an admin's; both are written, because both spend
+from the same quota.
+
 #### `audit_logs`
 Security-relevant events (ADR-014): `id`, `user_id` FK SET NULL, `action`, `resource_type`,
 `resource_id`, `ip_address INET`, `user_agent`, `metadata JSONB`, `created_at`.
@@ -612,6 +664,7 @@ Security-relevant events (ADR-014): `id`, `user_id` FK SET NULL, `action`, `reso
 | Application funnel | `(user_id, status, last_status_change_at DESC)` |
 | Idempotent import | Partial unique `(source, external_id) WHERE external_id IS NOT NULL` |
 | Unread notifications | Partial `(user_id, created_at DESC) WHERE NOT is_read` |
+| Fetch budget / rotation | `job_fetch_runs (started_at)` and `(query, started_at)` |
 
 Partial indexes are used heavily. They are smaller, faster, and encode a business rule — "there is
 at most one primary resume per user" is enforced by a unique partial index rather than application

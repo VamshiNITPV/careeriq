@@ -223,7 +223,8 @@ code `UNEXTRACTABLE_DOCUMENT` (requirements.md §6).
 | `GET` | `/jobs/{id}` | Detail with parsed structure and extracted skills |
 | `PATCH` | `/jobs/{id}/application-link` | Attach an application link to a job that has none |
 | `GET` | `/jobs/{id}/match` | **This caller's** score breakdown for this job |
-| `POST` | `/jobs/{id}/save` | Create an application in `SAVED` |
+| `PUT` | `/jobs/{id}/application` | Save this job, or mark that you applied to it |
+| `DELETE` | `/jobs/{id}/application` | Remove it from your saved list |
 | `GET` | `/jobs/{id}/similar` | Nearest neighbours by embedding |
 | `POST` | `/admin/jobs/import` | 🔒 `ADMIN` — bulk dataset import → `202` |
 | `POST` | `/admin/jobs/fetch` | 🔒 `ADMIN` — pull current postings from the configured jobs provider |
@@ -299,8 +300,27 @@ code `UNEXTRACTABLE_DOCUMENT` (requirements.md §6).
 > composite key — worth doing for `/recommendations` in Phase 6, where the
 > ordering is expensive to recompute per page, and not before.
 >
-> `/jobs/{id}/match`, `/jobs/{id}/save` and `/jobs/{id}/similar` are Phases 6–8
-> and do not exist yet.
+> `/jobs/{id}/match` and `/jobs/{id}/similar` are Phases 6-8 and do not exist yet.
+>
+> `POST /jobs/{id}/save` became **`PUT` and `DELETE /jobs/{id}/application`** (US-7.0). A verb in a
+> path has nowhere to put the other three writes — it grows into `/save`, `/unsave`, `/apply`,
+> `/unapply` — whereas a singleton sub-resource takes two verbs that are idempotent by definition.
+> That matters: a bookmark is a control people tap twice on a phone, and a POST that 409s on the
+> second tap is the exact failure this must not have. Unmarking applied sends `{"status": "SAVED"}`
+> rather than deleting, so the job stays saved.
+>
+> `PUT` answers **200, never 201**. The caller cannot tell a create from an update and does not need
+> to; varying the status by which one happened would make an idempotent endpoint's *response*
+> non-idempotent, which is the property that makes retrying safe. `DELETE` answers **204 always**,
+> including when there was nothing to remove. Neither carries an ownership check: the write is
+> scoped by `(job_id, caller)` in its WHERE clause, so the client never holds an application id and
+> there is none to enumerate.
+>
+> `JobSummary` and `JobDetail` gained a nullable **`application`** object — what *this caller* has
+> done about the job. A per-caller field on a shared-corpus row, which is acceptable here because
+> both job endpoints already require a caller and nothing is cached. A nullable object rather than
+> `is_saved`/`is_applied` booleans: it carries `applied_at`, which the removal confirmation needs,
+> and it is the same shape the PUT returns, so a client updates a row by swapping one field.
 
 <details>
 <summary><code>GET /jobs/{id}/match</code> — the explainable score (US-4.1, US-4.2)</summary>
@@ -420,9 +440,14 @@ new resume version. The source version is never mutated (US-6.1 AC3).
 
 ### 2.8 Applications — `/applications`
 
+> **Only `GET /applications` is built** (US-7.0). The writes are a sub-resource of a job, above.
+> Everything else here — `POST`, the id-addressed routes, `/status` with its transition table
+> and `/events` — is Phase 8 and arrives with the funnel. The transition table below remains
+> the documented target.
+
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/applications` | List. Filter by `status`, `date_from`, `date_to` |
+| `GET` | `/applications` | List. Filter by `status` |
 | `POST` | `/applications` | Create from a job |
 | `GET` | `/applications/{id}` | Detail with full event timeline |
 | `PATCH` | `/applications/{id}` | Update notes, `next_action_at` |

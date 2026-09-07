@@ -188,3 +188,22 @@ class SalaryPeriod(StrEnum):
     YEARLY = "YEARLY"
     MONTHLY = "MONTHLY"
     HOURLY = "HOURLY"
+
+
+class ApplicationStatus(StrEnum):
+    """What the user has done about a job.
+
+    Two members, not the seven database.md section 3.7 sketches. The rest of the
+    lifecycle — ASSESSMENT, INTERVIEW, OFFER, REJECTED, WITHDRAWN — arrives with
+    the funnel that reads them and the `application_events` log that records the
+    transitions (US-7.1 AC2), rather than sitting here as five values nothing can
+    set. Same rule as this module's opening note; same precedent as JobStatus
+    shipping without EXPIRED and SkillRequirement without NICE_TO_HAVE.
+
+    APPLIED is always the user's own assertion. Auto-submitting applications is
+    out of scope (requirements.md section 3), so nothing infers this and nothing
+    may claim it on the user's behalf.
+    """
+
+    SAVED = "SAVED"
+    APPLIED = "APPLIED"

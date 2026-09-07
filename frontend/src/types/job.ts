@@ -1,5 +1,6 @@
 /** Job types mirroring backend/app/schemas/job.py. */
 
+import type { ApplicationRead } from '@/types/application'
 import type { EmploymentType, WorkMode } from '@/types/profile'
 
 export type ExperienceLevel =
@@ -58,6 +59,17 @@ export interface JobSummary {
   posted_at: string | null
   created_at: string
   skill_count: number
+  /**
+   * What *you* have done about this job, or null.
+   *
+   * Per-caller, on a row from a shared corpus — which is fine here because both
+   * job endpoints already require a caller and nothing is cached. A nullable
+   * object rather than `is_saved`/`is_applied` booleans: it reads as a separate
+   * entity of yours rather than a property of the job, it carries `applied_at`
+   * which the remove-confirmation needs, and it is the same shape the PUT
+   * returns, so updating a row is a field swap with no translation.
+   */
+  application: ApplicationRead | null
 }
 
 export interface JobDetail extends JobSummary {

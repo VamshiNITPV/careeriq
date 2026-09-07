@@ -785,6 +785,46 @@ admin endpoint.
   removal — see (5).
 - *A scheduled refresh.* There is no scheduler; the queue is Phase 10 (ADR-008, ADR-018). A cron
   built for this alone would be the second half-implemented task runner in the codebase.
+  **Reversed on 2026-09-07 — see the amendment below.**
+
+**Amendment, 2026-09-07 — recency does not work; rotation does, and it is scheduled.**
+
+An admin-triggered fetch left the corpus static: the same 165 postings two days running. Four
+requests were spent measuring why, and the result overturned the assumption the feature was
+designed on.
+
+| Request | Result |
+| --- | --- |
+| `python developer in India`, last 3 days | **0 results** |
+| the same, last week | **0 results** |
+| the same, last month | 10 results, dated **June to September** |
+| `golang developer in Hyderabad`, unfiltered | **10 results, all 10 new** |
+
+So the provider is **a large, slowly-changing index, not a live feed**. Its own recency filter does
+not agree with the dates it reports, and asking a question already asked returns the answer already
+held. *Repetition yields nothing; variety yields everything.*
+
+1. **The rotation is the mechanism, not the date filter.** `services/job/rotation.py` builds a
+   matrix of roles × Indian tech cities — about 135 combinations, ~1,350 postings — and asks the
+   one left unasked longest. `posted_within_days` still exists and is still plumbed through to the
+   provider, because a caller may legitimately want it; it is simply not what makes the corpus
+   grow, and the scheduler does not set it.
+2. **The budget lives in the database, not in memory** (`job_fetch_runs`, migration 0008). A count
+   held in a process resets on every restart and dev reload, and quota does not come back. Manual
+   admin fetches are written to the same ledger for the same reason: one quota, one book.
+3. **A scheduler, reversing the rejection above — but not a task runner.** One `asyncio` task that
+   sleeps, checks the budget, and makes at most one fetch. No job types, no retries, no
+   dead-letter, no fan-out. It polls rather than firing at a fixed hour because the machine is not
+   always on and a missed 09:00 is simply missed. When Phase 10's queue arrives this becomes a job
+   definition and the loop is deleted. Off by default (`JOBS_AUTO_FETCH_ENABLED`).
+4. **It slows down when it runs out of questions, rather than stopping.** Once every combination
+   has been tried, repeats return mostly duplicates — but the index does keep growing, slowly. One
+   request a day is the honest rate for that; six would be spending the month's quota on postings
+   already held.
+
+**The honest limit:** at six requests a day the matrix takes about a month to work through, which
+is almost exactly the monthly quota. After that, arrivals drop sharply. This is a property of a
+200-request tier, not something the design can engineer away.
 
 **Consequences.**
 - **Quota is the binding constraint, and it is small.** Measured, not estimated: JSearch's free
@@ -881,3 +921,4 @@ production value. Missing required config fails loudly at startup, not at first 
 | 2026-09-02 | ADR-017 added. Transactional email, password reset and email verification, after review found that a forgotten password left a user permanently locked out. |
 | 2026-09-02 | ADR-018 added. Resume ingestion, object storage, and the interim background task runner. |
 | 2026-09-04 | ADR-019 added. Job data sourcing from permitted APIs, after the corpus reached Phase 6 with seven hand-entered postings and no way to grow. |
+| 2026-09-07 | ADR-019 amended. Measurement showed the provider is a slowly-changing index, not a live feed: recency filtering returns nothing and query variety returns everything. Adds the rotation, a database-backed request budget, and a scheduler — reversing the ADR's own rejection of one. |

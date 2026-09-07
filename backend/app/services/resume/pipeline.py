@@ -416,9 +416,7 @@ async def _store_entities(
         counts[name] = await repository.upsert_from_extraction(
             user_id=user_id, source_version_id=version_id, rows=rows
         )
-        await repository.delete_stale(
-            user_id=user_id, source_version_id=version_id, keep_keys=keys
-        )
+        await repository.delete_stale(user_id=user_id, source_version_id=version_id, keep_keys=keys)
 
     await apply(
         WorkExperienceRepository(session),

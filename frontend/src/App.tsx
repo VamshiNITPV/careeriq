@@ -14,6 +14,7 @@ import { ProfilePage } from '@/pages/ProfilePage'
 import { RegisterPage } from '@/pages/RegisterPage'
 import { ResetPasswordPage } from '@/pages/ResetPasswordPage'
 import { ResumePage } from '@/pages/ResumePage'
+import { SavedJobsPage } from '@/pages/SavedJobsPage'
 import { VerifyEmailPage } from '@/pages/VerifyEmailPage'
 import { ApiError } from '@/services/apiClient'
 
@@ -62,6 +63,12 @@ export function App() {
                 <Route path="/jobs/new" element={<AddJobPage />} />
                 <Route path="/jobs/:jobId" element={<JobDetailPage />} />
                 <Route path="/profile" element={<ProfilePage />} />
+                {/* Top level, not /jobs/saved: a path under /jobs would
+                    have to be declared before /jobs/:jobId or the
+                    parameter route swallows it, and relying on
+                    declaration order for correctness is the trap the
+                    comment above already describes. */}
+                <Route path="/saved-jobs" element={<SavedJobsPage />} />
               </Route>
             </Route>
 

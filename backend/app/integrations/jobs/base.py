@@ -89,9 +89,20 @@ class JobProvider(Protocol):
         ...
 
     async def search(
-        self, *, query: str, country: str, cursor: str | None = None
+        self,
+        *,
+        query: str,
+        country: str,
+        posted_within_days: int | None = None,
+        cursor: str | None = None,
     ) -> JobSearchPage:
         """One page of results.
+
+        `posted_within_days` is expressed in days rather than in a vendor's
+        vocabulary — JSearch takes `today|3days|week|month`, others take a date —
+        so the caller says what it means and each adapter maps it. Without it a
+        repeated fetch returns the same relevance-ranked results every time,
+        which is quota spent on rows the corpus already has.
 
         `cursor` is an opaque string this provider produced and the caller only
         ever echoes back. **The caller must never parse it.** That is what keeps

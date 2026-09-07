@@ -1,4 +1,7 @@
 import { Link } from 'react-router-dom'
+import { JobSaveControls, UnsaveConfirmation } from '@/components/JobSaveControls'
+import { useJobApplication } from '@/hooks/useJobApplication'
+import type { ApplicationRead } from '@/types/application'
 import { formatExperience, formatSalary, humanise, type JobSummary } from '@/types/job'
 
 /**
@@ -18,9 +21,18 @@ function Tag({ children }: { children: React.ReactNode }) {
   )
 }
 
-export function JobCard({ job }: { job: JobSummary }) {
+export function JobCard({
+  job,
+  onApplicationChange,
+}: {
+  job: JobSummary
+  /** Lets the list swap this row's application in place, with no refetch — so
+   *  scroll position, page and filters all survive a tap on the bookmark. */
+  onApplicationChange?: (application: ApplicationRead | null) => void
+}) {
   const salary = formatSalary(job)
   const experience = formatExperience(job)
+  const state = useJobApplication(job.id, job.application, onApplicationChange)
 
   return (
     <li className="relative rounded-lg bg-white p-4 shadow-sm ring-1 ring-slate-200 transition-shadow focus-within:ring-2 focus-within:ring-indigo-600 hover:shadow-md">
@@ -41,9 +53,23 @@ export function JobCard({ job }: { job: JobSummary }) {
             {job.title}
           </Link>
         </h3>
-        {salary !== null && (
-          <span className="shrink-0 text-sm font-medium text-slate-900">{salary}</span>
-        )}
+        {/*
+          `relative z-10`, and both halves are load-bearing. The title link's
+          `after:absolute after:inset-0` above stretches a pseudo-element across
+          the whole card and carries no z-index of its own. `z-10` alone does
+          nothing, because z-index only applies to positioned elements, and
+          `relative` alone happens to work today only because this comes later
+          in DOM order — together they survive someone reordering the header.
+
+          Without it the bookmark is unclickable: the tap lands on the stretched
+          link and navigates to the job instead of saving it. jsdom has no
+          layout, so no test in this repo can catch that.
+        */}
+        <div className="relative z-10 flex shrink-0 items-center gap-2">
+          {salary !== null && <span className="text-sm font-medium text-slate-900">{salary}</span>}
+          <JobSaveControls state={state} jobTitle={job.title} variant="icon" />
+          <UnsaveConfirmation state={state} />
+        </div>
       </div>
 
       <p className="mt-0.5 text-sm text-slate-600">
