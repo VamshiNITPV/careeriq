@@ -98,6 +98,31 @@ export function readJobListParams(params: URLSearchParams): JobListParams {
 }
 
 /**
+ * How many of the five filters are set.
+ *
+ * Compared against '' rather than tested for truthiness, for the reason
+ * `yearsValue` gives above: '0' is a real filter and `Number('0')` is falsy.
+ * Miss it and "0+ years" counts as nothing — which decides both the badge on
+ * the collapsed Filters button and whether the empty state offers to add a job
+ * or to widen the search.
+ *
+ * Takes the validated params, never raw `URLSearchParams`. `?work_mode=BANANA`
+ * is not a filter, and counting query-string keys would advertise one that was
+ * never sent — the same lie the empty state already refuses to tell.
+ */
+export function countActiveJobFilters({
+  q,
+  workMode,
+  employmentType,
+  yearsValue,
+  postedWithin,
+}: JobListParams): number {
+  return [q, workMode, employmentType, yearsValue, postedWithin].filter(
+    (value) => value !== '',
+  ).length
+}
+
+/**
  * Set or clear one filter, and drop the page with it.
  *
  * **Page one is reset here, at the write.** It used to be an effect watching the

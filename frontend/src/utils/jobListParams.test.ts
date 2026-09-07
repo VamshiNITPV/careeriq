@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  countActiveJobFilters,
   PAGE_SIZE,
   readJobListParams,
   setJobListFilter,
@@ -89,6 +90,38 @@ describe('readJobListParams', () => {
       expect(read('offset=37').offset).toBe(20)
       expect(read(`offset=${PAGE_SIZE}`).offset).toBe(PAGE_SIZE)
     })
+  })
+})
+
+describe('countActiveJobFilters', () => {
+  it('counts nothing for a bare URL', () => {
+    expect(countActiveJobFilters(read(''))).toBe(0)
+  })
+
+  it('counts every filter', () => {
+    const all = read(
+      'q=python&work_mode=REMOTE&employment_type=FULL_TIME' +
+        '&years_experience=5&posted_within_days=7',
+    )
+
+    expect(countActiveJobFilters(all)).toBe(5)
+  })
+
+  it('counts "0+ years", which is a real filter', () => {
+    // The zero trap again, and this is now a third site that has to get it
+    // right: a truthiness check would show "Filters" with no count while a
+    // filter was quietly narrowing the list.
+    expect(countActiveJobFilters(read('years_experience=0'))).toBe(1)
+  })
+
+  it('does not count a value the URL made up', () => {
+    // It counts the validated params, not query-string keys — otherwise the
+    // badge advertises a filter that was never sent to the API.
+    expect(countActiveJobFilters(read('work_mode=BANANA&years_experience=99'))).toBe(0)
+  })
+
+  it('does not count the page', () => {
+    expect(countActiveJobFilters(read('offset=20'))).toBe(0)
   })
 })
 

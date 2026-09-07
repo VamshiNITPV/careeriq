@@ -12,7 +12,9 @@ import { ApiError } from '@/services/apiClient'
 import { jobService } from '@/services/jobService'
 import { EXPERIENCE_YEAR_OPTIONS, POSTED_WITHIN_OPTIONS, type JobSummary } from '@/types/job'
 import { EMPLOYMENT_TYPES, WORK_MODES } from '@/types/profile'
+import { cn } from '@/utils/cn'
 import {
+  countActiveJobFilters,
   PAGE_SIZE,
   readJobListParams,
   setJobListFilter,
@@ -30,6 +32,30 @@ import {
 
 const SEARCH_DEBOUNCE_MS = 300
 
+/**
+ * The funnel on the Filters button.
+ *
+ * Local and unexported, following MenuIcon in AppLayout and BookmarkIcon in
+ * JobSaveControls: there is no icon library here, and a component exported from
+ * a .tsx page file trips react-refresh/only-export-components.
+ */
+function FilterIcon() {
+  return (
+    <svg
+      className="size-4"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M4 5h16l-6 7v5l-4 2v-7L4 5Z" />
+    </svg>
+  )
+}
+
 export function JobsPage() {
   const [jobs, setJobs] = useState<JobSummary[]>([])
   const [total, setTotal] = useState(0)
@@ -38,13 +64,14 @@ export function JobsPage() {
 
   const [searchParams, setSearchParams] = useSearchParams()
 
-  // Destructured to primitives on purpose. The object this returns has a new
-  // identity every render, and putting it in `load`'s dependency array below
-  // would turn `useEffect(load, [load])` into an unbounded refetch loop — one
-  // that would also keep overwriting the in-place row swap that
-  // `onApplicationChange` performs.
-  const { q, workMode, employmentType, yearsValue, postedWithin, offset } =
-    readJobListParams(searchParams)
+  // Destructured to primitives on purpose. `params` and the object it came from
+  // both have a new identity every render, so neither may enter `load`'s
+  // dependency array below — that would turn `useEffect(load, [load])` into an
+  // unbounded refetch loop, one that would also keep overwriting the in-place
+  // row swap `onApplicationChange` performs. `load` depends on the six
+  // primitives and nothing else; `params` exists only to be counted.
+  const params = readJobListParams(searchParams)
+  const { q, workMode, employmentType, yearsValue, postedWithin, offset } = params
 
   // What the input shows, versus what the URL holds. Separated so typing stays
   // responsive while requests lag behind it. Seeded from the URL, so arriving
@@ -54,6 +81,16 @@ export function JobsPage() {
   const [lastQ, setLastQ] = useState(q)
 
   const requestId = useRef(0)
+
+  // Below lg the four dropdowns collapse behind a button, so the results are
+  // not pushed off the first screen by three rows of filters.
+  //
+  // Always closed on arrival, never seeded from the active filters: someone
+  // following a shared /jobs?work_mode=REMOTE link came for the results, and
+  // opening the panel for them pushes those results down — the very thing this
+  // exists to prevent. The count on the button is what tells them instead.
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const filtersTrigger = useRef<HTMLButtonElement>(null)
 
   // Adjusting state during render, which is deliberate and not something to be
   // "tidied" into an effect: Back, or a pasted link, changes `q` underneath us
@@ -139,12 +176,8 @@ export function JobsPage() {
 
   // Same reason as the request itself. Miss it here and "0+ years" renders
   // "No jobs yet." with an Add-a-job button while a filter is active.
-  const hasFilters =
-    q !== '' ||
-    workMode !== '' ||
-    employmentType !== '' ||
-    yearsValue !== '' ||
-    postedWithin !== ''
+  const activeFilterCount = countActiveJobFilters(params)
+  const hasFilters = activeFilterCount > 0
 
   const showing = jobs.length > 0 ? `${offset + 1}–${offset + jobs.length} of ${total}` : null
 
@@ -162,8 +195,31 @@ export function JobsPage() {
         </Link>
       </div>
 
-      <div className="rounded-lg bg-white p-4 shadow-sm ring-1 ring-slate-200">
+      <div
+        className="rounded-lg bg-white p-4 shadow-sm ring-1 ring-slate-200"
+        /*
+          Escape as a React handler on the card, not a document listener like
+          AppLayout's nav. comboboxCore's Escape case calls stopPropagation to
+          stop it reaching an enclosing dialog, and a handler on a React
+          ancestor is the one place that is definitively honoured — so one
+          Escape closes the experience list and keeps its value, and a second
+          closes this panel. It also scopes Escape correctly: pressing it while
+          reading the job list should not collapse the filters.
+        */
+        onKeyDown={(event) => {
+          if (event.key !== 'Escape' || !filtersOpen) return
+          setFiltersOpen(false)
+          // Focus would otherwise land on <body>, resetting tab order to the
+          // top of the page.
+          filtersTrigger.current?.focus()
+        }}
+      >
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+          {/*
+            Deliberately outside the collapsing group. Free-text search is the
+            control people reach for first, and putting it behind a tap is the
+            downgrade the rest of this is trying to avoid.
+          */}
           <Input
             label="Search"
             type="search"
@@ -171,21 +227,88 @@ export function JobsPage() {
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
           />
-          <Select
-            label="Work mode"
-            placeholder="Any"
-            options={WORK_MODES}
-            value={workMode}
-            onChange={(e) => setFilter('work_mode', e.target.value)}
-          />
-          <Select
-            label="Employment type"
-            placeholder="Any"
-            options={EMPLOYMENT_TYPES}
-            value={employmentType}
-            onChange={(e) => setFilter('employment_type', e.target.value)}
-          />
+
           {/*
+            Between the search box and what it controls, so DOM order, reading
+            order and tab order agree. `lg:hidden` is display:none, which
+            generates no box at all — so at lg this is not a grid item and the
+            five columns line up exactly as they did before. Swap it for
+            `lg:invisible` and the row silently gains a sixth cell.
+          */}
+          <div className="flex items-end lg:hidden">
+            <button
+              type="button"
+              ref={filtersTrigger}
+              onClick={() => setFiltersOpen((open) => !open)}
+              aria-expanded={filtersOpen}
+              aria-controls="job-filters"
+              className={buttonClass({ variant: 'secondary', size: 'sm' })}
+            >
+              <FilterIcon />
+              Filters
+              {activeFilterCount > 0 && (
+                <>
+                  {/*
+                    The badge is hidden from assistive tech and the count is
+                    given as words beside it. A bare "2" in the accessible name
+                    reads as "Filters 2", which could be a page number. The
+                    visible text stays the name source, so no aria-label is
+                    needed and none should be added — it would override the
+                    visible text and drift from it.
+                  */}
+                  <span
+                    aria-hidden="true"
+                    className="rounded-full bg-indigo-600 px-1.5 text-xs font-semibold text-white"
+                  >
+                    {activeFilterCount}
+                  </span>
+                  <span className="sr-only">{activeFilterCount} active</span>
+                </>
+              )}
+            </button>
+          </div>
+
+          {/*
+            Toggled with display *classes*, not the `hidden` attribute the
+            mobile nav in AppLayout uses. Three-way state — collapsed, expanded,
+            always-open at lg — is not expressible as one boolean attribute, and
+            the attribute would also drop everything in here out of the
+            accessibility tree, which is what getByRole filters on.
+
+            The ternary emits exactly one display class. `cn` is a plain join,
+            not tailwind-merge, so `cn('grid', !open && 'hidden')` would leave
+            both in the attribute and let Tailwind's internal ordering decide.
+            `lg:grid` beating a base `hidden` is safe by contrast: it lives in a
+            media block, emitted after the base utilities.
+
+            Nothing here may gain `overflow-*`, `transform`, `transition` or a
+            stacking context. The experience Combobox's listbox is
+            position:absolute with no portal (comboboxCore.listboxClass), so any
+            of those clips or re-anchors eleven options. `display` is not
+            animatable in any case.
+          */}
+          <div
+            id="job-filters"
+            className={cn(
+              'gap-4 sm:col-span-2 sm:grid-cols-2 lg:col-span-4 lg:grid-cols-4 lg:grid',
+              filtersOpen ? 'grid' : 'hidden',
+            )}
+          >
+            <Select
+              label="Work mode"
+              placeholder="Any"
+              options={WORK_MODES}
+              value={workMode}
+              onChange={(e) => setFilter('work_mode', e.target.value)}
+            />
+            <Select
+              label="Employment type"
+              placeholder="Any"
+              options={EMPLOYMENT_TYPES}
+              value={employmentType}
+              onChange={(e) => setFilter('employment_type', e.target.value)}
+            />
+            {/*
             A Combobox rather than a native Select: eleven options is short
             enough for either, but this one supports typing to filter as well as
             arrowing. It commits on selection, so unlike the free-text box it
@@ -193,27 +316,28 @@ export function JobsPage() {
             against — only list options can be chosen. Clearing back to "Any" is
             the × button.
           */}
-          <Combobox
-            label="Your experience"
-            options={EXPERIENCE_YEAR_OPTIONS}
-            value={yearsValue}
-            onChange={(value) => setFilter('years_experience', value)}
-            placeholder="Any"
-            hint="Shows jobs whose stated range covers you. Postings that don't say are still shown."
-          />
-          {/*
+            <Combobox
+              label="Your experience"
+              options={EXPERIENCE_YEAR_OPTIONS}
+              value={yearsValue}
+              onChange={(value) => setFilter('years_experience', value)}
+              placeholder="Any"
+              hint="Shows jobs whose stated range covers you. Postings that don't say are still shown."
+            />
+            {/*
             A native Select, unlike the years Combobox beside it: four options
             is too few to be worth typing through, and the Combobox's filtering
             earns nothing here.
           */}
-          <Select
-            label="Posted within"
-            placeholder="Any time"
-            options={POSTED_WITHIN_OPTIONS}
-            value={postedWithin}
-            onChange={(e) => setFilter('posted_within_days', e.target.value)}
-            hint="Postings with no stated date are still shown."
-          />
+            <Select
+              label="Posted within"
+              placeholder="Any time"
+              options={POSTED_WITHIN_OPTIONS}
+              value={postedWithin}
+              onChange={(e) => setFilter('posted_within_days', e.target.value)}
+              hint="Postings with no stated date are still shown."
+            />
+          </div>
         </div>
       </div>
 
@@ -250,12 +374,7 @@ export function JobsPage() {
           <p className="mt-1 text-sm text-slate-600">
             There {total === 1 ? 'is 1 job' : `are ${total} jobs`} to show.
           </p>
-          <Button
-            variant="secondary"
-            size="sm"
-            className="mt-4"
-            onClick={() => goToOffset(0)}
-          >
+          <Button variant="secondary" size="sm" className="mt-4" onClick={() => goToOffset(0)}>
             Back to the first page
           </Button>
         </div>

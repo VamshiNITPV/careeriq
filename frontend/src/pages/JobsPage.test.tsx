@@ -365,6 +365,139 @@ describe('JobsPage', () => {
     })
   })
 
+  describe('the filters collapse on small screens', () => {
+    /**
+     * Below lg the four dropdowns hide behind a button, so three rows of
+     * filters do not push the jobs off the first screen.
+     *
+     * The collapse itself is pure CSS. jsdom has no layout and this suite loads
+     * no stylesheet, so nothing here can prove what a real viewport renders —
+     * only that the classes and the wiring are present. The browser steps in
+     * the plan cover the rest.
+     */
+
+    // /^Filters/ rather than an exact name: the accessible name becomes
+    // "Filters 2 active" the moment a filter is set.
+    const trigger = () => screen.getByRole('button', { name: /^Filters/ })
+    // Resolved through aria-controls, so a dangling reference fails here too.
+    const panel = () => document.getElementById(trigger().getAttribute('aria-controls') ?? '')!
+
+    it('counts the active filters on the button', async () => {
+      mockList([jobFixture()])
+      renderPage('/jobs?work_mode=REMOTE&years_experience=0')
+      await screen.findByRole('listitem')
+
+      // years_experience=0 on purpose: the one value a truthiness check loses.
+      expect(screen.getByRole('button', { name: 'Filters 2 active' })).toBeInTheDocument()
+    })
+
+    it('says nothing about filters the URL made up', async () => {
+      mockList([jobFixture()])
+      renderPage('/jobs?work_mode=BANANA&years_experience=99')
+      await screen.findByRole('listitem')
+
+      expect(trigger()).toHaveAccessibleName('Filters')
+    })
+
+    it('toggles the panel', async () => {
+      const user = userEvent.setup()
+      mockList([jobFixture()])
+      renderPage()
+      await screen.findByRole('listitem')
+
+      expect(trigger()).toHaveAttribute('aria-expanded', 'false')
+      expect(panel()).toHaveClass('hidden')
+
+      await user.click(trigger())
+
+      expect(trigger()).toHaveAttribute('aria-expanded', 'true')
+      expect(panel()).toHaveClass('grid')
+      expect(panel()).not.toHaveClass('hidden')
+    })
+
+    it('keeps the collapse to small screens', async () => {
+      // A tripwire for a refactor that drops the breakpoint classes, and
+      // nothing more: with no stylesheet in jsdom these strings have no effect
+      // on rendering here at all.
+      mockList([jobFixture()])
+      renderPage()
+      await screen.findByRole('listitem')
+
+      expect(trigger().parentElement).toHaveClass('lg:hidden')
+      expect(panel()).toHaveClass('lg:grid')
+    })
+
+    it('keeps the search box out of the collapse', async () => {
+      // A product decision that is otherwise invisible: search is the control
+      // people reach for first, so it stays on screen at every width.
+      mockList([jobFixture()])
+      renderPage()
+      await screen.findByRole('listitem')
+
+      expect(panel()).not.toContainElement(screen.getByLabelText('Search'))
+      expect(panel()).toContainElement(screen.getByLabelText('Work mode'))
+    })
+
+    it('stays open while filters are chosen', async () => {
+      // People set two and three filters at a time. Closing after each one
+      // would make the panel hostile — and a filter write only replaces the
+      // search params, so the component never remounts.
+      const user = userEvent.setup()
+      mockList([jobFixture()])
+      renderPage()
+      await screen.findByRole('listitem')
+      await user.click(trigger())
+
+      await user.selectOptions(screen.getByLabelText('Work mode'), 'REMOTE')
+
+      await waitFor(() => expect(currentUrl()).toBe('/jobs?work_mode=REMOTE'))
+      expect(trigger()).toHaveAttribute('aria-expanded', 'true')
+    })
+
+    it('closes on Escape and gives focus back to the button', async () => {
+      const user = userEvent.setup()
+      mockList([jobFixture()])
+      renderPage()
+      await screen.findByRole('listitem')
+      await user.click(trigger())
+
+      screen.getByLabelText('Work mode').focus()
+      await user.keyboard('{Escape}')
+
+      expect(trigger()).toHaveAttribute('aria-expanded', 'false')
+      // Otherwise focus lands on <body> and tab order resets to the top of
+      // the page.
+      expect(trigger()).toHaveFocus()
+    })
+
+    it('lets Escape close the experience list before the panel', async () => {
+      /*
+       * The reason the Escape handler is a React handler on the card rather
+       * than a document listener. comboboxCore stops propagation on Escape so
+       * it does not reach an enclosing dialog; a document listener would fire
+       * anyway and collapse the whole panel in the same keypress, losing the
+       * user's place.
+       */
+      const user = userEvent.setup()
+      mockList([jobFixture()])
+      renderPage()
+      await screen.findByRole('listitem')
+      await user.click(trigger())
+
+      await user.click(screen.getByLabelText('Your experience'))
+      expect(screen.getByRole('listbox')).toBeInTheDocument()
+
+      await user.keyboard('{Escape}')
+
+      expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+      expect(trigger()).toHaveAttribute('aria-expanded', 'true')
+
+      await user.keyboard('{Escape}')
+
+      expect(trigger()).toHaveAttribute('aria-expanded', 'false')
+    })
+  })
+
   describe('years of experience', () => {
     /**
      * These prove what is *requested*. The filtering itself is server-side and
