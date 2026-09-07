@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from app.services.job.rotation import (
     DEFAULT_LOCATIONS,
     DEFAULT_ROLES,
+    PRIORITY_ROLES,
     build_queries,
     next_query,
 )
@@ -20,16 +21,48 @@ from app.services.job.rotation import (
 class TestBuildQueries:
     def test_covers_every_role_and_location_once(self) -> None:
         queries = build_queries()
+        roles = len(DEFAULT_ROLES) + len(PRIORITY_ROLES)
 
-        assert len(queries) == len(DEFAULT_ROLES) * len(DEFAULT_LOCATIONS)
+        assert len(queries) == roles * len(DEFAULT_LOCATIONS)
         assert len(set(queries)) == len(queries)
+
+    def test_priority_roles_reach_every_city_before_anything_else(self) -> None:
+        """The point of the priority block, and the reason it is not just an ordering.
+
+        Putting a role at the top of `DEFAULT_ROLES` would fetch it in the first
+        city on day one and in the ninth city a month later, because the
+        rotation is location-major. Crossing it with every city up front is what
+        actually makes the whole group arrive early.
+        """
+        queries = build_queries(
+            roles=("established",), locations=("X", "Y"), priority_roles=("urgent",)
+        )
+
+        assert queries == [
+            "urgent in X",
+            "urgent in Y",
+            "established in X",
+            "established in Y",
+        ]
+
+    def test_a_role_named_twice_is_asked_once(self) -> None:
+        """A maintenance slip, not a reason to fail — but never a wasted request."""
+        queries = build_queries(
+            roles=("python developer",),
+            locations=("Pune",),
+            priority_roles=("python developer",),
+        )
+
+        assert queries == ["python developer in Pune"]
 
     def test_consecutive_queries_span_cities_not_one_city(self) -> None:
         """Location-major ordering, so a day's six fetches cover six cities.
 
         Role-major would spend the first fortnight on Bengaluru alone.
         """
-        queries = build_queries(roles=("python", "java"), locations=("Pune", "Chennai"))
+        queries = build_queries(
+            roles=("python", "java"), locations=("Pune", "Chennai"), priority_roles=()
+        )
 
         assert queries == [
             "python in Pune",

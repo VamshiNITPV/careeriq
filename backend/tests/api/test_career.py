@@ -329,9 +329,7 @@ class TestAddingByHand:
         )
         entity_id = created.json()["id"]
 
-        removed = await client.delete(
-            f"{API}/profile/experience/{entity_id}", headers=auth_headers
-        )
+        removed = await client.delete(f"{API}/profile/experience/{entity_id}", headers=auth_headers)
         assert removed.status_code == 200
         assert (await client.get(f"{API}/profile/experience", headers=auth_headers)).json() == []
 

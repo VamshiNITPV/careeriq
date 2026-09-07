@@ -28,6 +28,36 @@ from datetime import datetime
 #: corpus grows only in the directions written here, so a user whose field is
 #: absent finds nothing however long they wait. Reading it from users' stated
 #: target roles is the obvious next step and has not been done.
+#: Roles asked **everywhere first**, before any other role is asked anywhere.
+#:
+#: Ordering roles within a city is not enough on its own to make a role arrive
+#: soon: the rotation is location-major, so putting a role at the top of one
+#: list still leaves it eight city-blocks away from its last city. These are
+#: crossed with every location up front instead, so the whole group is covered
+#: in the first week rather than the last.
+#:
+#: Reserve it for a genuinely under-covered field. Everything promoted here
+#: delays everything else by the same amount — the budget is fixed, so priority
+#: is a reordering, never an increase.
+#:
+#: "vibe coder" is here on evidence rather than on the guess that preceded it:
+#: it looked like a description of a practice rather than a title anyone
+#: advertises under, so it was expected to return nothing. One request settled
+#: it — "vibe coder in Bengaluru" returned three postings on 2026-09-07, headed
+#: *Vibe Coder Entry Level Fresher*, *Tech Lead — Python+DataBricks - Vibe
+#: Coder* and *Freelance Web Scraping Engineer (Vibe Coding)*. Employers are
+#: using the term. The lesson is the one the module docstring records about
+#: `date_posted`: measure the provider, do not reason about it.
+PRIORITY_ROLES: tuple[str, ...] = (
+    "ai engineer",
+    "genai developer",
+    "llm engineer",
+    "prompt engineer",
+    "vibe coder",
+)
+
+#: The established titles, already well represented in the corpus. Asked after
+#: every priority role has been asked in every city.
 DEFAULT_ROLES: tuple[str, ...] = (
     "python developer",
     "backend developer",
@@ -43,21 +73,6 @@ DEFAULT_ROLES: tuple[str, ...] = (
     "java developer",
     "react developer",
     "sql developer",
-    # Requested by hand, and kept on evidence rather than on the guess that
-    # preceded it: this looked like a description of a practice rather than a
-    # title anyone advertises under, so it was expected to return nothing. One
-    # request settled it — "vibe coder in Bengaluru" returned three postings on
-    # 2026-09-07, headed *Vibe Coder Entry Level Fresher*, *Tech Lead —
-    # Python+DataBricks - Vibe Coder* and *Freelance Web Scraping Engineer (Vibe
-    # Coding)*. Employers are using the term. The lesson is the same one the
-    # module docstring records about `date_posted`: measure the provider, do not
-    # reason about it.
-    "vibe coder",
-    # The titles employers actually head AI adverts with, added alongside it.
-    "ai engineer",
-    "prompt engineer",
-    "genai developer",
-    "llm engineer",
 )
 
 #: Cities, weighted to where the corpus already shows Indian tech hiring.
@@ -78,14 +93,28 @@ DEFAULT_LOCATIONS: tuple[str, ...] = (
 def build_queries(
     roles: tuple[str, ...] = DEFAULT_ROLES,
     locations: tuple[str, ...] = DEFAULT_LOCATIONS,
+    priority_roles: tuple[str, ...] = PRIORITY_ROLES,
 ) -> list[str]:
     """Every role-and-city combination, in a stable order.
 
-    Ordered location-major so consecutive runs cover different cities rather
-    than fourteen variations on Bengaluru — a day's fetch then spans the market
-    instead of one corner of it.
+    Two blocks: the priority roles across every city, then everything else. The
+    split exists because ordering roles *within* a city does not actually make a
+    role arrive soon — location-major ordering leaves the ninth city eight
+    blocks away regardless of where the role sits in its list.
+
+    Each block is ordered location-major so consecutive runs cover different
+    cities rather than nineteen variations on Bengaluru — a day's fetch then
+    spans the market instead of one corner of it.
+
+    Duplicates are dropped rather than rejected: a role named in both tuples is
+    a maintenance slip, not a reason to fail at startup, and asking the same
+    question twice in one cycle would waste a request for nothing.
     """
-    return [f"{role} in {location}" for location in locations for role in roles]
+    ordered = [
+        *(f"{role} in {location}" for location in locations for role in priority_roles),
+        *(f"{role} in {location}" for location in locations for role in roles),
+    ]
+    return list(dict.fromkeys(ordered))
 
 
 def next_query(candidates: list[str], last_used: dict[str, datetime]) -> str | None:

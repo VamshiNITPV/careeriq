@@ -297,11 +297,7 @@ class TestJobSkillExtraction:
 
     def test_requirements_are_required_and_nice_to_haves_preferred(self) -> None:
         text = (
-            "Requirements\n"
-            "- Strong Python experience\n"
-            "\n"
-            "Nice to have\n"
-            "- Exposure to Kubernetes\n"
+            "Requirements\n- Strong Python experience\n\nNice to have\n- Exposure to Kubernetes\n"
         )
         found = self.build(text)
         assert found["Python"].requirement is SkillRequirement.REQUIRED

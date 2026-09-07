@@ -310,9 +310,7 @@ class TestIsolationBetweenUsers:
             f"{API}/auth/register",
             json={"email": "other@example.com", "password": "correct-horse-9", "full_name": "O"},
         )
-        other_headers = {
-            "Authorization": f"Bearer {other.json()['tokens']['access_token']}"
-        }
+        other_headers = {"Authorization": f"Bearer {other.json()['tokens']['access_token']}"}
 
         listing = (await client.get(f"{API}/jobs", headers=other_headers)).json()
         assert listing["items"][0]["application"] is None
@@ -349,14 +347,10 @@ class TestDeletingAJobIsRestricted:
         # one transaction, and unwinding it would leak into later tests.
         with pytest.raises(IntegrityError):
             async with db_session.begin_nested():
-                await db_session.execute(
-                    text("DELETE FROM jobs WHERE id = :id"), {"id": job_id}
-                )
+                await db_session.execute(text("DELETE FROM jobs WHERE id = :id"), {"id": job_id})
 
         await client.delete(f"{API}/jobs/{job_id}/application", headers=auth_headers)
 
         with pytest.raises(IntegrityError):
             async with db_session.begin_nested():
-                await db_session.execute(
-                    text("DELETE FROM jobs WHERE id = :id"), {"id": job_id}
-                )
+                await db_session.execute(text("DELETE FROM jobs WHERE id = :id"), {"id": job_id})

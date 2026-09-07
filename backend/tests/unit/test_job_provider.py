@@ -58,9 +58,7 @@ def ok(payload: dict[str, Any], headers: dict[str, str] | None = None) -> Any:
 
 class TestMapping:
     async def test_maps_a_result_onto_a_posting(self) -> None:
-        provider = provider_with(
-            ok(page([JOB]), {"x-ratelimit-requests-remaining": "197"})
-        )
+        provider = provider_with(ok(page([JOB]), {"x-ratelimit-requests-remaining": "197"}))
 
         result = await provider.search(query="python developer", country="in")
 
@@ -68,11 +66,14 @@ class TestMapping:
         posting = result.postings[0]
         # job_uid (24 chars), never job_id — which is ~400 and would not fit
         # external_id's String(200) without a truncation that risks collisions.
-        assert posting.external_id == 'K4BQlHLn_O2qB6u3AAAAAA=='
+        assert posting.external_id == "K4BQlHLn_O2qB6u3AAAAAA=="
         assert len(posting.external_id) < 100
-        assert posting.title == 'Python Backend Developer'
-        assert posting.company_name == 'Quest Global'
-        assert posting.apply_url == 'https://careers.quest-global.com/global/en/job/P-120209/Python-Backend-Developer'
+        assert posting.title == "Python Backend Developer"
+        assert posting.company_name == "Quest Global"
+        assert (
+            posting.apply_url
+            == "https://careers.quest-global.com/global/en/job/P-120209/Python-Backend-Developer"
+        )
         # City, region and country joined — the parser cannot read a location
         # out of API prose, so this metadata is the only source.
         assert posting.location == "Bengaluru, Karnataka, IN"

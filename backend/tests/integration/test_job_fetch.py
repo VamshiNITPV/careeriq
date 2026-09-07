@@ -17,9 +17,7 @@ from app.services.job.fetch import fetch_and_import
 from tests.integration.test_job_import import build_service
 
 
-async def run(
-    session: AsyncSession, provider: FakeJobProvider, *, max_pages: int = 5
-) -> object:
+async def run(session: AsyncSession, provider: FakeJobProvider, *, max_pages: int = 5) -> object:
     return await fetch_and_import(
         provider=provider,
         service=build_service(session),

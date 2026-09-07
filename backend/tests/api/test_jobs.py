@@ -82,9 +82,7 @@ class TestSubmitJob:
         self, client: AsyncClient, auth_headers: dict[str, str], seeded_skills: int
     ) -> None:
         """US-3.1 AC2 — every field the acceptance criterion names."""
-        response = await client.post(
-            f"{API}/jobs", headers=auth_headers, json=submission()
-        )
+        response = await client.post(f"{API}/jobs", headers=auth_headers, json=submission())
 
         assert response.status_code == 201, response.text
         body = response.json()
@@ -107,9 +105,7 @@ class TestSubmitJob:
         self, client: AsyncClient, auth_headers: dict[str, str], seeded_skills: int
     ) -> None:
         # The only signal the ranking formula has for weighting a skill.
-        response = await client.post(
-            f"{API}/jobs", headers=auth_headers, json=submission()
-        )
+        response = await client.post(f"{API}/jobs", headers=auth_headers, json=submission())
         skills = {s["name"]: s["requirement"] for s in response.json()["job"]["skills"]}
 
         assert skills["Python"] == "REQUIRED"
@@ -122,9 +118,9 @@ class TestSubmitJob:
     async def test_extracts_bullets_into_arrays(
         self, client: AsyncClient, auth_headers: dict[str, str], seeded_skills: int
     ) -> None:
-        job = (
-            await client.post(f"{API}/jobs", headers=auth_headers, json=submission())
-        ).json()["job"]
+        job = (await client.post(f"{API}/jobs", headers=auth_headers, json=submission())).json()[
+            "job"
+        ]
 
         assert any("backend services" in r for r in job["responsibilities"])
         assert any("years" in r for r in job["requirements"])
@@ -343,12 +339,8 @@ class TestDeduplication:
         self, client: AsyncClient, auth_headers: dict[str, str], seeded_skills: int
     ) -> None:
         """US-3.2 AC2 — links to the canonical job rather than creating a row."""
-        first = await client.post(
-            f"{API}/jobs", headers=auth_headers, json=submission()
-        )
-        second = await client.post(
-            f"{API}/jobs", headers=auth_headers, json=submission()
-        )
+        first = await client.post(f"{API}/jobs", headers=auth_headers, json=submission())
+        second = await client.post(f"{API}/jobs", headers=auth_headers, json=submission())
 
         assert second.json()["is_duplicate"] is True
         assert second.json()["job"]["id"] == first.json()["job"]["id"]
