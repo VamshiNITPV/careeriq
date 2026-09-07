@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { JobCard } from '@/components/JobCard'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
@@ -11,12 +11,14 @@ import { Spinner } from '@/components/ui/Spinner'
 import { ApiError } from '@/services/apiClient'
 import { jobService } from '@/services/jobService'
 import { EXPERIENCE_YEAR_OPTIONS, POSTED_WITHIN_OPTIONS, type JobSummary } from '@/types/job'
+import { EMPLOYMENT_TYPES, WORK_MODES } from '@/types/profile'
 import {
-  EMPLOYMENT_TYPES,
-  WORK_MODES,
-  type EmploymentType,
-  type WorkMode,
-} from '@/types/profile'
+  PAGE_SIZE,
+  readJobListParams,
+  setJobListFilter,
+  setJobListOffset,
+  type JobFilterKey,
+} from '@/utils/jobListParams'
 
 /**
  * Browse the job corpus.
@@ -26,40 +28,77 @@ import {
  * implies personalisation would be a claim the system cannot yet support.
  */
 
-const PAGE_SIZE = 20
 const SEARCH_DEBOUNCE_MS = 300
 
 export function JobsPage() {
   const [jobs, setJobs] = useState<JobSummary[]>([])
   const [total, setTotal] = useState(0)
-  const [offset, setOffset] = useState(0)
   const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [error, setError] = useState<string | null>(null)
 
-  // What the input shows, versus what has been sent. Separated so typing stays
-  // responsive while requests lag behind it.
-  const [searchText, setSearchText] = useState('')
-  const [query, setQuery] = useState('')
-  const [workMode, setWorkMode] = useState<WorkMode | ''>('')
-  const [employmentType, setEmploymentType] = useState<EmploymentType | ''>('')
-  // '' is "Any"; otherwise '0'…'10'. Kept as the raw option value rather than
-  // converted early, because Number('0') is falsy and any check written on the
-  // converted value would silently drop the "0+ years" filter.
-  const [yearsValue, setYearsValue] = useState('')
-  // '' is "Any time"; otherwise a day count as a string.
-  const [postedWithin, setPostedWithin] = useState('')
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  // Destructured to primitives on purpose. The object this returns has a new
+  // identity every render, and putting it in `load`'s dependency array below
+  // would turn `useEffect(load, [load])` into an unbounded refetch loop — one
+  // that would also keep overwriting the in-place row swap that
+  // `onApplicationChange` performs.
+  const { q, workMode, employmentType, yearsValue, postedWithin, offset } =
+    readJobListParams(searchParams)
+
+  // What the input shows, versus what the URL holds. Separated so typing stays
+  // responsive while requests lag behind it. Seeded from the URL, so arriving
+  // at /jobs?q=python shows "python" in the box rather than an empty field
+  // sitting over a filtered list.
+  const [searchText, setSearchText] = useState(q)
+  const [lastQ, setLastQ] = useState(q)
 
   const requestId = useRef(0)
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => setQuery(searchText.trim()), SEARCH_DEBOUNCE_MS)
-    return () => window.clearTimeout(timer)
-  }, [searchText])
+  // Adjusting state during render, which is deliberate and not something to be
+  // "tidied" into an effect: Back, or a pasted link, changes `q` underneath us
+  // and the box has to follow in the same pass. An effect would run a render
+  // late and race the debounce below.
+  if (q !== lastQ) {
+    setLastQ(q)
+    // Guarded against our own debounced write, which would otherwise snap the
+    // caret: typing "python " settles `q` to "python", and rewriting the box
+    // would eat the trailing space the user is still typing past.
+    if (q !== searchText.trim()) setSearchText(q)
+  }
 
-  // Any filter change puts the user back on page one. Without this, narrowing
-  // a search while on page three shows an empty list that looks like no
-  // results. Keyed on `query`, the debounced value, not the raw search text.
-  useEffect(() => setOffset(0), [query, workMode, employmentType, yearsValue, postedWithin])
+  useEffect(() => {
+    const next = searchText.trim()
+    // The loop-breaker, and the mount guard. React Router does not diff URLs,
+    // so without this every arrival on the page fires a navigation to the URL
+    // it is already on.
+    if (next === q) return
+    const timer = window.setTimeout(() => {
+      setSearchParams((previous) => setJobListFilter(previous, 'q', next), { replace: true })
+    }, SEARCH_DEBOUNCE_MS)
+    return () => window.clearTimeout(timer)
+  }, [searchText, q, setSearchParams])
+
+  /**
+   * Write one filter. `setJobListFilter` drops the page along with it.
+   *
+   * `replace`, not push: even debounced, a typed search is several history
+   * entries, and ten searches would mean a Back button that no longer leaves
+   * /jobs. A push would also only half-fix the bug this exists for — Back from
+   * a job would land on the second-to-last filter state.
+   */
+  const setFilter = useCallback(
+    (key: JobFilterKey, value: string) =>
+      setSearchParams((previous) => setJobListFilter(previous, key, value), { replace: true }),
+    [setSearchParams],
+  )
+
+  // Pushed, unlike the filters: a page is a real position in a list, it is one
+  // deliberate click, and it cannot flood history the way keystrokes can.
+  const goToOffset = useCallback(
+    (next: number) => setSearchParams((previous) => setJobListOffset(previous, next)),
+    [setSearchParams],
+  )
 
   const load = useCallback(() => {
     const id = ++requestId.current
@@ -68,7 +107,7 @@ export function JobsPage() {
 
     jobService
       .list({
-        ...(query ? { q: query } : {}),
+        ...(q ? { q } : {}),
         ...(workMode ? { work_mode: workMode } : {}),
         ...(employmentType ? { employment_type: employmentType } : {}),
         // Compared against '' rather than tested for truthiness: "0+ years" is
@@ -94,14 +133,14 @@ export function JobsPage() {
           setLoadState('error')
         },
       )
-  }, [query, workMode, employmentType, yearsValue, postedWithin, offset])
+  }, [q, workMode, employmentType, yearsValue, postedWithin, offset])
 
   useEffect(load, [load])
 
   // Same reason as the request itself. Miss it here and "0+ years" renders
   // "No jobs yet." with an Add-a-job button while a filter is active.
   const hasFilters =
-    query !== '' ||
+    q !== '' ||
     workMode !== '' ||
     employmentType !== '' ||
     yearsValue !== '' ||
@@ -137,14 +176,14 @@ export function JobsPage() {
             placeholder="Any"
             options={WORK_MODES}
             value={workMode}
-            onChange={(e) => setWorkMode(e.target.value as WorkMode | '')}
+            onChange={(e) => setFilter('work_mode', e.target.value)}
           />
           <Select
             label="Employment type"
             placeholder="Any"
             options={EMPLOYMENT_TYPES}
             value={employmentType}
-            onChange={(e) => setEmploymentType(e.target.value as EmploymentType | '')}
+            onChange={(e) => setFilter('employment_type', e.target.value)}
           />
           {/*
             A Combobox rather than a native Select: eleven options is short
@@ -158,7 +197,7 @@ export function JobsPage() {
             label="Your experience"
             options={EXPERIENCE_YEAR_OPTIONS}
             value={yearsValue}
-            onChange={setYearsValue}
+            onChange={(value) => setFilter('years_experience', value)}
             placeholder="Any"
             hint="Shows jobs whose stated range covers you. Postings that don't say are still shown."
           />
@@ -172,7 +211,7 @@ export function JobsPage() {
             placeholder="Any time"
             options={POSTED_WITHIN_OPTIONS}
             value={postedWithin}
-            onChange={(e) => setPostedWithin(e.target.value)}
+            onChange={(e) => setFilter('posted_within_days', e.target.value)}
             hint="Postings with no stated date are still shown."
           />
         </div>
@@ -191,6 +230,34 @@ export function JobsPage() {
       ) : loadState === 'loading' ? (
         <div className="flex justify-center py-12">
           <Spinner className="size-6 text-indigo-600" label="Loading jobs" />
+        </div>
+      ) : jobs.length === 0 && offset > 0 ? (
+        /*
+          An empty page that is not an empty list. Only reachable by editing the
+          URL — the pager disables Next at the end — but reachable, and "No jobs
+          match those filters" would be a lie that sends the user off widening a
+          search that is fine.
+
+          A button rather than an effect that resets the offset after an empty
+          load: that would be a write derived from a response, which is the loop
+          shape this page's URL state deliberately avoids, and it would teleport
+          the user instead of telling them what happened.
+        */
+        <div className="rounded-lg border border-dashed border-slate-300 bg-white p-10 text-center">
+          <p className="text-sm font-medium text-slate-900">
+            That page is past the end of these results.
+          </p>
+          <p className="mt-1 text-sm text-slate-600">
+            There {total === 1 ? 'is 1 job' : `are ${total} jobs`} to show.
+          </p>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="mt-4"
+            onClick={() => goToOffset(0)}
+          >
+            Back to the first page
+          </Button>
         </div>
       ) : jobs.length === 0 ? (
         <div className="rounded-lg border border-dashed border-slate-300 bg-white p-10 text-center">
@@ -236,7 +303,7 @@ export function JobsPage() {
                 variant="secondary"
                 size="sm"
                 disabled={offset === 0}
-                onClick={() => setOffset((current) => Math.max(0, current - PAGE_SIZE))}
+                onClick={() => goToOffset(Math.max(0, offset - PAGE_SIZE))}
               >
                 Previous
               </Button>
@@ -244,7 +311,7 @@ export function JobsPage() {
                 variant="secondary"
                 size="sm"
                 disabled={offset + PAGE_SIZE >= total}
-                onClick={() => setOffset((current) => current + PAGE_SIZE)}
+                onClick={() => goToOffset(offset + PAGE_SIZE)}
               >
                 Next
               </Button>

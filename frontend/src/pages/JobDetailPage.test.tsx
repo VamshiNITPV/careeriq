@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/services/apiClient'
 import { applicationService } from '@/services/applicationService'
 import { jobService } from '@/services/jobService'
-import type { JobDetail } from '@/types/job'
+import type { JobDetail, JobDetailLocationState } from '@/types/job'
 import { JobDetailPage } from './JobDetailPage'
 
 function detailFixture(overrides: Partial<JobDetail> = {}): JobDetail {
@@ -64,7 +64,7 @@ function detailFixture(overrides: Partial<JobDetail> = {}): JobDetail {
   }
 }
 
-function renderPage(state?: { isDuplicate: boolean }) {
+function renderPage(state?: JobDetailLocationState) {
   return render(
     <MemoryRouter initialEntries={[{ pathname: '/jobs/j1', state: state ?? null }]}>
       <Routes>
@@ -176,6 +176,71 @@ describe('JobDetailPage', () => {
 
     expect(await screen.findByRole('heading', { name: 'Senior Data Engineer' })).toBeInTheDocument()
     expect(get).toHaveBeenCalledTimes(2)
+  })
+
+  describe('going back to the list', () => {
+    /**
+     * The list keeps its filters in the URL, so this link has to carry them
+     * back. A hard "/jobs" would drop them — which is the bug these tests
+     * exist for, and the browser's own Back button is not the only way people
+     * return.
+     */
+
+    const backLink = () => screen.getByRole('link', { name: '← Back to jobs' })
+
+    it('returns to the list you came from', async () => {
+      vi.spyOn(jobService, 'get').mockResolvedValue(detailFixture())
+      renderPage({ backTo: '/jobs?q=python&offset=20' })
+      await screen.findByRole('heading', { name: 'Senior Data Engineer' })
+
+      expect(backLink()).toHaveAttribute('href', '/jobs?q=python&offset=20')
+    })
+
+    it('falls back to the plain list when the job was opened directly', async () => {
+      // A pasted URL, a refresh, or the link on the saved-jobs page: no state,
+      // and the link must still work.
+      vi.spyOn(jobService, 'get').mockResolvedValue(detailFixture())
+      renderPage()
+      await screen.findByRole('heading', { name: 'Senior Data Engineer' })
+
+      expect(backLink()).toHaveAttribute('href', '/jobs')
+    })
+
+    it('refuses a back target that leaves the app', async () => {
+      // History state is writable by any script on the page, and
+      // <Link to="//evil.example"> renders a protocol-relative href that walks
+      // off the origin.
+      vi.spyOn(jobService, 'get').mockResolvedValue(detailFixture())
+      renderPage({ backTo: '//evil.example' })
+      await screen.findByRole('heading', { name: 'Senior Data Engineer' })
+
+      expect(backLink()).toHaveAttribute('href', '/jobs')
+    })
+
+    it('carries the duplicate notice and the back target together', async () => {
+      // Two independent senders write this state. This is the test that fails
+      // if someone replaces the object rather than adding a field to it.
+      vi.spyOn(jobService, 'get').mockResolvedValue(detailFixture())
+      renderPage({ isDuplicate: true, backTo: '/jobs?offset=20' })
+      await screen.findByRole('heading', { name: 'Senior Data Engineer' })
+
+      expect(screen.getByText(/This posting was already here/)).toBeInTheDocument()
+      expect(backLink()).toHaveAttribute('href', '/jobs?offset=20')
+    })
+
+    it('honours it on the error page too', async () => {
+      // A second, separate link, above the split into JobDetailView — easy to
+      // fix one and forget the other.
+      vi.spyOn(jobService, 'get').mockRejectedValue(
+        new ApiError(404, 'RESOURCE_NOT_FOUND', 'Nope.'),
+      )
+      renderPage({ backTo: '/jobs?q=python' })
+
+      expect(await screen.findByRole('link', { name: 'Back to jobs' })).toHaveAttribute(
+        'href',
+        '/jobs?q=python',
+      )
+    })
   })
 
   describe('applying', () => {

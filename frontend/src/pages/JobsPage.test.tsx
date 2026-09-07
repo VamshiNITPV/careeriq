@@ -1,6 +1,6 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/services/apiClient'
 import { jobService } from '@/services/jobService'
@@ -37,10 +37,40 @@ function mockList(items: JobSummary[], total = items.length) {
     .mockResolvedValue({ items, total, limit: 20, offset: 0 })
 }
 
-const renderPage = () =>
+/**
+ * The current URL, exposed through the accessibility tree.
+ *
+ * There is no data-testid convention in this suite, and the filters now live in
+ * the URL — so the URL has to be assertable. Not <output>, which carries an
+ * implicit role="status" that the "Showing 1-20 of 50" line already owns on
+ * this page.
+ */
+function LocationProbe() {
+  const location = useLocation()
+  return <span aria-label="location">{`${location.pathname}${location.search}`}</span>
+}
+
+const currentUrl = () => screen.getByLabelText('location').textContent
+
+/** The link state a navigation carried, for the same reason as LocationProbe. */
+function StateProbe() {
+  const location = useLocation()
+  return <span aria-label="link state">{JSON.stringify(location.state)}</span>
+}
+
+/** A back button, so a test can prove what did and did not enter history. */
+function BackButton() {
+  const navigate = useNavigate()
+  return <button onClick={() => navigate(-1)}>test-back</button>
+}
+
+// The explicit '/jobs' matters: MemoryRouter's own default is '/', which would
+// make every probe assertion read "/?q=..." instead.
+const renderPage = (initialEntry = '/jobs') =>
   render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[initialEntry]}>
       <JobsPage />
+      <LocationProbe />
     </MemoryRouter>,
   )
 
@@ -133,6 +163,205 @@ describe('JobsPage', () => {
       await screen.findByRole('listitem')
 
       expect(list.mock.calls[0]?.[0]).not.toHaveProperty('posted_within_days')
+    })
+  })
+
+  describe('the URL holds the filters', () => {
+    /**
+     * The point of all this: leave /jobs for a job posting and come back, and
+     * the filters and the page are still there. They live in the URL, so Back
+     * restores them, a refresh survives, and a filtered list is a link that can
+     * be shared.
+     */
+
+    it('restores every filter and the page from the URL', async () => {
+      const list = mockList([jobFixture()], 50)
+      renderPage(
+        '/jobs?q=python&work_mode=REMOTE&employment_type=FULL_TIME' +
+          '&years_experience=5&posted_within_days=7&offset=20',
+      )
+      await screen.findByRole('listitem')
+
+      // The FIRST call, not the last. What matters is that no mount-time
+      // effect fired an unfiltered page-one request before this one.
+      expect(list.mock.calls[0]?.[0]).toEqual({
+        q: 'python',
+        work_mode: 'REMOTE',
+        employment_type: 'FULL_TIME',
+        years_experience: 5,
+        posted_within_days: 7,
+        limit: 20,
+        offset: 20,
+      })
+    })
+
+    it('shows the restored values in the controls', async () => {
+      mockList([jobFixture()], 50)
+      renderPage('/jobs?q=python&work_mode=REMOTE&years_experience=5')
+      await screen.findByRole('listitem')
+
+      // An empty search box sitting over a filtered list is the version of
+      // this bug that looks like the filter is broken.
+      expect(screen.getByLabelText('Search')).toHaveValue('python')
+      expect(screen.getByLabelText('Work mode')).toHaveValue('REMOTE')
+      expect(screen.getByLabelText('Your experience')).toHaveValue('5+ years')
+    })
+
+    it('writes a filter change to the URL', async () => {
+      const user = userEvent.setup()
+      mockList([jobFixture()])
+      renderPage()
+      await screen.findByRole('listitem')
+
+      await user.selectOptions(screen.getByLabelText('Work mode'), 'REMOTE')
+
+      await waitFor(() => expect(currentUrl()).toBe('/jobs?work_mode=REMOTE'))
+    })
+
+    it('writes the settled search term, not each keystroke', async () => {
+      const user = userEvent.setup()
+      mockList([jobFixture()])
+      renderPage()
+      await screen.findByRole('listitem')
+
+      await user.type(screen.getByLabelText('Search'), 'data')
+
+      await waitFor(() => expect(currentUrl()).toBe('/jobs?q=data'))
+    })
+
+    it('drops the page from the URL when a filter changes', async () => {
+      const user = userEvent.setup()
+      const list = mockList([jobFixture()], 50)
+      renderPage('/jobs?work_mode=REMOTE&offset=20')
+      await screen.findByRole('listitem')
+
+      await user.selectOptions(screen.getByLabelText('Employment type'), 'FULL_TIME')
+
+      await waitFor(() => expect(currentUrl()).toBe('/jobs?work_mode=REMOTE&employment_type=FULL_TIME'))
+      expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 0 }))
+    })
+
+    it('removes a cleared filter from the URL rather than leaving it blank', async () => {
+      const user = userEvent.setup()
+      const list = mockList([jobFixture()])
+      renderPage('/jobs?years_experience=5')
+      await screen.findByRole('listitem')
+
+      await user.click(screen.getByRole('button', { name: 'Clear Your experience' }))
+
+      // A blank still reads as "no filter", so the request would stay correct
+      // while the address bar filled with ?years_experience=&work_mode= —
+      // which is why this asserts the URL and not only the request.
+      await waitFor(() => expect(currentUrl()).toBe('/jobs'))
+      expect(list.mock.lastCall?.[0]).not.toHaveProperty('years_experience')
+    })
+
+    it('ignores filter values the URL made up', async () => {
+      const list = mockList([])
+      renderPage('/jobs?work_mode=BANANA&years_experience=99&posted_within_days=999&offset=-5')
+      await screen.findByText('No jobs yet.')
+
+      // Nothing invalid reaches the API, which would answer 422 for it.
+      expect(list.mock.calls[0]?.[0]).toEqual({ limit: 20, offset: 0 })
+      // And the empty state does not claim filters are active and send the
+      // user off widening a search they never made.
+      expect(screen.queryByText('No jobs match those filters.')).not.toBeInTheDocument()
+    })
+
+    it('snaps an off-grid offset onto a page boundary', async () => {
+      const list = mockList([jobFixture()], 50)
+      renderPage('/jobs?offset=37')
+      await screen.findByRole('listitem')
+
+      expect(list.mock.calls[0]?.[0]).toEqual({ limit: 20, offset: 20 })
+    })
+
+    it('keeps filter changes out of history, and puts pages in it', async () => {
+      const user = userEvent.setup()
+      mockList([jobFixture()], 50)
+      render(
+        <MemoryRouter initialEntries={['/dashboard', '/jobs']} initialIndex={1}>
+          <JobsPage />
+          <LocationProbe />
+          <BackButton />
+        </MemoryRouter>,
+      )
+      await screen.findByRole('listitem')
+
+      // Two filter changes, both replacing: one Back leaves /jobs entirely.
+      // Pushing here would mean ten searches make a Back button that never
+      // escapes the page — and Back from a job would land on the
+      // second-to-last filter state, which is this bug one step removed.
+      await user.selectOptions(screen.getByLabelText('Work mode'), 'REMOTE')
+      await waitFor(() => expect(currentUrl()).toBe('/jobs?work_mode=REMOTE'))
+      await user.selectOptions(screen.getByLabelText('Employment type'), 'FULL_TIME')
+      await waitFor(() => expect(currentUrl()).toContain('employment_type'))
+
+      await user.click(screen.getByRole('button', { name: 'test-back' }))
+
+      await waitFor(() => expect(currentUrl()).toBe('/dashboard'))
+    })
+
+    it('puts a page change in history', async () => {
+      const user = userEvent.setup()
+      mockList([jobFixture()], 50)
+      render(
+        <MemoryRouter initialEntries={['/jobs']}>
+          <JobsPage />
+          <LocationProbe />
+          <BackButton />
+        </MemoryRouter>,
+      )
+      await screen.findByRole('listitem')
+
+      // A page is a real position in a list, and Back from page two should be
+      // page one rather than leaving the list.
+      await user.click(screen.getByRole('button', { name: 'Next' }))
+      await waitFor(() => expect(currentUrl()).toBe('/jobs?offset=20'))
+
+      await user.click(screen.getByRole('button', { name: 'test-back' }))
+
+      await waitFor(() => expect(currentUrl()).toBe('/jobs'))
+    })
+
+    it('carries the list you were on into the job link', async () => {
+      const user = userEvent.setup()
+      mockList([jobFixture()], 50)
+      render(
+        <MemoryRouter initialEntries={['/jobs?work_mode=REMOTE&offset=20']}>
+          <Routes>
+            <Route path="/jobs" element={<JobsPage />} />
+            <Route
+              path="/jobs/:jobId"
+              element={<StateProbe />}
+            />
+          </Routes>
+        </MemoryRouter>,
+      )
+      await screen.findByRole('listitem')
+
+      await user.click(screen.getByRole('link', { name: 'Senior Data Engineer' }))
+
+      // What the detail page's "back to jobs" link is built from.
+      expect(await screen.findByLabelText('link state')).toHaveTextContent(
+        JSON.stringify({ backTo: '/jobs?work_mode=REMOTE&offset=20' }),
+      )
+    })
+
+    it('explains an empty page past the end rather than blaming the filters', async () => {
+      const user = userEvent.setup()
+      const list = mockList([], 50)
+      renderPage('/jobs?offset=200')
+
+      // Only reachable by editing the URL — Next disables itself at the end —
+      // but "No jobs match those filters" would be a lie.
+      await screen.findByText('That page is past the end of these results.')
+      expect(screen.getByText('There are 50 jobs to show.')).toBeInTheDocument()
+
+      await user.click(screen.getByRole('button', { name: 'Back to the first page' }))
+
+      await waitFor(() => expect(currentUrl()).toBe('/jobs'))
+      expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 0 }))
     })
   })
 
@@ -241,6 +470,11 @@ describe('JobsPage', () => {
   it('returns to the first page when a filter changes', async () => {
     // Narrowing a search while on page three otherwise shows an empty list
     // that reads as "no results".
+    //
+    // The rule lives in setJobListFilter, at the write. It used to be an
+    // effect watching the filters, which could not survive the move to the
+    // URL: an effect also fires on mount, so arriving back at /jobs?offset=20
+    // would have wiped the very offset the URL was restoring.
     const user = userEvent.setup()
     const list = mockList([jobFixture()], 50)
     renderPage()

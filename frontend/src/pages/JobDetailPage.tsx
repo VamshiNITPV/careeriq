@@ -15,6 +15,7 @@ import {
   formatSalary,
   humanise,
   type JobDetail,
+  type JobDetailLocationState,
   type JobSkillRead,
 } from '@/types/job'
 import { cn } from '@/utils/cn'
@@ -163,9 +164,25 @@ export function JobDetailPage() {
   const location = useLocation()
   // Set by AddJobPage when the submission matched a posting already in the
   // corpus. Read once — a reload should not keep announcing it.
-  const [isDuplicate] = useState(
-    () => (location.state as { isDuplicate?: boolean } | null)?.isDuplicate === true,
-  )
+  const state = location.state as JobDetailLocationState | null
+  const [isDuplicate] = useState(() => state?.isDuplicate === true)
+
+  /*
+    Where the "back to jobs" links point. A plain const rather than state:
+    unlike the duplicate notice there is nothing to announce once and forget.
+
+    Guarded, and not only against undefined. History state is writable by any
+    script on the page, and `<Link to="//evil.example">` renders a
+    protocol-relative href that walks straight off the origin — the same trap
+    utils/externalUrl.ts exists for. Anything that is not a plain in-app path
+    falls back to the list, which is exactly what these links did before.
+  */
+  const backTo =
+    typeof state?.backTo === 'string' &&
+    state.backTo.startsWith('/') &&
+    !state.backTo.startsWith('//')
+      ? state.backTo
+      : '/jobs'
 
   const [job, setJob] = useState<JobDetail | null>(null)
   const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading')
@@ -211,7 +228,7 @@ export function JobDetailPage() {
           <Button variant="secondary" size="sm" onClick={load}>
             Try again
           </Button>
-          <Link to="/jobs" className="self-center text-sm text-indigo-600 hover:underline">
+          <Link to={backTo} className="self-center text-sm text-indigo-600 hover:underline">
             Back to jobs
           </Link>
         </div>
@@ -220,7 +237,13 @@ export function JobDetailPage() {
   }
 
   return (
-    <JobDetailView job={job} onJobChange={setJob} onReload={load} isDuplicate={isDuplicate} />
+    <JobDetailView
+      job={job}
+      onJobChange={setJob}
+      onReload={load}
+      isDuplicate={isDuplicate}
+      backTo={backTo}
+    />
   )
 }
 
@@ -238,11 +261,14 @@ function JobDetailView({
   onJobChange,
   onReload,
   isDuplicate,
+  backTo,
 }: {
   job: JobDetail
   onJobChange: (job: JobDetail) => void
   onReload: () => void
   isDuplicate: boolean
+  /** Already validated by JobDetailPage — never render raw link state. */
+  backTo: string
 }) {
   const required = job.skills.filter((s) => s.requirement === 'REQUIRED')
   const preferred = job.skills.filter((s) => s.requirement === 'PREFERRED')
@@ -266,7 +292,7 @@ function JobDetailView({
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      <Link to="/jobs" className="text-sm font-medium text-indigo-600 hover:underline">
+      <Link to={backTo} className="text-sm font-medium text-indigo-600 hover:underline">
         ← Back to jobs
       </Link>
 

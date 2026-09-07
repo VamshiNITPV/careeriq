@@ -97,6 +97,20 @@ export interface JobSubmitResponse {
   is_duplicate: boolean
 }
 
+/**
+ * Link state that JobDetailPage understands.
+ *
+ * Two independent senders — JobCard, which knows which list you were looking
+ * at, and AddJobPage, which knows the posting was already in the corpus. Both
+ * fields are optional and read independently, so a third sender adds a field
+ * rather than colliding with the other two.
+ */
+export interface JobDetailLocationState {
+  /** Path and search of the list to return to, e.g. "/jobs?q=python&offset=20". */
+  backTo?: string
+  isDuplicate?: boolean
+}
+
 export interface JobFilters {
   q?: string
   work_mode?: WorkMode
