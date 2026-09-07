@@ -80,7 +80,12 @@ class Settings(BaseSettings):
     # admin triggered it — while a timeout is expensive: the request still
     # counts against a quota measured in a few hundred per month, so giving up
     # early spends the scarce resource and returns nothing for it.
-    jobs_api_timeout_seconds: int = Field(default=45, ge=5, le=120)
+    #
+    # Raised from 45 when the rotation moved to OR-grouped queries: a group of
+    # four role names is a broader question than one, and one such query was
+    # measured running past 45s and returning nothing — having been billed all
+    # the same (2026-09-07, see services/job/rotation.py).
+    jobs_api_timeout_seconds: int = Field(default=60, ge=5, le=120)
     #: Which country the scheduled fetch searches.
     jobs_fetch_country: str = "in"
 

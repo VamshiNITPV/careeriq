@@ -11,68 +11,60 @@ against JSearch on 2026-09-07:
 * `golang developer in Hyderabad`, unfiltered — **10 results, all 10 new**.
 
 So repetition yields nothing and variety yields everything. The corpus grows by
-working through a matrix of role-and-city combinations, never repeating one
+working through a matrix of question-and-city combinations, never repeating one
 until the rest have been tried.
+
+**One request can ask about several roles at once.** Also measured, on the same
+day, and it is what makes a day's budget cover the whole role list rather than
+six-nineteenths of it:
+
+* `ai engineer OR genai developer OR llm engineer OR prompt engineer in
+  Bengaluru` — 10 results, genuinely mixed: *AI Engineer*, *Generative AI
+  Engineer*, *Senior GenAI Engineer*, *LLM Engineer*.
+* `python developer OR django developer OR fastapi developer OR backend
+  developer in Bengaluru` — 10 results in 5.9s, again mixed: *Python Backend
+  Developer*, *Python developer Fastapi*, *Backend Engineer (Python)*, one
+  naming Django.
+
+Two limits came with it, both paid for:
+
+1. **A rare term is crowded out by its group.** `vibe coder` returns three real
+   postings on its own, and none at all inside the AI group above — the common
+   terms take all ten slots. So a term that is rare gets its own query rather
+   than a share of someone else's.
+2. **An incoherent group is slow enough to time out.** `devops engineer OR
+   golang developer OR sql developer OR software development engineer in
+   Bengaluru` ran past the 45s client timeout and returned nothing — while
+   still costing a request, as ADR-019 records. The timeout has since been
+   raised, and groups are kept to terms that describe one kind of job. If a
+   group starts showing `created: 0` or timeouts in `job_fetch_runs`, split it.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
 
-#: Roles. Mostly drawn from the target roles a candidate states and the skills a
-#: resume actually carries, plus anything asked for by hand. Phrased as someone
-#: would search, because the provider matches on the whole string rather than on
-#: structured fields.
+#: Roles, grouped so that one request asks about a whole group.
 #:
-#: This list is a hand-maintained constant, which is its main limitation: the
-#: corpus grows only in the directions written here, so a user whose field is
-#: absent finds nothing however long they wait. Reading it from users' stated
-#: target roles is the obvious next step and has not been done.
-#: Roles asked **everywhere first**, before any other role is asked anywhere.
+#: Six groups covering nineteen role names, so **six requests cover every role
+#: in one city** — which is the point: a day's budget covers the whole list
+#: rather than a sixth of it, and the rotation then moves city by city instead
+#: of crawling role by role.
 #:
-#: Ordering roles within a city is not enough on its own to make a role arrive
-#: soon: the rotation is location-major, so putting a role at the top of one
-#: list still leaves it eight city-blocks away from its last city. These are
-#: crossed with every location up front instead, so the whole group is covered
-#: in the first week rather than the last.
+#: Groups hold terms that describe one kind of job. That is not tidiness: the
+#: measurement in the module docstring shows an incoherent group timing out and
+#: costing a request for nothing.
 #:
-#: Reserve it for a genuinely under-covered field. Everything promoted here
-#: delays everything else by the same amount — the budget is fixed, so priority
-#: is a reordering, never an increase.
-#:
-#: "vibe coder" is here on evidence rather than on the guess that preceded it:
-#: it looked like a description of a practice rather than a title anyone
-#: advertises under, so it was expected to return nothing. One request settled
-#: it — "vibe coder in Bengaluru" returned three postings on 2026-09-07, headed
-#: *Vibe Coder Entry Level Fresher*, *Tech Lead — Python+DataBricks - Vibe
-#: Coder* and *Freelance Web Scraping Engineer (Vibe Coding)*. Employers are
-#: using the term. The lesson is the one the module docstring records about
-#: `date_posted`: measure the provider, do not reason about it.
-PRIORITY_ROLES: tuple[str, ...] = (
-    "ai engineer",
-    "genai developer",
-    "llm engineer",
-    "prompt engineer",
-    "vibe coder",
-)
-
-#: The established titles, already well represented in the corpus. Asked after
-#: every priority role has been asked in every city.
-DEFAULT_ROLES: tuple[str, ...] = (
-    "python developer",
-    "backend developer",
-    "data engineer",
-    "data scientist",
-    "machine learning engineer",
-    "software development engineer",
-    "full stack developer",
-    "devops engineer",
-    "django developer",
-    "fastapi developer",
-    "golang developer",
-    "java developer",
-    "react developer",
-    "sql developer",
+#: `vibe coder` sits alone deliberately. It is a real title — three postings in
+#: Bengaluru on 2026-09-07 — but rare enough that grouping it with `ai engineer`
+#: returned none of it at all.
+ROLE_GROUPS: tuple[tuple[str, ...], ...] = (
+    ("ai engineer", "genai developer", "llm engineer", "prompt engineer"),
+    ("vibe coder",),
+    ("python developer", "django developer", "fastapi developer", "backend developer"),
+    ("data engineer", "data scientist", "machine learning engineer"),
+    ("full stack developer", "react developer", "java developer"),
+    ("devops engineer", "golang developer", "sql developer", "software development engineer"),
 )
 
 #: Cities, weighted to where the corpus already shows Indian tech hiring.
@@ -91,30 +83,22 @@ DEFAULT_LOCATIONS: tuple[str, ...] = (
 
 
 def build_queries(
-    roles: tuple[str, ...] = DEFAULT_ROLES,
+    groups: tuple[tuple[str, ...], ...] = ROLE_GROUPS,
     locations: tuple[str, ...] = DEFAULT_LOCATIONS,
-    priority_roles: tuple[str, ...] = PRIORITY_ROLES,
 ) -> list[str]:
-    """Every role-and-city combination, in a stable order.
+    """Every role-group-and-city combination, in a stable order.
 
-    Two blocks: the priority roles across every city, then everything else. The
-    split exists because ordering roles *within* a city does not actually make a
-    role arrive soon — location-major ordering leaves the ninth city eight
-    blocks away regardless of where the role sits in its list.
+    Ordered **city-major**, which is the opposite of what it was and is the
+    whole point of the grouping: six groups is one city's worth of questions,
+    so at six requests a day each day covers every role in one city and the
+    next day moves on. The full matrix comes round in nine days rather than
+    twenty-eight, so a repeat is asked of an index that has had a week to
+    change rather than a month.
 
-    Each block is ordered location-major so consecutive runs cover different
-    cities rather than nineteen variations on Bengaluru — a day's fetch then
-    spans the market instead of one corner of it.
-
-    Duplicates are dropped rather than rejected: a role named in both tuples is
-    a maintenance slip, not a reason to fail at startup, and asking the same
-    question twice in one cycle would waste a request for nothing.
+    `OR` between the terms of a group, which the provider honours — see the
+    module docstring for what was measured.
     """
-    ordered = [
-        *(f"{role} in {location}" for location in locations for role in priority_roles),
-        *(f"{role} in {location}" for location in locations for role in roles),
-    ]
-    return list(dict.fromkeys(ordered))
+    return [f"{' OR '.join(group)} in {location}" for location in locations for group in groups]
 
 
 def next_query(candidates: list[str], last_used: dict[str, datetime]) -> str | None:

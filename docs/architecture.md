@@ -822,9 +822,25 @@ held. *Repetition yields nothing; variety yields everything.*
    request a day is the honest rate for that; six would be spending the month's quota on postings
    already held.
 
-**The honest limit:** at six requests a day the matrix takes about a month to work through, which
-is almost exactly the monthly quota. After that, arrivals drop sharply. This is a property of a
-200-request tier, not something the design can engineer away.
+**Amended the same day: one request asks about several roles.** The matrix above took a month to
+cross because it asked one role at a time. Measured: `ai engineer OR genai developer OR llm
+engineer OR prompt engineer in Bengaluru` returns ten genuinely mixed results, and the same holds
+for a Python group in 5.9s. So nineteen role names collapse into **six groups**, six requests cover
+every role in one city, and a day's budget now covers the whole role list rather than a sixth of
+it. The cycle is 54 queries — **nine days, not twenty-eight** — so a repeat is asked of an index
+that has had a week to change rather than a month.
+
+Two limits came with it, both paid for in quota:
+
+- **A rare term is crowded out by its group.** `vibe coder` returns three real postings alone and
+  none inside the AI group; the common terms take all ten slots. Rare terms get their own query.
+- **An incoherent group can time out.** Four unrelated roles ran past the 45s client timeout and
+  returned nothing, while still being billed. `jobs_api_timeout_seconds` is now 60, and groups hold
+  terms describing one kind of job. A group that starts showing `created: 0` in `job_fetch_runs`
+  should be split.
+
+**The honest limit:** the quota is still 200 a month, and grouping does not change how many
+postings a request returns — ten. It changes *which* roles a day covers, not how many jobs arrive.
 
 **Consequences.**
 - **Quota is the binding constraint, and it is small.** Measured, not estimated: JSearch's free

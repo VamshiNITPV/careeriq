@@ -11,58 +11,60 @@ from datetime import UTC, datetime, timedelta
 
 from app.services.job.rotation import (
     DEFAULT_LOCATIONS,
-    DEFAULT_ROLES,
-    PRIORITY_ROLES,
+    ROLE_GROUPS,
     build_queries,
     next_query,
 )
 
 
 class TestBuildQueries:
-    def test_covers_every_role_and_location_once(self) -> None:
+    def test_covers_every_group_and_location_once(self) -> None:
         queries = build_queries()
-        roles = len(DEFAULT_ROLES) + len(PRIORITY_ROLES)
 
-        assert len(queries) == roles * len(DEFAULT_LOCATIONS)
+        assert len(queries) == len(ROLE_GROUPS) * len(DEFAULT_LOCATIONS)
         assert len(set(queries)) == len(queries)
 
-    def test_priority_roles_reach_every_city_before_anything_else(self) -> None:
-        """The point of the priority block, and the reason it is not just an ordering.
+    def test_a_day_of_requests_covers_every_role(self) -> None:
+        """The whole reason the roles are grouped.
 
-        Putting a role at the top of `DEFAULT_ROLES` would fetch it in the first
-        city on day one and in the ninth city a month later, because the
-        rotation is location-major. Crossing it with every city up front is what
-        actually makes the whole group arrive early.
+        Six groups is one city's worth of questions, so six requests — a day's
+        budget — ask about every role name on the list. Ungrouped it was
+        nineteen roles crawling one at a time, and a role at the end of the
+        list waited three weeks for its first look.
         """
-        queries = build_queries(
-            roles=("established",), locations=("X", "Y"), priority_roles=("urgent",)
-        )
+        per_day = len(ROLE_GROUPS)
+        first_day = build_queries()[:per_day]
 
-        assert queries == [
-            "urgent in X",
-            "urgent in Y",
-            "established in X",
-            "established in Y",
-        ]
+        named = " ".join(first_day)
+        for group in ROLE_GROUPS:
+            for role in group:
+                assert role in named
 
-    def test_a_role_named_twice_is_asked_once(self) -> None:
-        """A maintenance slip, not a reason to fail — but never a wasted request."""
-        queries = build_queries(
-            roles=("python developer",),
-            locations=("Pune",),
-            priority_roles=("python developer",),
-        )
+    def test_asks_about_a_whole_group_in_one_query(self) -> None:
+        """OR between the terms, which the provider honours — see the module docstring."""
+        queries = build_queries(groups=(("alpha", "beta"),), locations=("Pune",))
 
-        assert queries == ["python developer in Pune"]
+        assert queries == ["alpha OR beta in Pune"]
 
-    def test_consecutive_queries_span_cities_not_one_city(self) -> None:
-        """Location-major ordering, so a day's six fetches cover six cities.
+    def test_keeps_a_rare_term_out_of_a_group(self) -> None:
+        """Measured: "vibe coder" returns nothing when grouped with "ai engineer".
 
-        Role-major would spend the first fortnight on Bengaluru alone.
+        The common terms take all ten result slots, so a rare one only ever
+        surfaces as a question of its own.
         """
-        queries = build_queries(
-            roles=("python", "java"), locations=("Pune", "Chennai"), priority_roles=()
-        )
+        solo = [group for group in ROLE_GROUPS if len(group) == 1]
+
+        assert ("vibe coder",) in solo
+
+    def test_finishes_a_city_before_moving_to_the_next(self) -> None:
+        """City-major, which is the opposite of what it was — and deliberate.
+
+        Six groups is exactly one city, so this ordering means each day covers
+        every role in one city and the next day moves on. The full matrix comes
+        round in nine days rather than twenty-eight, so a repeat is asked of an
+        index that has had a week to change rather than a month.
+        """
+        queries = build_queries(groups=(("python",), ("java",)), locations=("Pune", "Chennai"))
 
         assert queries == [
             "python in Pune",
@@ -106,7 +108,7 @@ class TestNextQuery:
 
     def test_rotation_visits_everything_before_repeating(self) -> None:
         """The property that makes the corpus grow, simulated over a full cycle."""
-        candidates = build_queries(roles=("a", "b"), locations=("X", "Y", "Z"))
+        candidates = build_queries(groups=(("a",), ("b",)), locations=("X", "Y", "Z"))
         last_used: dict[str, datetime] = {}
         now = datetime.now(UTC)
         picked: list[str] = []
