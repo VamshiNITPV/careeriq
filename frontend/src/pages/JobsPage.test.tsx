@@ -365,10 +365,11 @@ describe('JobsPage', () => {
     })
   })
 
-  describe('the filters collapse on small screens', () => {
+  describe('the filters collapse behind a button', () => {
     /**
-     * Below lg the four dropdowns hide behind a button, so three rows of
-     * filters do not push the jobs off the first screen.
+     * The page opens on a search box and a way to the rest, at every width.
+     * Opening the panel hides the results: filtering is a step, not something
+     * done alongside reading.
      *
      * The collapse itself is pure CSS. jsdom has no layout and this suite loads
      * no stylesheet, so nothing here can prove what a real viewport renders —
@@ -415,16 +416,126 @@ describe('JobsPage', () => {
       expect(panel()).not.toHaveClass('hidden')
     })
 
-    it('keeps the collapse to small screens', async () => {
-      // A tripwire for a refactor that drops the breakpoint classes, and
-      // nothing more: with no stylesheet in jsdom these strings have no effect
-      // on rendering here at all.
+    it('collapses at every width, not just small screens', async () => {
+      // An inverted tripwire: the breakpoint classes used to keep the panel
+      // open at lg, and their return would silently undo this change. With no
+      // stylesheet in jsdom these strings have no effect on rendering here at
+      // all — the browser steps in the plan cover what a real viewport does.
       mockList([jobFixture()])
       renderPage()
       await screen.findByRole('listitem')
 
-      expect(trigger().parentElement).toHaveClass('lg:hidden')
-      expect(panel()).toHaveClass('lg:grid')
+      expect(panel()).toHaveClass('hidden')
+      expect(panel()).not.toHaveClass('lg:grid')
+      expect(trigger().parentElement).not.toHaveClass('lg:hidden')
+    })
+
+    it('counts only the filters that are behind the button', async () => {
+      // Search sits outside the panel, so counting it would promise a filter
+      // the panel does not contain.
+      mockList([jobFixture()])
+      renderPage('/jobs?q=python')
+      await screen.findByRole('listitem')
+
+      expect(trigger()).toHaveAccessibleName('Filters')
+    })
+
+    it('hides the results while the filters are open', async () => {
+      const user = userEvent.setup()
+      mockList([jobFixture()], 50)
+      renderPage()
+      await screen.findByRole('listitem')
+
+      await user.click(trigger())
+
+      expect(screen.queryByRole('listitem')).not.toBeInTheDocument()
+      // A regex, because getByText normalises across the two text nodes of
+      // `Showing {showing}`.
+      expect(screen.queryByText(/^Showing /)).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Next' })).not.toBeInTheDocument()
+    })
+
+    it('brings the results back, and the focus with them', async () => {
+      const user = userEvent.setup()
+      mockList([jobFixture()], 50)
+      renderPage()
+      await screen.findByRole('listitem')
+      await user.click(trigger())
+
+      await user.click(screen.getByRole('button', { name: 'Show 50 jobs' }))
+
+      expect(await screen.findByRole('listitem')).toBeInTheDocument()
+      expect(trigger()).toHaveAttribute('aria-expanded', 'false')
+      // The button unmounts itself, so without an explicit return focus would
+      // land on <body> and reset tab order to the top of the page.
+      expect(trigger()).toHaveFocus()
+    })
+
+    it('says how many jobs are waiting, in the singular too', async () => {
+      const user = userEvent.setup()
+      mockList([jobFixture()], 1)
+      renderPage()
+      await screen.findByRole('listitem')
+
+      await user.click(trigger())
+
+      expect(screen.getByRole('button', { name: 'Show 1 job' })).toBeInTheDocument()
+    })
+
+    it('promises no count before anything has loaded', async () => {
+      // Reachable: the panel can be opened while the mount spinner is still
+      // up. "Show 0 jobs" would be a claim about a request that has not landed.
+      const user = userEvent.setup()
+      vi.spyOn(jobService, 'list').mockReturnValue(new Promise(() => {}))
+      renderPage()
+
+      await user.click(trigger())
+
+      expect(screen.getByRole('button', { name: 'Show results' })).toBeInTheDocument()
+    })
+
+    it('promises no count when nothing matches', async () => {
+      const user = userEvent.setup()
+      mockList([], 0)
+      renderPage()
+      await screen.findByText('No jobs yet.')
+
+      await user.click(trigger())
+
+      expect(screen.getByRole('button', { name: 'Show results' })).toBeInTheDocument()
+    })
+
+    it('keeps the count in step with the filters, without closing', async () => {
+      const user = userEvent.setup()
+      const list = mockList([jobFixture()], 50)
+      renderPage()
+      await screen.findByRole('listitem')
+      await user.click(trigger())
+      list.mockResolvedValue({ items: [jobFixture()], total: 7, limit: 20, offset: 0 })
+
+      await user.selectOptions(screen.getByLabelText('Work mode'), 'REMOTE')
+
+      expect(await screen.findByRole('button', { name: 'Show 7 jobs' })).toBeInTheDocument()
+      // People set two and three filters at a time; closing after each one
+      // would make the panel hostile.
+      expect(trigger()).toHaveAttribute('aria-expanded', 'true')
+    })
+
+    it('leaves the search box usable while the panel is open', async () => {
+      // Search is in the top row, outside the panel. This pins the rule that
+      // nothing closes the panel except a user gesture — an effect keyed on
+      // `q` would slam it shut mid-sentence.
+      const user = userEvent.setup()
+      mockList([jobFixture()])
+      renderPage()
+      await screen.findByRole('listitem')
+      await user.click(trigger())
+
+      await user.type(screen.getByLabelText('Search'), 'data')
+
+      await waitFor(() => expect(currentUrl()).toBe('/jobs?q=data'))
+      expect(trigger()).toHaveAttribute('aria-expanded', 'true')
+      expect(screen.queryByRole('listitem')).not.toBeInTheDocument()
     })
 
     it('keeps the search box out of the collapse', async () => {
@@ -565,6 +676,20 @@ describe('JobsPage', () => {
       // Past the debounce window, and still clear.
       await new Promise((resolve) => setTimeout(resolve, 500))
       expect(currentUrl()).toBe('/jobs')
+    })
+
+    it('keeps focus on the page after clearing', async () => {
+      // Clearing unmounts the button that was just clicked, because hasFilters
+      // goes false. Focus would otherwise drop to <body>.
+      const user = userEvent.setup()
+      mockList([jobFixture()])
+      renderPage('/jobs?work_mode=REMOTE')
+      await screen.findByRole('listitem')
+
+      await user.click(clearAll())
+
+      expect(document.body).not.toHaveFocus()
+      expect(screen.getByRole('button', { name: /^Filters/ })).toHaveFocus()
     })
 
     it('can be reached without opening the filters panel', async () => {

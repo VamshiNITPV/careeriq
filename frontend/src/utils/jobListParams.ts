@@ -107,17 +107,27 @@ export function readJobListParams(params: URLSearchParams): JobListParams {
 }
 
 /**
- * How many of the five filters are set.
+ * Set filters, out of however many the caller counts.
  *
  * Compared against '' rather than tested for truthiness, for the reason
  * `yearsValue` gives above: '0' is a real filter and `Number('0')` is falsy.
- * Miss it and "0+ years" counts as nothing — which decides both the badge on
- * the collapsed Filters button and whether the empty state offers to add a job
- * or to widen the search.
+ * Miss it and "0+ years" counts as nothing.
  *
- * Takes the validated params, never raw `URLSearchParams`. `?work_mode=BANANA`
- * is not a filter, and counting query-string keys would advertise one that was
- * never sent — the same lie the empty state already refuses to tell.
+ * Both counters below take the validated params, never raw `URLSearchParams`.
+ * `?work_mode=BANANA` is not a filter, and counting query-string keys would
+ * advertise one that was never sent — the same lie the empty state refuses to
+ * tell.
+ */
+function countSet(values: readonly string[]): number {
+  return values.filter((value) => value !== '').length
+}
+
+/**
+ * How many of the five filters are set, the search term included.
+ *
+ * This is "is the list narrowed at all?" — it decides whether the empty state
+ * offers to add a job or to widen the search, and whether there is anything for
+ * "Clear all filters" to do.
  */
 export function countActiveJobFilters({
   q,
@@ -126,9 +136,24 @@ export function countActiveJobFilters({
   yearsValue,
   postedWithin,
 }: JobListParams): number {
-  return [q, workMode, employmentType, yearsValue, postedWithin].filter(
-    (value) => value !== '',
-  ).length
+  return countSet([q, workMode, employmentType, yearsValue, postedWithin])
+}
+
+/**
+ * How many filters are set *behind the Filters button* — the search term
+ * excluded, because it is not behind it.
+ *
+ * Search is its own control in its own place on the page. A badge that counted
+ * it would promise something the panel does not contain: type "python" and the
+ * button would read "Filters 1" over four untouched dropdowns.
+ */
+export function countPanelFilters({
+  workMode,
+  employmentType,
+  yearsValue,
+  postedWithin,
+}: JobListParams): number {
+  return countSet([workMode, employmentType, yearsValue, postedWithin])
 }
 
 /**

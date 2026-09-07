@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   clearJobListFilters,
   countActiveJobFilters,
+  countPanelFilters,
   JOB_FILTER_KEYS,
   PAGE_SIZE,
   readJobListParams,
@@ -154,6 +155,37 @@ describe('setJobListFilter', () => {
     setJobListFilter(previous, 'q', 'java')
 
     expect(previous.get('q')).toBe('python')
+  })
+})
+
+describe('countPanelFilters', () => {
+  /**
+   * What is behind the Filters button, which is not the same question as
+   * "is the list narrowed". Search sits outside the panel on the page, so a
+   * badge that counted it would promise a filter the panel does not contain.
+   */
+
+  it('ignores the search term', () => {
+    expect(countPanelFilters(read('q=python'))).toBe(0)
+  })
+
+  it('counts the four that are behind the button', () => {
+    const all = read(
+      'q=python&work_mode=REMOTE&employment_type=FULL_TIME' +
+        '&years_experience=5&posted_within_days=7',
+    )
+
+    // Five filters are set; four of them are in the panel.
+    expect(countActiveJobFilters(all)).toBe(5)
+    expect(countPanelFilters(all)).toBe(4)
+  })
+
+  it('counts "0+ years", which is a real filter', () => {
+    expect(countPanelFilters(read('years_experience=0'))).toBe(1)
+  })
+
+  it('does not count a value the URL made up, or the page', () => {
+    expect(countPanelFilters(read('work_mode=BANANA&offset=20'))).toBe(0)
   })
 })
 

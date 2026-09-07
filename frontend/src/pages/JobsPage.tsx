@@ -16,6 +16,7 @@ import { cn } from '@/utils/cn'
 import {
   clearJobListFilters,
   countActiveJobFilters,
+  countPanelFilters,
   PAGE_SIZE,
   readJobListParams,
   setJobListFilter,
@@ -83,15 +84,33 @@ export function JobsPage() {
 
   const requestId = useRef(0)
 
-  // Below lg the four dropdowns collapse behind a button, so the results are
-  // not pushed off the first screen by three rows of filters.
+  // The page opens on a search box and a way to the rest, at every width. The
+  // four dropdowns are behind the button, and while they are showing the
+  // results are not — filtering is a step, not a thing you do alongside
+  // reading.
   //
   // Always closed on arrival, never seeded from the active filters: someone
   // following a shared /jobs?work_mode=REMOTE link came for the results, and
-  // opening the panel for them pushes those results down — the very thing this
-  // exists to prevent. The count on the button is what tells them instead.
+  // opening the panel for them hides the very thing they followed the link
+  // for. The count on the button is what tells them a filter is on instead.
+  //
+  // **`filtersOpen` is written only from onClick/onKeyDown.** It is in no
+  // dependency array and no effect writes it. An effect closing it on a filter
+  // change is the obvious-looking mistake: Search stays usable while the panel
+  // is open, so it would slam shut mid-sentence.
   const [filtersOpen, setFiltersOpen] = useState(false)
   const filtersTrigger = useRef<HTMLButtonElement>(null)
+
+  /*
+    Closing always puts focus back on the trigger. The footer button unmounts
+    itself, and hiding the panel with display:none blurs whatever is inside it
+    — either way focus would land on <body> and reset tab order to the top of
+    the page.
+  */
+  const closeFilters = useCallback(() => {
+    setFiltersOpen(false)
+    filtersTrigger.current?.focus()
+  }, [])
 
   // Adjusting state during render, which is deliberate and not something to be
   // "tidied" into an effect: Back, or a pasted link, changes `q` underneath us
@@ -141,6 +160,9 @@ export function JobsPage() {
     // debounce writes `?q=python` into the URL that was just cleared.
     setSearchText('')
     setSearchParams(clearJobListFilters, { replace: true })
+    // Clearing unmounts the button that was just clicked, because hasFilters
+    // goes false. Without this, focus drops to <body>.
+    filtersTrigger.current?.focus()
   }, [setSearchParams])
 
   // Pushed, unlike the filters: a page is a real position in a list, it is one
@@ -189,10 +211,37 @@ export function JobsPage() {
 
   // Same reason as the request itself. Miss it here and "0+ years" renders
   // "No jobs yet." with an Add-a-job button while a filter is active.
-  const activeFilterCount = countActiveJobFilters(params)
-  const hasFilters = activeFilterCount > 0
+  // Two counts, deliberately. `hasFilters` asks "is the list narrowed at all?"
+  // and so includes the search term; the badge asks "how many of the things
+  // behind this button are set?" and so does not.
+  const hasFilters = countActiveJobFilters(params) > 0
+  const panelFilterCount = countPanelFilters(params)
 
   const showing = jobs.length > 0 ? `${offset + 1}–${offset + jobs.length} of ${total}` : null
+
+  /*
+    `total` is the last *completed* load's total, so between a filter change and
+    its response this label is one request behind. That staleness is deliberate:
+    the alternative is flipping to a placeholder and back on every settled
+    keystroke, a flicker on the one control the user is aiming at.
+
+    `total === 0` covers two cases with the same honest words — nothing has
+    loaded yet (reachable: the panel can be opened while the mount spinner is
+    up) and nothing matches. "Show 0 jobs" reads as a dare.
+
+    On error there is no count to promise, and the button must stay enabled: it
+    is the only way back to the "Try again" control.
+  */
+  const showResultsLabel =
+    loadState === 'error' || total === 0
+      ? 'Show results'
+      : total === 1
+        ? 'Show 1 job'
+        : `Show ${total} jobs`
+
+  /** The prose form, for the live region. Mirrors the "past the end" wording. */
+  const totalSentence =
+    total === 0 ? 'No jobs to show.' : total === 1 ? '1 job to show.' : `${total} jobs to show.`
 
   return (
     <div className="space-y-6">
@@ -216,112 +265,118 @@ export function JobsPage() {
           stop it reaching an enclosing dialog, and a handler on a React
           ancestor is the one place that is definitively honoured — so one
           Escape closes the experience list and keeps its value, and a second
-          closes this panel. It also scopes Escape correctly: pressing it while
-          reading the job list should not collapse the filters.
+          closes this panel. The footer row below is inside this element on
+          purpose, so Escape works from the "Show N jobs" button too.
         */
         onKeyDown={(event) => {
           if (event.key !== 'Escape' || !filtersOpen) return
-          setFiltersOpen(false)
-          // Focus would otherwise land on <body>, resetting tab order to the
-          // top of the page.
-          filtersTrigger.current?.focus()
+          closeFilters()
         }}
       >
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        {/*
+          What a closed page offers, at every width: a search box and a way to
+          the rest. `flex-wrap` rather than a breakpoint — the button drops to
+          its own line exactly when there is no room for it, and `items-end`
+          applies per flex line, so the bottoms still align on both.
+        */}
+        <div className="flex flex-wrap items-end gap-4">
           {/*
-            Deliberately outside the collapsing group. Free-text search is the
-            control people reach for first, and putting it behind a tap is the
-            downgrade the rest of this is trying to avoid.
+            Input renders a bare <div> and forwards className to the <input>
+            itself, so the growth has to live on a wrapper of our own.
+            `min-w-56` is the width below which the button wraps instead of
+            crushing the box.
           */}
-          <Input
-            label="Search"
-            type="search"
-            placeholder="Title or description"
-            value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
-          />
-
-          {/*
-            Between the search box and what it controls, so DOM order, reading
-            order and tab order agree. `lg:hidden` is display:none, which
-            generates no box at all — so at lg this is not a grid item and the
-            five columns line up exactly as they did before. Swap it for
-            `lg:invisible` and the row silently gains a sixth cell.
-          */}
-          <div className="flex items-end lg:hidden">
-            <button
-              type="button"
-              ref={filtersTrigger}
-              onClick={() => setFiltersOpen((open) => !open)}
-              aria-expanded={filtersOpen}
-              aria-controls="job-filters"
-              className={buttonClass({ variant: 'secondary', size: 'sm' })}
-            >
-              <FilterIcon />
-              Filters
-              {activeFilterCount > 0 && (
-                <>
-                  {/*
-                    The badge is hidden from assistive tech and the count is
-                    given as words beside it. A bare "2" in the accessible name
-                    reads as "Filters 2", which could be a page number. The
-                    visible text stays the name source, so no aria-label is
-                    needed and none should be added — it would override the
-                    visible text and drift from it.
-                  */}
-                  <span
-                    aria-hidden="true"
-                    className="rounded-full bg-indigo-600 px-1.5 text-xs font-semibold text-white"
-                  >
-                    {activeFilterCount}
-                  </span>
-                  <span className="sr-only">{activeFilterCount} active</span>
-                </>
-              )}
-            </button>
+          <div className="min-w-56 flex-1">
+            <Input
+              label="Search"
+              type="search"
+              placeholder="Title or description"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+            />
           </div>
 
           {/*
-            Toggled with display *classes*, not the `hidden` attribute the
-            mobile nav in AppLayout uses. Three-way state — collapsed, expanded,
-            always-open at lg — is not expressible as one boolean attribute, and
-            the attribute would also drop everything in here out of the
-            accessibility tree, which is what getByRole filters on.
-
-            The ternary emits exactly one display class. `cn` is a plain join,
-            not tailwind-merge, so `cn('grid', !open && 'hidden')` would leave
-            both in the attribute and let Tailwind's internal ordering decide.
-            `lg:grid` beating a base `hidden` is safe by contrast: it lives in a
-            media block, emitted after the base utilities.
-
-            Nothing here may gain `overflow-*`, `transform`, `transition` or a
-            stacking context. The experience Combobox's listbox is
-            position:absolute with no portal (comboboxCore.listboxClass), so any
-            of those clips or re-anchors eleven options. `display` is not
-            animatable in any case.
+            After the search box and before what it controls, so DOM order,
+            reading order and tab order all agree.
           */}
-          <div
-            id="job-filters"
-            className={cn(
-              'gap-4 sm:col-span-2 sm:grid-cols-2 lg:col-span-4 lg:grid-cols-4 lg:grid',
-              filtersOpen ? 'grid' : 'hidden',
-            )}
+          <button
+            type="button"
+            ref={filtersTrigger}
+            onClick={() => setFiltersOpen((open) => !open)}
+            aria-expanded={filtersOpen}
+            aria-controls="job-filters"
+            className={buttonClass({ variant: 'secondary' })}
           >
-            <Select
-              label="Work mode"
-              placeholder="Any"
-              options={WORK_MODES}
-              value={workMode}
-              onChange={(e) => setFilter('work_mode', e.target.value)}
-            />
-            <Select
-              label="Employment type"
-              placeholder="Any"
-              options={EMPLOYMENT_TYPES}
-              value={employmentType}
-              onChange={(e) => setFilter('employment_type', e.target.value)}
-            />
-            {/*
+            <FilterIcon />
+            Filters
+            {panelFilterCount > 0 && (
+              <>
+                {/*
+                  The badge is hidden from assistive tech and the count is
+                  given as words beside it. A bare "2" in the accessible name
+                  reads as "Filters 2", which could be a page number. The
+                  visible text stays the name source, so no aria-label is
+                  needed and none should be added — it would override the
+                  visible text and drift from it.
+                */}
+                <span
+                  aria-hidden="true"
+                  className="rounded-full bg-indigo-600 px-1.5 text-xs font-semibold text-white"
+                >
+                  {panelFilterCount}
+                </span>
+                <span className="sr-only">{panelFilterCount} active</span>
+              </>
+            )}
+          </button>
+        </div>
+
+        {/*
+          Toggled with display *classes*, not the `hidden` attribute the mobile
+          nav in AppLayout uses. The attribute would drop everything in here out
+          of the accessibility tree, which is what getByRole filters on — and
+          these four are queried by role and by label throughout
+          JobsPage.test.tsx without the panel ever being opened.
+
+          The ternary emits exactly one display class. `cn` is a plain join, not
+          tailwind-merge, so `cn('grid', !open && 'hidden')` would leave both in
+          the attribute and let Tailwind's internal ordering decide.
+
+          There is no `lg:grid` any more, and there must not be: the panel is
+          closed at every width now. `sm:grid-cols-2` and `lg:grid-cols-4` are
+          safe in the base string because grid-template-columns does not set
+          `display`, so neither can un-hide the panel at a breakpoint.
+
+          Nothing here may gain `overflow-*`, `transform`, `transition`,
+          `opacity` or a stacking context. The experience Combobox's listbox is
+          position:absolute with no portal (comboboxCore.listboxClass), so any
+          of those clips or re-anchors eleven options. `display` is not
+          animatable in any case, and plain `grid` is safe — it establishes
+          neither a stacking context nor a containing block.
+        */}
+        <div
+          id="job-filters"
+          className={cn(
+            'mt-4 gap-4 sm:grid-cols-2 lg:grid-cols-4',
+            filtersOpen ? 'grid' : 'hidden',
+          )}
+        >
+          <Select
+            label="Work mode"
+            placeholder="Any"
+            options={WORK_MODES}
+            value={workMode}
+            onChange={(e) => setFilter('work_mode', e.target.value)}
+          />
+          <Select
+            label="Employment type"
+            placeholder="Any"
+            options={EMPLOYMENT_TYPES}
+            value={employmentType}
+            onChange={(e) => setFilter('employment_type', e.target.value)}
+          />
+          {/*
             A Combobox rather than a native Select: eleven options is short
             enough for either, but this one supports typing to filter as well as
             arrowing. It commits on selection, so unlike the free-text box it
@@ -329,64 +384,106 @@ export function JobsPage() {
             against — only list options can be chosen. Clearing back to "Any" is
             the × button.
           */}
-            <Combobox
-              label="Your experience"
-              options={EXPERIENCE_YEAR_OPTIONS}
-              value={yearsValue}
-              onChange={(value) => setFilter('years_experience', value)}
-              placeholder="Any"
-              hint="Shows jobs whose stated range covers you. Postings that don't say are still shown."
-            />
-            {/*
+          <Combobox
+            label="Your experience"
+            options={EXPERIENCE_YEAR_OPTIONS}
+            value={yearsValue}
+            onChange={(value) => setFilter('years_experience', value)}
+            placeholder="Any"
+            hint="Shows jobs whose stated range covers you. Postings that don't say are still shown."
+          />
+          {/*
             A native Select, unlike the years Combobox beside it: four options
             is too few to be worth typing through, and the Combobox's filtering
             earns nothing here.
           */}
-            <Select
-              label="Posted within"
-              placeholder="Any time"
-              options={POSTED_WITHIN_OPTIONS}
-              value={postedWithin}
-              onChange={(e) => setFilter('posted_within_days', e.target.value)}
-              hint="Postings with no stated date are still shown."
-            />
-          </div>
+          <Select
+            label="Posted within"
+            placeholder="Any time"
+            options={POSTED_WITHIN_OPTIONS}
+            value={postedWithin}
+            onChange={(e) => setFilter('posted_within_days', e.target.value)}
+            hint="Postings with no stated date are still shown."
+          />
         </div>
 
         {/*
-          Outside the collapsing panel, so clearing is one tap whether the panel
-          is open or shut — which is the whole point of it on a narrow screen,
-          where the filters being cleared are not even visible.
+          Always mounted, and empty while the panel is shut. A live region
+          inserted with its text already in place is not reliably announced;
+          one whose content changes from '' always is. So opening the panel —
+          the moment the results vanish — says what is behind the button, and
+          each settled filter change says it again. That is the rate at which
+          the "Showing 1–20 of 50" line already announces, so this is parity
+          rather than new chatter, and it is what stops a screen-reader user
+          losing that line entirely while filtering.
 
-          Rendered only when there is something to clear, rather than sitting
-          there disabled: a permanently greyed-out button is noise on a page
-          that is mostly controls already.
+          aria-live with no role, following Combobox.tsx: role="status" would
+          collide with the "Showing …" line, and testing-library computes roles
+          from the element and its role attribute rather than from aria-live.
         */}
-        {hasFilters && (
-          <div className="mt-4 flex justify-end">
-            <Button variant="ghost" size="sm" onClick={clearFilters}>
-              Clear all filters
-            </Button>
+        <span aria-live="polite" className="sr-only">
+          {filtersOpen && loadState === 'ready' ? totalSentence : ''}
+        </span>
+
+        {/*
+          Clear-all stays outside the panel, so clearing is one tap whether the
+          panel is open or shut. It stays out of the top row too, though that
+          looks like the obvious home: `hasFilters` counts the search term, so
+          it would appear 300ms into the first keystroke and shrink the search
+          box by its own width, under the user's caret.
+
+          "Show N jobs" is the way back to the results, which otherwise vanish
+          with no visible route home. Rendered rather than class-hidden because,
+          unlike the four dropdowns, no test needs to reach it while shut.
+        */}
+        {(hasFilters || filtersOpen) && (
+          <div className="mt-4 flex flex-wrap items-center justify-end gap-3">
+            {hasFilters && (
+              <Button variant="ghost" size="sm" onClick={clearFilters}>
+                Clear all filters
+              </Button>
+            )}
+            {filtersOpen && (
+              <Button size="sm" onClick={closeFilters}>
+                {showResultsLabel}
+              </Button>
+            )}
           </div>
         )}
       </div>
 
-      {error !== null && (
-        <Alert tone="error" title="We couldn't load jobs">
-          {error}
-        </Alert>
-      )}
+      {/*
+        The results, and everything describing them, only while the panel is
+        shut — the error alert included, because "Try again" lives inside the
+        chain below and an alert with no way to act on it is half a message.
+        The close button falls back to "Show results" whenever loadState is
+        'error', so nothing promises a count that is not coming.
 
-      {loadState === 'error' ? (
-        <Button variant="secondary" size="sm" onClick={load}>
-          Try again
-        </Button>
-      ) : loadState === 'loading' ? (
-        <div className="flex justify-center py-12">
-          <Spinner className="size-6 text-indigo-600" label="Loading jobs" />
-        </div>
-      ) : jobs.length === 0 && offset > 0 ? (
-        /*
+        A conditional render, unlike the panel above. That display-class trick
+        exists to keep the four dropdowns in jsdom's accessibility tree for
+        tests that never open the panel; nothing here needs reaching while the
+        panel is open, and unmounting is what was asked for. A fragment, so
+        `space-y-6` still sees the alert, the "Showing" line, the <ul> and the
+        pager as its own children.
+      */}
+      {!filtersOpen && (
+        <>
+          {error !== null && (
+            <Alert tone="error" title="We couldn't load jobs">
+              {error}
+            </Alert>
+          )}
+
+          {loadState === 'error' ? (
+            <Button variant="secondary" size="sm" onClick={load}>
+              Try again
+            </Button>
+          ) : loadState === 'loading' ? (
+            <div className="flex justify-center py-12">
+              <Spinner className="size-6 text-indigo-600" label="Loading jobs" />
+            </div>
+          ) : jobs.length === 0 && offset > 0 ? (
+            /*
           An empty page that is not an empty list. Only reachable by editing the
           URL — the pager disables Next at the end — but reachable, and "No jobs
           match those filters" would be a lie that sends the user off widening a
@@ -397,74 +494,76 @@ export function JobsPage() {
           shape this page's URL state deliberately avoids, and it would teleport
           the user instead of telling them what happened.
         */
-        <div className="rounded-lg border border-dashed border-slate-300 bg-white p-10 text-center">
-          <p className="text-sm font-medium text-slate-900">
-            That page is past the end of these results.
-          </p>
-          <p className="mt-1 text-sm text-slate-600">
-            There {total === 1 ? 'is 1 job' : `are ${total} jobs`} to show.
-          </p>
-          <Button variant="secondary" size="sm" className="mt-4" onClick={() => goToOffset(0)}>
-            Back to the first page
-          </Button>
-        </div>
-      ) : jobs.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-slate-300 bg-white p-10 text-center">
-          <p className="text-sm font-medium text-slate-900">
-            {hasFilters ? 'No jobs match those filters.' : 'No jobs yet.'}
-          </p>
-          <p className="mt-1 text-sm text-slate-600">
-            {hasFilters
-              ? 'Try widening the search.'
-              : 'Paste a posting you are interested in to get started.'}
-          </p>
-          {!hasFilters && (
-            <Link to="/jobs/new" className={buttonClass({ className: 'mt-4' })}>
-              Add a job
-            </Link>
-          )}
-        </div>
-      ) : (
-        <>
-          <p className="text-sm text-slate-500" role="status">
-            Showing {showing}
-          </p>
-          <ul className="space-y-3">
-            {jobs.map((job) => (
-              <JobCard
-                key={job.id}
-                job={job}
-                // Swap the one row rather than reloading the page. A refetch
-                // would reset scroll and re-run the filters to produce the
-                // same list, and would race the requestId guard above.
-                onApplicationChange={(application) =>
-                  setJobs((previous) =>
-                    previous.map((row) => (row.id === job.id ? { ...row, application } : row)),
-                  )
-                }
-              />
-            ))}
-          </ul>
-
-          {total > PAGE_SIZE && (
-            <div className="flex items-center justify-between border-t border-slate-200 pt-4">
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={offset === 0}
-                onClick={() => goToOffset(Math.max(0, offset - PAGE_SIZE))}
-              >
-                Previous
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={offset + PAGE_SIZE >= total}
-                onClick={() => goToOffset(offset + PAGE_SIZE)}
-              >
-                Next
+            <div className="rounded-lg border border-dashed border-slate-300 bg-white p-10 text-center">
+              <p className="text-sm font-medium text-slate-900">
+                That page is past the end of these results.
+              </p>
+              <p className="mt-1 text-sm text-slate-600">
+                There {total === 1 ? 'is 1 job' : `are ${total} jobs`} to show.
+              </p>
+              <Button variant="secondary" size="sm" className="mt-4" onClick={() => goToOffset(0)}>
+                Back to the first page
               </Button>
             </div>
+          ) : jobs.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-slate-300 bg-white p-10 text-center">
+              <p className="text-sm font-medium text-slate-900">
+                {hasFilters ? 'No jobs match those filters.' : 'No jobs yet.'}
+              </p>
+              <p className="mt-1 text-sm text-slate-600">
+                {hasFilters
+                  ? 'Try widening the search.'
+                  : 'Paste a posting you are interested in to get started.'}
+              </p>
+              {!hasFilters && (
+                <Link to="/jobs/new" className={buttonClass({ className: 'mt-4' })}>
+                  Add a job
+                </Link>
+              )}
+            </div>
+          ) : (
+            <>
+              <p className="text-sm text-slate-500" role="status">
+                Showing {showing}
+              </p>
+              <ul className="space-y-3">
+                {jobs.map((job) => (
+                  <JobCard
+                    key={job.id}
+                    job={job}
+                    // Swap the one row rather than reloading the page. A refetch
+                    // would reset scroll and re-run the filters to produce the
+                    // same list, and would race the requestId guard above.
+                    onApplicationChange={(application) =>
+                      setJobs((previous) =>
+                        previous.map((row) => (row.id === job.id ? { ...row, application } : row)),
+                      )
+                    }
+                  />
+                ))}
+              </ul>
+
+              {total > PAGE_SIZE && (
+                <div className="flex items-center justify-between border-t border-slate-200 pt-4">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={offset === 0}
+                    onClick={() => goToOffset(Math.max(0, offset - PAGE_SIZE))}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={offset + PAGE_SIZE >= total}
+                    onClick={() => goToOffset(offset + PAGE_SIZE)}
+                  >
+                    Next
+                  </Button>
+                </div>
+              )}
+            </>
           )}
         </>
       )}
