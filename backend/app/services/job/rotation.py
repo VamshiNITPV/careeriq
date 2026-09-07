@@ -19,9 +19,15 @@ from __future__ import annotations
 
 from datetime import datetime
 
-#: Roles, drawn from the target roles a candidate states and the skills a resume
-#: actually carries. Phrased as someone would search, because the provider
-#: matches on the whole string rather than on structured fields.
+#: Roles. Mostly drawn from the target roles a candidate states and the skills a
+#: resume actually carries, plus anything asked for by hand. Phrased as someone
+#: would search, because the provider matches on the whole string rather than on
+#: structured fields.
+#:
+#: This list is a hand-maintained constant, which is its main limitation: the
+#: corpus grows only in the directions written here, so a user whose field is
+#: absent finds nothing however long they wait. Reading it from users' stated
+#: target roles is the obvious next step and has not been done.
 DEFAULT_ROLES: tuple[str, ...] = (
     "python developer",
     "backend developer",
@@ -37,6 +43,21 @@ DEFAULT_ROLES: tuple[str, ...] = (
     "java developer",
     "react developer",
     "sql developer",
+    # Requested by hand, and kept on evidence rather than on the guess that
+    # preceded it: this looked like a description of a practice rather than a
+    # title anyone advertises under, so it was expected to return nothing. One
+    # request settled it — "vibe coder in Bengaluru" returned three postings on
+    # 2026-09-07, headed *Vibe Coder Entry Level Fresher*, *Tech Lead —
+    # Python+DataBricks - Vibe Coder* and *Freelance Web Scraping Engineer (Vibe
+    # Coding)*. Employers are using the term. The lesson is the same one the
+    # module docstring records about `date_posted`: measure the provider, do not
+    # reason about it.
+    "vibe coder",
+    # The titles employers actually head AI adverts with, added alongside it.
+    "ai engineer",
+    "prompt engineer",
+    "genai developer",
+    "llm engineer",
 )
 
 #: Cities, weighted to where the corpus already shows Indian tech hiring.
