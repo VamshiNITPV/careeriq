@@ -7,7 +7,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models.enums import ProcessingStatus, ProficiencyLevel
 
@@ -141,6 +141,26 @@ class SuggestionsResponse(BaseModel):
 class ResumeUpdateRequest(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     is_primary: bool | None = None
+
+    @field_validator("title")
+    @classmethod
+    def _reject_a_blank_title(cls, value: str | None) -> str | None:
+        """Strip, and refuse what is left of nothing.
+
+        `min_length=1` accepts "   ", which would store a resume whose heading
+        renders as an empty line and whose list row looks broken. Stripping
+        first is what makes the length check mean what it says.
+
+        Raised rather than coerced to None, unlike the blank-to-None idiom in
+        schemas/profile.py. On a PATCH, `title=None` means "leave the title
+        alone" — so coercing would turn a bad request into a silent 200 no-op.
+        """
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("must not be blank")
+        return stripped
 
 
 class SkillRead(BaseModel):

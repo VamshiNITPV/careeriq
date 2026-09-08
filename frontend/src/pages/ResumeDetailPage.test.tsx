@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/services/apiClient'
@@ -193,6 +194,150 @@ describe('ResumeDetailPage', () => {
     renderPage('/resume/r1?v=not-a-real-version')
 
     await waitFor(() => expect(getVersion).toHaveBeenCalledWith('v7'))
+  })
+
+  describe('renaming and choosing the primary', () => {
+    const openRename = async (user: ReturnType<typeof userEvent.setup>) =>
+      user.click(await screen.findByRole('button', { name: 'Rename' }))
+
+    it('renames without reloading the page', async () => {
+      const user = userEvent.setup()
+      const get = vi.spyOn(resumeService, 'get').mockResolvedValue(detailFixture())
+      vi.spyOn(resumeService, 'getVersion').mockResolvedValue(VERSION)
+      const rename = vi
+        .spyOn(resumeService, 'rename')
+        .mockResolvedValue({ ...detailFixture(), title: 'Backend CV' })
+
+      renderPage()
+      await openRename(user)
+
+      const field = screen.getByLabelText('Resume name')
+      // Prefilled and selected: the existing name is a raw filename people
+      // almost always want to replace rather than append to.
+      expect(field).toHaveValue('resume.pdf')
+      await user.clear(field)
+      await user.type(field, 'Backend CV{Enter}')
+
+      await waitFor(() => expect(rename).toHaveBeenCalledWith('r1', 'Backend CV'))
+      expect(await screen.findByRole('heading', { name: 'Backend CV' })).toBeInTheDocument()
+      // The call-count assertion is the point. Without it, someone "simplifies"
+      // the merge into load() and nothing fails — the only symptom is a
+      // full-page spinner and a re-downloaded PDF on every rename.
+      expect(get).toHaveBeenCalledTimes(1)
+    })
+
+    it('trims the name and refuses a blank one', async () => {
+      const user = userEvent.setup()
+      vi.spyOn(resumeService, 'get').mockResolvedValue(detailFixture())
+      vi.spyOn(resumeService, 'getVersion').mockResolvedValue(VERSION)
+      const rename = vi
+        .spyOn(resumeService, 'rename')
+        .mockResolvedValue({ ...detailFixture(), title: 'Backend CV' })
+
+      renderPage()
+      await openRename(user)
+      const field = screen.getByLabelText('Resume name')
+
+      await user.clear(field)
+      await user.type(field, '   ')
+      expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+      expect(rename).not.toHaveBeenCalled()
+
+      await user.clear(field)
+      await user.type(field, '  Backend CV  {Enter}')
+
+      await waitFor(() => expect(rename).toHaveBeenCalledWith('r1', 'Backend CV'))
+    })
+
+    it('abandons the rename on Escape and gives focus back', async () => {
+      const user = userEvent.setup()
+      vi.spyOn(resumeService, 'get').mockResolvedValue(detailFixture())
+      vi.spyOn(resumeService, 'getVersion').mockResolvedValue(VERSION)
+      const rename = vi.spyOn(resumeService, 'rename')
+
+      renderPage()
+      await openRename(user)
+      await user.type(screen.getByLabelText('Resume name'), 'nonsense')
+      await user.keyboard('{Escape}')
+
+      // level 1 to disambiguate: the file preview's own heading is the version's
+      // filename, which happens to be the same string.
+      expect(
+        await screen.findByRole('heading', { level: 1, name: 'resume.pdf' }),
+      ).toBeInTheDocument()
+      expect(rename).not.toHaveBeenCalled()
+      // Without the focus-return effect — which looks unnecessary — a keyboard
+      // user who cancels lands on <body> with tab order reset to the top.
+      expect(screen.getByRole('button', { name: 'Rename' })).toHaveFocus()
+    })
+
+    it('keeps the editor open with what was typed when the save fails', async () => {
+      const user = userEvent.setup()
+      vi.spyOn(resumeService, 'get').mockResolvedValue(detailFixture())
+      vi.spyOn(resumeService, 'getVersion').mockResolvedValue(VERSION)
+      vi.spyOn(resumeService, 'rename').mockRejectedValue(
+        new ApiError(500, ErrorCode.InternalError, 'Nope.'),
+      )
+
+      renderPage()
+      await openRename(user)
+      const field = screen.getByLabelText('Resume name')
+      await user.clear(field)
+      await user.type(field, 'Backend CV{Enter}')
+
+      expect(await screen.findByText('Nope.')).toBeInTheDocument()
+      // Closing on failure would throw away what the user typed.
+      expect(screen.getByLabelText('Resume name')).toHaveValue('Backend CV')
+      expect(screen.queryByRole('heading', { name: 'Backend CV' })).not.toBeInTheDocument()
+    })
+
+    it('swaps the button for the badge once this resume is primary', async () => {
+      const user = userEvent.setup()
+      const get = vi
+        .spyOn(resumeService, 'get')
+        .mockResolvedValue(detailFixture({ is_primary: false }))
+      vi.spyOn(resumeService, 'getVersion').mockResolvedValue(VERSION)
+      const setPrimary = vi
+        .spyOn(resumeService, 'setPrimary')
+        .mockResolvedValue({ ...detailFixture(), is_primary: true })
+
+      renderPage()
+      await user.click(await screen.findByRole('button', { name: 'Make primary' }))
+
+      await waitFor(() => expect(setPrimary).toHaveBeenCalledWith('r1'))
+      // The swap is the feedback. Leaving the button up would invite a second
+      // pointless PATCH.
+      expect(screen.queryByRole('button', { name: 'Make primary' })).not.toBeInTheDocument()
+      expect(screen.getByText('Primary')).toBeInTheDocument()
+      expect(get).toHaveBeenCalledTimes(1)
+    })
+
+    it('offers no Make primary when this resume already is primary', async () => {
+      vi.spyOn(resumeService, 'get').mockResolvedValue(detailFixture())
+      vi.spyOn(resumeService, 'getVersion').mockResolvedValue(VERSION)
+
+      renderPage()
+      await screen.findByTitle('Preview of resume.pdf')
+
+      // Hidden rather than disabled: nothing on this page could ever enable it.
+      expect(screen.queryByRole('button', { name: 'Make primary' })).not.toBeInTheDocument()
+      expect(screen.getByText('Primary')).toBeInTheDocument()
+    })
+
+    it('lets only one action be in flight', async () => {
+      const user = userEvent.setup()
+      vi.spyOn(resumeService, 'get').mockResolvedValue(detailFixture({ is_primary: false }))
+      vi.spyOn(resumeService, 'getVersion').mockResolvedValue(VERSION)
+      // Never resolves, so the request stays in flight for the assertion.
+      vi.spyOn(resumeService, 'setPrimary').mockReturnValue(new Promise(() => {}))
+
+      renderPage()
+      await user.click(await screen.findByRole('button', { name: 'Make primary' }))
+
+      // Both PATCH the same resource and both return a full resume, so
+      // overlapping them lets a stale response overwrite a fresh one.
+      expect(screen.getByRole('button', { name: 'Rename' })).toBeDisabled()
+    })
   })
 
   it('keeps the page up when the career summary fails', async () => {

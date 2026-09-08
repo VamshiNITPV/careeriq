@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { ResumeFilePreview } from '@/components/resume/ResumeFilePreview'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
+import { buttonClass } from '@/components/ui/buttonStyles'
+import { Input } from '@/components/ui/Input'
 import { Spinner } from '@/components/ui/Spinner'
 import { ApiError } from '@/services/apiClient'
 import { careerService } from '@/services/careerService'
@@ -11,6 +13,7 @@ import { formatSpan, type CareerSummary } from '@/types/career'
 import {
   formatFileSize,
   IN_FLIGHT,
+  type Resume,
   type ResumeDetail,
   type ResumeVersionDetail,
 } from '@/types/resume'
@@ -79,6 +82,103 @@ export function ResumeDetailPage() {
   // whose main subject loaded fine.
   const [career, setCareer] = useState<CareerSummary | null>(null)
   const [careerFailed, setCareerFailed] = useState(false)
+
+  /*
+    One key rather than two booleans, and not tidiness: rename and make-primary
+    PATCH the same resource and both return a full resume. With two flags they
+    could overlap, and a rename response landing after a make-primary response
+    would write `is_primary: false` back over a resume that is now primary.
+    A single value makes that impossible.
+  */
+  const [busy, setBusy] = useState<'rename' | 'primary' | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [announcement, setAnnouncement] = useState('')
+  const [isRenaming, setIsRenaming] = useState(false)
+  const [draft, setDraft] = useState('')
+  const renameButton = useRef<HTMLButtonElement>(null)
+  const returnFocus = useRef(false)
+
+  /*
+    Focus goes back to Rename after the form has closed, not in the handler that
+    closes it: that button is unmounted while the form is open, so its ref is
+    null until React re-renders. JobsPage can focus its trigger inline only
+    because that trigger never unmounts.
+  */
+  useEffect(() => {
+    if (isRenaming || !returnFocus.current) return
+    returnFocus.current = false
+    renameButton.current?.focus()
+  }, [isRenaming])
+
+  /**
+   * Fold a PATCH response into the page.
+   *
+   * A merge rather than a reload, and it is correct rather than merely cheaper:
+   * `ResumeDetail` is `Resume` plus `versions`, PATCH returns exactly a
+   * `Resume`, and neither action can change a version. The derived fields
+   * cannot go stale either — PATCH builds its body with the same helper and the
+   * same inputs as GET does.
+   *
+   * Reloading would be worse than wasteful: `load` sets loadState to 'loading'
+   * first, so renaming one word would blank the page to a spinner, issue two
+   * requests and remount the preview, re-downloading the whole PDF.
+   */
+  const merge = useCallback((updated: Resume) => {
+    setDetail((previous) => (previous === null ? previous : { ...previous, ...updated }))
+  }, [])
+
+  const closeRename = useCallback(() => {
+    returnFocus.current = true
+    setIsRenaming(false)
+    setActionError(null)
+  }, [])
+
+  const saveRename = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault()
+      if (resumeId === undefined || busy !== null) return
+      // Trimmed before sending, so a stray space never round-trips into the
+      // database. Re-checked here rather than trusting the disabled Save
+      // button: implicit form submission is suppressed by a disabled default
+      // button, but that is a spec detail no reader should have to know.
+      const title = draft.trim()
+      if (title === '') return
+
+      setBusy('rename')
+      setActionError(null)
+      try {
+        merge(await resumeService.rename(resumeId, title))
+        setAnnouncement(`Renamed to ${title}.`)
+        closeRename()
+      } catch (caught) {
+        // The editor stays open with what was typed. Closing it on failure
+        // would throw the user's work away, which is the worst thing an inline
+        // edit can do.
+        setActionError(
+          caught instanceof ApiError ? caught.message : 'Could not rename this resume.',
+        )
+      } finally {
+        setBusy(null)
+      }
+    },
+    [resumeId, busy, draft, merge, closeRename],
+  )
+
+  const makePrimary = useCallback(async () => {
+    if (resumeId === undefined || busy !== null) return
+    setBusy('primary')
+    setActionError(null)
+    try {
+      merge(await resumeService.setPrimary(resumeId))
+      setAnnouncement('This is now your primary resume.')
+    } catch (caught) {
+      setActionError(
+        caught instanceof ApiError ? caught.message : 'Could not make this your primary resume.',
+      )
+    } finally {
+      setBusy(null)
+    }
+  }, [resumeId, busy, merge])
 
   const requestedVersion = searchParams.get('v')
 
@@ -210,14 +310,117 @@ export function ResumeDetailPage() {
         ← Back to resumes
       </Link>
 
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">{detail.title}</h1>
-        <p className="mt-1 text-sm text-slate-600">
-          Added {formatDateTime(detail.created_at)}
-          {detail.is_primary && ' · Primary resume'}
-          {version?.processed_at != null && ` · Read ${formatDateTime(version.processed_at)}`}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          {isRenaming ? (
+            /*
+              A real form, not ConfirmDialog. That primitive is for actions that
+              cannot be undone, its children render outside any form so
+              Enter-to-submit would need hand-wiring, and its Escape already
+              means cancel. A form gives Enter-to-save for free — the same shape
+              CareerSection already uses for its inline edits.
+            */
+            <form onSubmit={(event) => void saveRename(event)} className="space-y-3" noValidate>
+              <Input
+                label="Resume name"
+                value={draft}
+                maxLength={200}
+                // Mounted focused with the text selected: the existing name is
+                // a raw filename, which people almost always want to replace
+                // rather than append to.
+                autoFocus
+                onFocus={(event) => event.currentTarget.select()}
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Escape' || busy !== null) return
+                  event.preventDefault()
+                  closeRename()
+                }}
+                {...(actionError !== null ? { error: actionError } : {})}
+              />
+              <div className="flex items-center gap-3">
+                <Button
+                  type="submit"
+                  size="sm"
+                  isLoading={busy === 'rename'}
+                  disabled={draft.trim() === ''}
+                >
+                  Save
+                </Button>
+                <Button variant="ghost" size="sm" disabled={busy !== null} onClick={closeRename}>
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          ) : (
+            <>
+              <h1 className="text-2xl font-bold tracking-tight text-slate-900">{detail.title}</h1>
+              <p className="mt-1 text-sm text-slate-600">
+                Added {formatDateTime(detail.created_at)}
+                {version?.processed_at != null && ` · Read ${formatDateTime(version.processed_at)}`}
+              </p>
+            </>
+          )}
+          {/* Both changes are otherwise silent to a screen reader. */}
+          <p role="status" className="sr-only">
+            {announcement}
+          </p>
+        </div>
+
+        {!isRenaming && (
+          <div className="flex shrink-0 items-center gap-2">
+            {detail.is_primary ? (
+              /*
+                A statement, not a disabled button. A disabled control promises
+                that something could enable it, and nothing on this page can —
+                the only way out is promoting a different resume from its own
+                page. The swap is also the feedback, at the spot just clicked.
+              */
+              <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">
+                Primary
+              </span>
+            ) : (
+              <Button
+                variant="secondary"
+                size="sm"
+                isLoading={busy === 'primary'}
+                disabled={busy !== null}
+                onClick={() => void makePrimary()}
+              >
+                Make primary
+              </Button>
+            )}
+            {/*
+              A raw button rather than <Button>: it needs a ref for focus
+              return, and Button takes none under strict mode. Same reason
+              JobsPage's filters trigger is a raw button.
+            */}
+            <button
+              type="button"
+              ref={renameButton}
+              disabled={busy !== null}
+              onClick={() => {
+                setDraft(detail.title)
+                setActionError(null)
+                setIsRenaming(true)
+              }}
+              className={buttonClass({ variant: 'ghost', size: 'sm' })}
+            >
+              Rename
+            </button>
+          </div>
+        )}
       </div>
+
+      {/* The rename form shows its own error under the field. */}
+      {actionError !== null && !isRenaming && <Alert tone="error">{actionError}</Alert>}
+
+      {!detail.is_primary && detail.current_version_id === null && (
+        <p className="text-sm text-slate-500">
+          We couldn&apos;t read this document, so making it primary would leave you with no
+          suggested skills until it parses.
+        </p>
+      )}
 
       {version === null ? (
         <Alert tone="info">This resume has no uploaded file.</Alert>

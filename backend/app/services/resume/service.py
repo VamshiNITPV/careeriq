@@ -203,8 +203,32 @@ class ResumeService:
         deleted resume appear to resurrect its contents.
         """
         resume = await self.get_resume(resume_id=resume_id, user_id=user_id)
+        was_primary = resume.is_primary
         resume.deleted_at = datetime.now(UTC)
         resume.is_primary = False
+
+        promoted: Resume | None = None
+        if was_primary:
+            # Deleting the primary used to leave the user with none, and nothing
+            # ever set it again: the only other write is the `is_first` branch in
+            # _create_resume, which fires once. The suggestions panel reads the
+            # primary resume's version, so it silently went empty.
+            #
+            # **The order of the two writes above and below is what matters.**
+            # ux_resumes_one_primary is checked per statement, so the row giving
+            # up is_primary has to reach the database before another claims it;
+            # promoting first gives two primaries and a 500. That is pinned by
+            # test_promoting_does_not_violate_the_one_primary_index.
+            #
+            # The flush itself is belt and braces — autoflush already runs one
+            # before the SELECT below, so removing this line changes nothing
+            # today (I checked, by removing it). It stays because a uniqueness
+            # constraint should not depend on a session setting being left at
+            # its default, and because set_primary above is written the same way.
+            await self.resumes.flush()
+            promoted = await self.resumes.newest_for_user(user_id)
+            if promoted is not None:
+                promoted.is_primary = True
 
         removed = 0
         if self.candidate_skills is not None:
@@ -224,6 +248,7 @@ class ResumeService:
             resume_id=str(resume_id),
             skills_removed=removed,
             entities_removed=entities_removed,
+            promoted_resume_id=str(promoted.id) if promoted is not None else None,
         )
 
     async def latest_versions(

@@ -86,13 +86,30 @@ class ResumeRepository(BaseRepository[Resume]):
             .values(is_primary=False)
         )
 
-    async def get_primary(self, user_id: uuid.UUID) -> Resume | None:
+    async def newest_for_user(self, user_id: uuid.UUID) -> Resume | None:
+        """The most recently added live resume — the successor when the primary goes.
+
+        Ordered by id as well as created_at because created_at defaults to
+        `now()`, which PostgreSQL evaluates as the *transaction* timestamp: two
+        resumes created inside one transaction share it exactly. uuid7 ids are
+        time-ordered, so they break that tie in the same direction rather than
+        arbitrarily.
+
+        Its own query rather than `list_for_user()[0]`. That ordering exists to
+        float the primary to the top of a list, and borrowing it would mean a
+        future "sort resumes alphabetically" silently changed which resume
+        inherits primary. It also loads one row instead of twenty.
+
+        `noload` for the reason list_for_user gives above: without it, setting
+        one boolean eagerly loads every version of that resume, raw_text and
+        both JSONB blobs included.
+        """
         return await self.session.scalar(
-            select(Resume).where(
-                Resume.user_id == user_id,
-                Resume.is_primary.is_(True),
-                Resume.deleted_at.is_(None),
-            )
+            select(Resume)
+            .options(noload(Resume.versions))
+            .where(Resume.user_id == user_id, Resume.deleted_at.is_(None))
+            .order_by(Resume.created_at.desc(), Resume.id.desc())
+            .limit(1)
         )
 
     async def set_current_version(self, resume_id: uuid.UUID, version_id: uuid.UUID) -> None:

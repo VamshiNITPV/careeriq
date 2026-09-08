@@ -350,6 +350,13 @@ export function ResumePage() {
             removed with it. Skills you typed in yourself are kept.
           </p>
         )}
+        {pendingDelete !== null && pendingDelete.is_primary && resumes.length > 1 && (
+          <p className="mt-2">
+            {/* The badge moves to another row afterwards. Saying so first turns
+                a surprising change into an announced one. */}
+            This is your primary resume, so your most recent one will become primary instead.
+          </p>
+        )}
         {deleteError !== null && (
           <p role="alert" className="mt-3 rounded-md bg-red-50 p-2 text-sm text-red-700">
             {deleteError}

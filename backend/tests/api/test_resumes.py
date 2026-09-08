@@ -647,6 +647,36 @@ class TestResumeManagement:
         assert primaries[0]["id"] == second.json()["resume_id"]
         assert primaries[0]["id"] != first.json()["resume_id"]
 
+    async def test_a_blank_title_is_rejected(
+        self, client: AsyncClient, auth_headers: dict[str, str]
+    ) -> None:
+        # min_length=1 accepts "   " on its own, which would store a resume
+        # whose heading renders as an empty line and whose row looks broken.
+        upload = await client.post(f"{API}/resumes", headers=auth_headers, files=pdf_upload())
+
+        response = await client.patch(
+            f"{API}/resumes/{upload.json()['resume_id']}",
+            headers=auth_headers,
+            json={"title": "   "},
+        )
+
+        assert response.status_code == 422
+
+    async def test_a_title_is_trimmed(
+        self, client: AsyncClient, auth_headers: dict[str, str]
+    ) -> None:
+        # Otherwise the padding survives into every future display of it, and
+        # into the delete dialog's own quoted title.
+        upload = await client.post(f"{API}/resumes", headers=auth_headers, files=pdf_upload())
+
+        response = await client.patch(
+            f"{API}/resumes/{upload.json()['resume_id']}",
+            headers=auth_headers,
+            json={"title": "  Backend CV  "},
+        )
+
+        assert response.json()["title"] == "Backend CV"
+
     async def test_delete_is_soft_and_hides_the_resume(
         self, client: AsyncClient, db_session: AsyncSession, auth_headers: dict[str, str]
     ) -> None:
@@ -661,6 +691,98 @@ class TestResumeManagement:
         row = await db_session.get(Resume, uuid.UUID(resume_id))
         assert row is not None
         assert row.deleted_at is not None
+
+
+class TestDeletePromotesAnother:
+    """Deleting the primary hands it on, rather than leaving the user with none.
+
+    `is_primary` decides which resume's suggested skills the resume page offers.
+    Before this, deleting the primary left no primary at all and nothing ever set
+    one again — the only other write is the `is_first` branch at first upload.
+    """
+
+    @staticmethod
+    async def _upload(client: AsyncClient, headers: dict[str, str], name: str) -> str:
+        files = {"file": (name, build_pdf(), "application/pdf")}
+        response = await client.post(f"{API}/resumes", headers=headers, files=files)
+        assert response.status_code == 202, response.text
+        return str(response.json()["resume_id"])
+
+    @staticmethod
+    async def _primaries(client: AsyncClient, headers: dict[str, str]) -> list[str]:
+        listed = (await client.get(f"{API}/resumes", headers=headers)).json()
+        return [row["id"] for row in listed if row["is_primary"]]
+
+    async def test_promotes_the_newest_remaining(
+        self, client: AsyncClient, auth_headers: dict[str, str]
+    ) -> None:
+        first = await self._upload(client, auth_headers, "a.pdf")
+        middle = await self._upload(client, auth_headers, "b.pdf")
+        newest = await self._upload(client, auth_headers, "c.pdf")
+
+        await client.delete(f"{API}/resumes/{first}", headers=auth_headers)
+
+        primaries = await self._primaries(client, auth_headers)
+        assert primaries == [newest]
+        # Asserted as "the newest, and not the middle one" rather than "one of
+        # them": that is what catches a reimplementation as list_for_user()[0]
+        # after somebody changes that ordering for presentation reasons.
+        assert middle not in primaries
+
+    async def test_deleting_the_only_resume_leaves_none_and_the_next_upload_is_primary(
+        self, client: AsyncClient, auth_headers: dict[str, str]
+    ) -> None:
+        """Two mechanisms have to compose, so both halves are asserted.
+
+        Without the None guard, an unguarded promotion 500s on the single most
+        common delete there is — a user with one resume.
+        """
+        only = await self._upload(client, auth_headers, "a.pdf")
+
+        await client.delete(f"{API}/resumes/{only}", headers=auth_headers)
+
+        assert (await client.get(f"{API}/resumes", headers=auth_headers)).json() == []
+
+        # _create_resume counts live rows only, so it is back to zero and the
+        # bootstrap takes over again.
+        replacement = await self._upload(client, auth_headers, "b.pdf")
+        assert await self._primaries(client, auth_headers) == [replacement]
+
+    async def test_deleting_a_non_primary_leaves_the_primary_alone(
+        self, client: AsyncClient, auth_headers: dict[str, str]
+    ) -> None:
+        # Otherwise tidying up an old resume silently moves the user's choice,
+        # with no error anywhere to notice.
+        first = await self._upload(client, auth_headers, "a.pdf")
+        second = await self._upload(client, auth_headers, "b.pdf")
+
+        await client.delete(f"{API}/resumes/{second}", headers=auth_headers)
+
+        assert await self._primaries(client, auth_headers) == [first]
+
+    async def test_promoting_does_not_violate_the_one_primary_index(
+        self, client: AsyncClient, auth_headers: dict[str, str]
+    ) -> None:
+        """The write ordering, which is easy to get backwards.
+
+        ux_resumes_one_primary is checked per statement, so the row giving up
+        is_primary must reach the database before another claims it. Promote
+        before clearing and this fails with two primaries — verified by making
+        exactly that change. It works only because the suite runs the real
+        migrations against real PostgreSQL.
+        """
+        first = await self._upload(client, auth_headers, "a.pdf")
+        newest = await self._upload(client, auth_headers, "b.pdf")
+        # Make the newest primary too, so the row being deleted is also the one
+        # that would otherwise be chosen as its own successor.
+        await client.patch(
+            f"{API}/resumes/{newest}", headers=auth_headers, json={"is_primary": True}
+        )
+
+        response = await client.delete(f"{API}/resumes/{newest}", headers=auth_headers)
+
+        assert response.status_code == 200, response.text
+        assert await self._primaries(client, auth_headers) == [first]
 
 
 class TestDeleteRemovesExtractedSkills:
