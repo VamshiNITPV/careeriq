@@ -165,6 +165,18 @@ interface RequestOptions extends Omit<RequestInit, 'body'> {
   body?: unknown
   /** Skip the Authorization header — used by login, register and refresh. */
   skipAuth?: boolean
+  /**
+   * How to read a successful body. Defaults to 'json'.
+   *
+   * Carried on the options object rather than expressed as a separate
+   * `requestBlob()` function, and that is load-bearing: the 401 path below
+   * retries by recursing with `options` forwarded whole, so the mode survives
+   * the retry for free. A separate function would have to duplicate the header
+   * construction, the network-error mapping, the refresh block and the
+   * recursion — and would retry a blob request in JSON mode, a failure that
+   * only ever appears after a token expiry.
+   */
+  parse?: 'json' | 'blob' | undefined
 }
 
 async function request<T>(
@@ -172,7 +184,10 @@ async function request<T>(
   options: RequestOptions = {},
   isRetry = false,
 ): Promise<T> {
-  const { body, skipAuth = false, headers, ...init } = options
+  // `parse` is destructured out deliberately: `...init` is spread straight
+  // into fetch(), and an unrecognised key there is exactly what a future
+  // runtime tightens.
+  const { body, skipAuth = false, parse = 'json', headers, ...init } = options
 
   const requestHeaders = new Headers(headers)
   // FormData generates its own Content-Type, multipart boundary included.
@@ -230,12 +245,21 @@ async function request<T>(
     return undefined as T
   }
 
+  // Only the success body varies. `parseError` above still reads JSON,
+  // which is right: FastAPI's error envelope is JSON even when the success
+  // body is bytes, so a 404 on a blob request still produces an ApiError.
+  if (parse === 'blob') return (await response.blob()) as T
+
   return (await response.json()) as T
 }
 
 export const api = {
   get: <T>(path: string, options?: RequestOptions) =>
     request<T>(path, { ...options, method: 'GET' }),
+
+  /** The raw bytes of a response, for endpoints that serve a stored file. */
+  getBlob: (path: string, options?: RequestOptions) =>
+    request<Blob>(path, { ...options, method: 'GET', parse: 'blob' }),
 
   post: <T>(path: string, body?: unknown, options?: RequestOptions) =>
     request<T>(path, { ...options, method: 'POST', body }),

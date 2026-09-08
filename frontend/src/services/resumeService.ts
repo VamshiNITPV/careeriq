@@ -6,11 +6,10 @@ import type {
   Resume,
   ResumeDetail,
   ResumeUploadResponse,
+  ResumeVersionDetail,
   Skill,
   SuggestionsResponse,
 } from '@/types/resume'
-
-const API_BASE = '/api/v1'
 
 export const resumeService = {
   /**
@@ -37,6 +36,22 @@ export const resumeService = {
 
   get(resumeId: string): Promise<ResumeDetail> {
     return api.get<ResumeDetail>(`/resumes/${resumeId}`)
+  },
+
+  /** Parsed output for one version: raw text, sections and entities. */
+  getVersion(versionId: string): Promise<ResumeVersionDetail> {
+    return api.get<ResumeVersionDetail>(`/resumes/versions/${versionId}`)
+  },
+
+  /**
+   * The stored file itself.
+   *
+   * Fetched rather than linked to. The endpoint needs an Authorization header,
+   * and a browser navigation or an <iframe src> sends none — so an <a href> or
+   * a framed URL would simply 401. The caller turns this into a `blob:` URL.
+   */
+  downloadFile(versionId: string): Promise<Blob> {
+    return api.getBlob(`/resumes/versions/${versionId}/download`)
   },
 
   status(versionId: string): Promise<ProcessingStatusResponse> {
@@ -69,11 +84,6 @@ export const resumeService = {
 
   remove(resumeId: string): Promise<MessageResponse> {
     return api.delete<MessageResponse>(`/resumes/${resumeId}`)
-  },
-
-  /** Absolute path for a download link. Auth is still required by the API. */
-  downloadUrl(versionId: string): string {
-    return `${API_BASE}/resumes/versions/${versionId}/download`
   },
 }
 

@@ -47,6 +47,80 @@ export interface Resume {
   latest_version_error: string | null
 }
 
+/**
+ * One heading the extractor found, from `parsed_sections.sections`.
+ *
+ * `start`, `end` and `length` are character offsets into `raw_text`. They are
+ * carried for completeness and deliberately not rendered anywhere — they mean
+ * nothing to a reader.
+ */
+export interface ParsedSection {
+  type: string
+  heading: string | null
+  start: number
+  end: number
+  length: number
+}
+
+/**
+ * `ResumeVersion.parsed_sections`, written by the pipeline.
+ *
+ * **Every key is optional, and that is the defence.** This is `dict[str, Any]`
+ * on the server, and the JSONB in any given row was written by whatever version
+ * of the pipeline was deployed at the time — so a key added later is simply
+ * absent from an older row. A required field would be a lie the compiler
+ * enforces. Narrow at the point of use: `parsed_sections?.sections ?? []`.
+ */
+export interface ParsedSections {
+  extractor?: string
+  page_count?: number | null
+  character_count?: number
+  sections?: ParsedSection[]
+}
+
+export interface ParsedSkill {
+  name: string
+  /**
+   * A JSON **number**, unlike `SuggestedSkill.confidence` below, which is a
+   * string. That one goes through Pydantic's Decimal and serialises quoted;
+   * this one is a raw float dumped into JSONB by the pipeline. Getting the two
+   * the wrong way round renders `NaN%` with no type error to warn you.
+   */
+  confidence: number
+  mentions: number
+  section: string
+  matched: string[]
+  span: number[]
+  /** False when the parse wanted a human to confirm it. */
+  accepted: boolean
+}
+
+/** `ResumeVersion.parsed_entities`. Optional keys for the reason above. */
+export interface ParsedEntities {
+  skills?: ParsedSkill[]
+  suggested_skills?: unknown[]
+  unknown_terms?: string[]
+  review_threshold?: number
+  contact?: unknown
+  entities?: Record<string, number>
+}
+
+/** What `GET /resumes/versions/{id}` returns — a summary plus the parse output. */
+export interface ResumeVersionDetail extends ResumeVersionSummary {
+  raw_text: string | null
+  parsed_sections: ParsedSections | null
+  parsed_entities: ParsedEntities | null
+}
+
+/**
+ * Statuses that mean the pipeline has not finished.
+ *
+ * Mirrors `_IN_FLIGHT` in backend/app/api/v1/resumes.py. Lives here rather than
+ * in a page because two pages need it now, and two copies of a status list
+ * drift.
+ */
+export const IN_FLIGHT: ProcessingStatus[] = ['PENDING', 'EXTRACTING', 'PARSING', 'EMBEDDING']
+
 export interface ResumeDetail extends Resume {
   versions: ResumeVersionSummary[]
 }

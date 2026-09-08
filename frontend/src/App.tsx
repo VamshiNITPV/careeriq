@@ -13,6 +13,7 @@ import { NotFoundPage } from '@/pages/NotFoundPage'
 import { ProfilePage } from '@/pages/ProfilePage'
 import { RegisterPage } from '@/pages/RegisterPage'
 import { ResetPasswordPage } from '@/pages/ResetPasswordPage'
+import { ResumeDetailPage } from '@/pages/ResumeDetailPage'
 import { ResumePage } from '@/pages/ResumePage'
 import { SavedJobsPage } from '@/pages/SavedJobsPage'
 import { VerifyEmailPage } from '@/pages/VerifyEmailPage'
@@ -56,6 +57,7 @@ export function App() {
               <Route element={<AppLayout />}>
                 <Route path="/dashboard" element={<DashboardPage />} />
                 <Route path="/resume" element={<ResumePage />} />
+                <Route path="/resume/:resumeId" element={<ResumeDetailPage />} />
                 {/* /jobs/new before /jobs/:jobId — otherwise the parameter
                     route matches "new" and the detail page looks up a job
                     whose id is the word new. */}

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent } from 'react'
+import { Link } from 'react-router-dom'
 import { SkillAdder } from '@/components/SkillAdder'
 import { Alert } from '@/components/ui/Alert'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -9,6 +10,7 @@ import { ApiError } from '@/services/apiClient'
 import { resumeService, skillService } from '@/services/resumeService'
 import {
   ACCEPTED_MIME_TYPES,
+  IN_FLIGHT,
   MAX_UPLOAD_BYTES,
   formatFileSize,
   type CandidateSkill,
@@ -106,9 +108,6 @@ function SkillChip({
     </span>
   )
 }
-
-/** Statuses that mean the server is still working on this resume. */
-const IN_FLIGHT = ['PENDING', 'EXTRACTING', 'PARSING', 'EMBEDDING']
 
 export function ResumePage() {
   const [resumes, setResumes] = useState<Resume[]>([])
@@ -478,9 +477,32 @@ export function ResumePage() {
               const versionId = resume.latest_version_id
 
               return (
-                <li key={resume.id} className="flex items-center gap-3 px-4 py-3">
+                <li
+                  key={resume.id}
+                  className="relative flex items-center gap-3 px-4 py-3 focus-within:ring-2 focus-within:ring-indigo-600 focus-within:ring-inset"
+                >
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-slate-900">{resume.title}</p>
+                    <p className="truncate text-sm font-medium text-slate-900">
+                      {/*
+                        Only the title is the link, but `after:absolute
+                        after:inset-0` stretches its hit area over the whole row.
+                        Wrapping everything would give it an accessible name of
+                        "resume.pdf Added 4 Sept 2026, 2:32 pm Primary" — one
+                        run-on string a screen reader user sits through to learn
+                        where the link goes.
+
+                        Deliberately still a link when the parse failed or is
+                        still running: the detail page is the *most* useful
+                        destination for a failed resume, since it shows the
+                        error and the file and offers the retry.
+                      */}
+                      <Link
+                        to={`/resume/${resume.id}`}
+                        className="after:absolute after:inset-0 hover:underline focus:outline-none"
+                      >
+                        {resume.title}
+                      </Link>
+                    </p>
                     <p className="text-xs text-slate-500">
                       Added {formatDateTime(resume.created_at)}
                     </p>
@@ -508,45 +530,59 @@ export function ResumePage() {
                     </span>
                   )}
 
-                  {versionId !== null && (
-                    // Targets the *latest* version, not the current one: for
-                    // "try again" that is the file that failed, and for
-                    // "re-extract" it is the newest file uploaded. Gating this
-                    // on current_version_id, as it used to, hid the button
-                    // precisely when it was needed — a failed parse never
-                    // becomes current, so the only recovery was delete and
-                    // re-upload.
+                  {/*
+                    `relative z-10`, and both halves are load-bearing. The title
+                    link's stretched pseudo-element above covers the whole row
+                    and carries no z-index; `z-10` alone does nothing, because
+                    z-index only applies to positioned elements. Without both, a
+                    tap on Delete navigates to the resume instead of deleting
+                    it, and jsdom has no layout so no test here can catch that.
+
+                    The status pills stay outside this wrapper on purpose —
+                    clicking "Couldn't be read" should go to the page that
+                    explains why.
+                  */}
+                  <div className="relative z-10 flex shrink-0 items-center gap-3">
+                    {versionId !== null && (
+                      // Targets the *latest* version, not the current one: for
+                      // "try again" that is the file that failed, and for
+                      // "re-extract" it is the newest file uploaded. Gating this
+                      // on current_version_id, as it used to, hid the button
+                      // precisely when it was needed — a failed parse never
+                      // becomes current, so the only recovery was delete and
+                      // re-upload.
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={locked || rowProcessing}
+                        isLoading={busyKey === `reparse:${versionId}`}
+                        onClick={() =>
+                          void run(
+                            `reparse:${versionId}`,
+                            "We couldn't start that again",
+                            'Please try again.',
+                            async () => {
+                              const result = await resumeService.reparse(versionId)
+                              track(result.version_id, () => void refresh())
+                            },
+                          )
+                        }
+                      >
+                        {rowFailed ? 'Try again' : 'Re-extract'}
+                      </Button>
+                    )}
                     <Button
-                      variant="secondary"
+                      variant="ghost"
                       size="sm"
-                      disabled={locked || rowProcessing}
-                      isLoading={busyKey === `reparse:${versionId}`}
-                      onClick={() =>
-                        void run(
-                          `reparse:${versionId}`,
-                          "We couldn't start that again",
-                          'Please try again.',
-                          async () => {
-                            const result = await resumeService.reparse(versionId)
-                            track(result.version_id, () => void refresh())
-                          },
-                        )
-                      }
+                      disabled={locked}
+                      onClick={() => {
+                        setDeleteError(null)
+                        setPendingDelete(resume)
+                      }}
                     >
-                      {rowFailed ? 'Try again' : 'Re-extract'}
+                      Delete
                     </Button>
-                  )}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={locked}
-                    onClick={() => {
-                      setDeleteError(null)
-                      setPendingDelete(resume)
-                    }}
-                  >
-                    Delete
-                  </Button>
+                  </div>
                 </li>
               )
             })}

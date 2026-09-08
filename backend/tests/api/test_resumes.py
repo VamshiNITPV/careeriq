@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Awaitable, Callable
 
 from httpx import AsyncClient
 from sqlalchemy import select
@@ -524,6 +525,80 @@ class TestDownload:
         assert response.status_code == 200
         assert response.content == original
         assert response.headers["x-content-type-options"] == "nosniff"
+
+
+class TestVersionDetail:
+    """GET /resumes/versions/{id} — the parsed output.
+
+    Untested until now because nothing consumed it; the resume detail page is
+    its first caller.
+    """
+
+    async def test_returns_the_parse_output(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        run_pipeline: Callable[[uuid.UUID], Awaitable[object]],
+        seeded_skills: int,
+    ) -> None:
+        upload = await client.post(f"{API}/resumes", headers=auth_headers, files=pdf_upload())
+        version_id = upload.json()["version_id"]
+        # The upload's own background task runs against the process-wide session,
+        # which cannot see this test's uncommitted rows. Run it here instead.
+        await run_pipeline(uuid.UUID(version_id))
+
+        response = await client.get(
+            f"{API}/resumes/versions/{version_id}", headers=auth_headers
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["raw_text"]
+        # The three fields the detail page renders, and the reason this endpoint
+        # exists at all — a summary would not carry them.
+        assert body["parsed_sections"]["sections"]
+        assert body["parsed_entities"]["skills"]
+        # Never exposed: an internal address clients would start constructing.
+        assert "storage_key" not in body
+
+    async def test_another_users_version_returns_404(
+        self, client: AsyncClient, auth_headers: dict[str, str]
+    ) -> None:
+        owner = await client.post(f"{API}/resumes", headers=auth_headers, files=pdf_upload())
+        version_id = owner.json()["version_id"]
+
+        other = await client.post(
+            f"{API}/auth/register",
+            json={"email": "intruder3@example.com", "password": "correct-horse-9"},
+        )
+        headers = {"Authorization": f"Bearer {other.json()['tokens']['access_token']}"}
+
+        response = await client.get(f"{API}/resumes/versions/{version_id}", headers=headers)
+        assert response.status_code == 404
+
+    async def test_a_deleted_resume_takes_its_versions_with_it(
+        self, client: AsyncClient, auth_headers: dict[str, str]
+    ) -> None:
+        """Soft delete is a real delete as far as the API is concerned.
+
+        The bytes stay on disk — reclaiming them is a Phase 10 job — but every
+        version endpoint joins through to the resume and filters `deleted_at`,
+        so nothing is reachable. Without that join a version id would outlive
+        the resume it belongs to and keep serving the file.
+        """
+        upload = await client.post(f"{API}/resumes", headers=auth_headers, files=pdf_upload())
+        body = upload.json()
+        await client.delete(f"{API}/resumes/{body['resume_id']}", headers=auth_headers)
+
+        detail = await client.get(
+            f"{API}/resumes/versions/{body['version_id']}", headers=auth_headers
+        )
+        download = await client.get(
+            f"{API}/resumes/versions/{body['version_id']}/download", headers=auth_headers
+        )
+
+        assert detail.status_code == 404
+        assert download.status_code == 404
 
 
 class TestResumeManagement:

@@ -25,6 +25,22 @@ if (typeof HTMLDialogElement !== 'undefined' && !HTMLDialogElement.prototype.sho
   }
 }
 
+/**
+ * jsdom implements Blob but not the object-URL registry.
+ *
+ * Both functions are simply absent, so anything that renders a fetched file
+ * throws on mount. The counter suffix matters: a test proving the *first* URL
+ * was revoked has to be able to tell two of them apart.
+ *
+ * Feature-guarded so it disappears the day jsdom ships its own, and defined
+ * here rather than per-test because `vi.spyOn` cannot stub a missing property.
+ */
+if (typeof URL.createObjectURL !== 'function') {
+  let created = 0
+  URL.createObjectURL = () => `blob:mock/${++created}`
+  URL.revokeObjectURL = () => {}
+}
+
 afterEach(() => {
   // Unmount rendered trees. Without this, components from an earlier test stay
   // in the document and queries match the wrong element — producing failures

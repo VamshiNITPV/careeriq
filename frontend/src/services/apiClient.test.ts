@@ -124,6 +124,74 @@ describe('apiClient', () => {
     })
   })
 
+  describe('blob responses', () => {
+    it('reads the raw bytes of a file response', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(
+          new Response('%PDF-1.7', {
+            status: 200,
+            headers: { 'Content-Type': 'application/pdf' },
+          }),
+        ),
+      )
+
+      const result = await api.getBlob('/resumes/versions/v1/download')
+
+      // Asserted on content, not `instanceof Blob`: undici builds the Response
+      // body in its own realm, so the object is a Blob without being jsdom's.
+      expect(await result.text()).toBe('%PDF-1.7')
+    })
+
+    it('still throws an ApiError when the server refuses', async () => {
+      // parseError reads JSON on the failure path, which stays right: FastAPI's
+      // error envelope is JSON even when the success body would be bytes.
+      setAccessToken('good')
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(errorResponse(404, 'RESOURCE_NOT_FOUND')))
+
+      await expect(api.getBlob('/resumes/versions/v1/download')).rejects.toMatchObject({
+        status: 404,
+        code: 'RESOURCE_NOT_FOUND',
+      })
+    })
+
+    it('retries in blob mode after a refresh, not in JSON mode', async () => {
+      /*
+       * The one that matters. The 401 path retries by recursing with `options`
+       * forwarded whole, so the parse mode rides along. Drop it from that
+       * recursion and this is the only thing that notices — the bug otherwise
+       * appears solely after a real token expiry.
+       */
+      setAccessToken('expired')
+      setRefreshToken('refresh-1')
+
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(errorResponse(401, 'INVALID_TOKEN'))
+        .mockResolvedValueOnce(
+          jsonResponse(200, {
+            access_token: 'fresh',
+            refresh_token: 'refresh-2',
+            token_type: 'bearer',
+            expires_in: 1800,
+          }),
+        )
+        .mockResolvedValueOnce(
+          new Response('%PDF-1.7', {
+            status: 200,
+            headers: { 'Content-Type': 'application/pdf' },
+          }),
+        )
+      vi.stubGlobal('fetch', fetchMock)
+
+      const result = await api.getBlob('/resumes/versions/v1/download')
+
+      // Bytes, not a parsed object — the retry stayed in blob mode.
+      expect(await result.text()).toBe('%PDF-1.7')
+      expect(fetchMock).toHaveBeenCalledTimes(3)
+    })
+  })
+
   describe('automatic token refresh', () => {
     it('refreshes on 401 and retries the original request', async () => {
       setAccessToken('expired')

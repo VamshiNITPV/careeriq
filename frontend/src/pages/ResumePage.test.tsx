@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/services/apiClient'
 import { resumeService, skillService } from '@/services/resumeService'
@@ -15,9 +16,17 @@ import { ResumePage } from './ResumePage'
  * Every test here pins a case where the page used to fail silently — the class
  * of bug where working code presents as broken.
  *
- * No MemoryRouter or AuthProvider: ResumePage consumes neither, and the service
- * modules are mocked directly, matching the convention in ProfilePage.test.tsx.
+ * Wrapped in a MemoryRouter because each row's title is now a link to the
+ * resume's own page; no AuthProvider, which ResumePage still does not consume.
+ * Service modules are mocked directly, matching ProfilePage.test.tsx.
  */
+
+const renderPage = () =>
+  render(
+    <MemoryRouter>
+      <ResumePage />
+    </MemoryRouter>,
+  )
 
 const POLL = 1200
 const MAX_ATTEMPTS = 50
@@ -116,7 +125,7 @@ describe('ResumePage', () => {
       // gone, as a statement of fact.
       vi.spyOn(resumeService, 'list').mockRejectedValue(new Error('offline'))
       vi.spyOn(skillService, 'mySkills').mockResolvedValue([])
-      render(<ResumePage />)
+      renderPage()
 
       expect(await screen.findByRole('alert')).toHaveTextContent(/couldn't load your resumes/i)
       expect(screen.queryByText('Nothing uploaded yet.')).not.toBeInTheDocument()
@@ -126,7 +135,7 @@ describe('ResumePage', () => {
       // Promise.all means either rejection blanks both sections.
       vi.spyOn(resumeService, 'list').mockResolvedValue([])
       vi.spyOn(skillService, 'mySkills').mockRejectedValue(new Error('offline'))
-      render(<ResumePage />)
+      renderPage()
 
       expect(await screen.findByRole('alert')).toBeInTheDocument()
       expect(screen.queryByText('Nothing uploaded yet.')).not.toBeInTheDocument()
@@ -137,7 +146,7 @@ describe('ResumePage', () => {
         new ApiError(500, 'INTERNAL_ERROR', 'Something broke.', {}, 'corr-7'),
       )
       vi.spyOn(skillService, 'mySkills').mockResolvedValue([])
-      render(<ResumePage />)
+      renderPage()
 
       expect(await screen.findByRole('alert')).toHaveTextContent('corr-7')
     })
@@ -153,7 +162,7 @@ describe('ResumePage', () => {
         suggestions: [],
         unknown_terms: [],
       })
-      render(<ResumePage />)
+      renderPage()
 
       await user.click(await screen.findByRole('button', { name: 'Try again' }))
 
@@ -164,7 +173,7 @@ describe('ResumePage', () => {
     it('does not tell a user with skills to go upload a resume', async () => {
       // The skills empty state was ungated, so it rendered during every load.
       mockLoad({ resumes: [resumeFixture()], skills: [skillFixture()] })
-      render(<ResumePage />)
+      renderPage()
 
       expect(screen.queryByText(/add skills by hand below/)).not.toBeInTheDocument()
       expect(await screen.findByText('Python')).toBeInTheDocument()
@@ -172,12 +181,40 @@ describe('ResumePage', () => {
     })
   })
 
+  it('links each resume to its own page', async () => {
+    mockLoad({ resumes: [resumeFixture()] })
+    renderPage()
+
+    const link = await screen.findByRole('link', { name: 'resume.pdf' })
+    expect(link).toHaveAttribute('href', '/resume/r1')
+  })
+
+  it('still links a resume that could not be read', async () => {
+    // The detail page is the *most* useful destination for a failed resume: it
+    // shows the error, still previews the file, and offers the retry. Gating
+    // the link on the success path would hide it exactly when it is wanted.
+    mockLoad({
+      resumes: [
+        resumeFixture({
+          latest_version_status: 'FAILED',
+          latest_version_error: 'No text could be extracted.',
+        }),
+      ],
+    })
+    renderPage()
+
+    expect(await screen.findByRole('link', { name: 'resume.pdf' })).toHaveAttribute(
+      'href',
+      '/resume/r1',
+    )
+  })
+
   it('shows when a resume was uploaded, with the time', async () => {
     // Structure, not an exact string: the suite pins no TZ, so the rendered
     // clock time depends on the machine. A named month and a time separator
     // are what was asked for, and they hold in every timezone.
     mockLoad({ resumes: [resumeFixture()] })
-    render(<ResumePage />)
+    renderPage()
 
     const added = within(await screen.findByRole('listitem')).getByText(/^Added /)
     // Day before the month, month as a name, then a time. The day number can
@@ -197,7 +234,7 @@ describe('ResumePage', () => {
         poll_url: '/x',
       })
       const poll = vi.spyOn(resumeService, 'status')
-      render(<ResumePage />)
+      renderPage()
       await screen.findByText('Nothing uploaded yet.')
 
       await user.upload(fileInput(), pdf())
@@ -213,7 +250,7 @@ describe('ResumePage', () => {
       vi.spyOn(resumeService, 'upload').mockRejectedValue(
         new ApiError(413, 'PAYLOAD_TOO_LARGE', 'File exceeds 5 MB.', {}, 'corr-1'),
       )
-      render(<ResumePage />)
+      renderPage()
       await screen.findByText('Nothing uploaded yet.')
 
       await user.upload(fileInput(), pdf())
@@ -239,7 +276,7 @@ describe('ResumePage', () => {
       vi.spyOn(resumeService, 'status').mockResolvedValue(
         statusFixture({ status: 'FAILED', error: null, is_terminal: true, percent: 100 }),
       )
-      render(<ResumePage />)
+      renderPage()
       await screen.findByText('Nothing uploaded yet.')
 
       await user.upload(fileInput(), pdf())
@@ -264,7 +301,7 @@ describe('ResumePage', () => {
         poll_url: '/x',
       })
       const poll = vi.spyOn(resumeService, 'status').mockResolvedValue(statusFixture())
-      render(<ResumePage />)
+      renderPage()
       await act(async () => {})
 
       await act(async () => {
@@ -312,7 +349,7 @@ describe('ResumePage', () => {
       vi.spyOn(resumeService, 'status').mockResolvedValue(
         statusFixture({ is_terminal: true, status: 'COMPLETE' }),
       )
-      render(<ResumePage />)
+      renderPage()
 
       const row = within(await screen.findByRole('listitem'))
       expect(row.getByText(/couldn't be read/i)).toBeInTheDocument()
@@ -327,7 +364,7 @@ describe('ResumePage', () => {
       mockLoad({
         resumes: [resumeFixture({ latest_version_status: 'PARSING', current_version_id: null })],
       })
-      render(<ResumePage />)
+      renderPage()
 
       const row = within(await screen.findByRole('listitem'))
       expect(row.getByText(/processing/i)).toBeInTheDocument()
@@ -340,7 +377,7 @@ describe('ResumePage', () => {
       const user = userEvent.setup()
       mockLoad({ resumes: [resumeFixture()] })
       vi.spyOn(resumeService, 'reparse').mockRejectedValue(new Error('offline'))
-      render(<ResumePage />)
+      renderPage()
 
       await user.click(await screen.findByRole('button', { name: 'Re-extract' }))
 
@@ -352,7 +389,7 @@ describe('ResumePage', () => {
       const user = userEvent.setup()
       mockLoad({ resumes: [resumeFixture()], skills: [skillFixture()] })
       vi.spyOn(skillService, 'remove').mockRejectedValue(new Error('offline'))
-      render(<ResumePage />)
+      renderPage()
 
       await user.click(await screen.findByRole('button', { name: 'Remove Python' }))
 
@@ -366,7 +403,7 @@ describe('ResumePage', () => {
       const user = userEvent.setup()
       mockLoad({ resumes: [resumeFixture()], suggestions: [suggestionFixture()] })
       vi.spyOn(skillService, 'add').mockRejectedValue(new Error('offline'))
-      render(<ResumePage />)
+      renderPage()
 
       await user.click(await screen.findByRole('button', { name: 'Add' }))
 
@@ -379,7 +416,7 @@ describe('ResumePage', () => {
       vi.spyOn(resumeService, 'list').mockResolvedValue([resumeFixture()])
       vi.spyOn(skillService, 'mySkills').mockResolvedValue([])
       vi.spyOn(resumeService, 'suggestions').mockRejectedValue(new Error('500'))
-      render(<ResumePage />)
+      renderPage()
 
       expect(await screen.findByText(/couldn't load suggested skills/i)).toBeInTheDocument()
     })
@@ -403,7 +440,7 @@ describe('ResumePage', () => {
       vi.spyOn(resumeService, 'status').mockResolvedValue(
         statusFixture({ is_terminal: true, status: 'COMPLETE' }),
       )
-      render(<ResumePage />)
+      renderPage()
 
       const button = await screen.findByRole('button', { name: 'Re-extract' })
       await user.click(button)
@@ -426,7 +463,7 @@ describe('ResumePage', () => {
       const user = userEvent.setup()
       mockLoad({ resumes: [resumeFixture()] })
       vi.spyOn(resumeService, 'remove').mockRejectedValue(new Error('offline'))
-      render(<ResumePage />)
+      renderPage()
 
       await user.click(await screen.findByRole('button', { name: 'Delete' }))
       await user.click(screen.getByRole('button', { name: 'Delete resume' }))
@@ -447,7 +484,7 @@ describe('ResumePage', () => {
         unknown_terms: [],
       })
       const remove = vi.spyOn(resumeService, 'remove').mockResolvedValue({ message: 'ok' })
-      render(<ResumePage />)
+      renderPage()
 
       await user.click(await screen.findByRole('button', { name: 'Delete' }))
       const dialog = screen.getByRole('dialog')
@@ -478,7 +515,7 @@ describe('ResumePage', () => {
       statusFixture({ status: 'COMPLETE', is_terminal: true, percent: 100 }),
     )
     vi.spyOn(skillService, 'remove').mockResolvedValue({ message: 'ok' })
-    render(<ResumePage />)
+    renderPage()
     await screen.findByText('Python')
 
     await user.upload(fileInput(), pdf())
