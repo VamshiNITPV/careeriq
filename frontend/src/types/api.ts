@@ -34,6 +34,8 @@ export const ErrorCode = {
   AuthenticationFailed: 'AUTHENTICATION_FAILED',
   InvalidToken: 'INVALID_TOKEN',
   TokenReuseDetected: 'TOKEN_REUSE_DETECTED',
+  /** The session went unused past the idle window and was revoked. */
+  SessionIdleTimeout: 'SESSION_IDLE_TIMEOUT',
   PermissionDenied: 'PERMISSION_DENIED',
   ResourceNotFound: 'RESOURCE_NOT_FOUND',
   RegistrationFailed: 'REGISTRATION_FAILED',

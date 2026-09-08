@@ -28,6 +28,27 @@ def build(**overrides: object) -> Settings:
     return Settings(_env_file=None, **values)  # type: ignore[arg-type]
 
 
+class TestSessionIdleTimeout:
+    """Two settings that cannot work, caught in every environment rather than
+    only in production — a developer should meet them locally."""
+
+    def test_accepts_a_window_at_least_as_long_as_the_access_token(self) -> None:
+        settings = build(session_idle_timeout_minutes=30, access_token_expire_minutes=30)
+
+        assert settings.session_idle_timeout_minutes == 30
+
+    def test_rejects_a_window_shorter_than_the_access_token(self) -> None:
+        # A refresh token only rotates when an access token expires, so a
+        # shorter window can never bind — it would look enabled and do nothing.
+        with pytest.raises(PydanticValidationError, match="ACCESS_TOKEN_EXPIRE_MINUTES"):
+            build(session_idle_timeout_minutes=29, access_token_expire_minutes=30)
+
+    def test_rejects_a_window_longer_than_the_absolute_expiry(self) -> None:
+        # Absolute expiry would always fire first. Dead configuration.
+        with pytest.raises(PydanticValidationError, match="REFRESH_TOKEN_EXPIRE_DAYS"):
+            build(session_idle_timeout_minutes=2881, refresh_token_expire_days=2)
+
+
 class TestDatabaseUrlValidation:
     def test_accepts_asyncpg_dsn(self) -> None:
         assert build().database_url == VALID_DB

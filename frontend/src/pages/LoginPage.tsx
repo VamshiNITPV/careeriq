@@ -3,16 +3,18 @@ import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import type { SignedOutReason } from '@/hooks/authContext'
 import { useAuth } from '@/hooks/useAuth'
 import { ApiError } from '@/services/apiClient'
 import { ErrorCode } from '@/types/api'
 
 interface LocationState {
   from?: { pathname: string }
+  reason?: SignedOutReason
 }
 
 export function LoginPage() {
-  const { login, status } = useAuth()
+  const { login, status, signedOutReason } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -22,7 +24,19 @@ export function LoginPage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   // Where the user was headed before the guard redirected them here.
-  const from = (location.state as LocationState | null)?.from?.pathname ?? '/dashboard'
+  const state = location.state as LocationState | null
+  const from = state?.from?.pathname ?? '/dashboard'
+
+  /*
+    Why they are here, if it is worth saying. Route state first: its lifetime is
+    exactly the one wanted — it survives the redirect and dies on reload, so the
+    notice does not haunt the page. The context is the fallback for someone
+    already sitting on /login, where there is no <Navigate> and so no state.
+
+    No number in the message. The window is a constant on both sides, and
+    "60 minutes" becomes a lie the day either changes.
+  */
+  const wasSignedOutForIdling = (state?.reason ?? signedOutReason) === 'idle'
 
   if (status === 'authenticated') return <Navigate to={from} replace />
 
@@ -51,6 +65,12 @@ export function LoginPage() {
         <h1 className="text-center text-2xl font-bold tracking-tight text-slate-900">
           Sign in to CareerIQ
         </h1>
+
+        {wasSignedOutForIdling && (
+          <Alert tone="info" className="mt-6">
+            You were signed out after a period of inactivity. Please sign in again.
+          </Alert>
+        )}
 
         <form onSubmit={(e) => void handleSubmit(e)} className="mt-8 space-y-5" noValidate>
           {error && (

@@ -153,6 +153,63 @@ describe('apiClient', () => {
       expect(getRefreshToken()).toBe('refresh-2')
     })
 
+    it('does not resurrect a session that ended while the refresh was in flight', async () => {
+      /*
+       * The sign-out race. A request 401s, the refresh goes out, and the user
+       * signs out — or the idle timer does it for them — before it comes back.
+       * Writing those tokens would leave the UI signed out and the next page
+       * load signed in, because hasStoredSession() would find a live token.
+       *
+       * Reachable today from the Sign out button on a slow connection; routine
+       * once something unattended is doing the signing out.
+       */
+      setAccessToken('expired')
+      setRefreshToken('refresh-1')
+
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(errorResponse(401, 'INVALID_TOKEN'))
+        .mockImplementationOnce(() => {
+          // The sign-out lands while the refresh is on the wire.
+          clearTokens()
+          return Promise.resolve(
+            jsonResponse(200, {
+              access_token: 'fresh',
+              refresh_token: 'refresh-2',
+              token_type: 'bearer',
+              expires_in: 1800,
+            }),
+          )
+        })
+      vi.stubGlobal('fetch', fetchMock)
+
+      await expect(api.get('/protected')).rejects.toBeInstanceOf(ApiError)
+
+      expect(getAccessToken()).toBeNull()
+      expect(getRefreshToken()).toBeNull()
+      // And no retry was attempted with tokens from a dead session.
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+    })
+
+    it('reports an idle timeout so the login page can explain it', async () => {
+      setAccessToken('expired')
+      setRefreshToken('refresh-1')
+      const onUnauthenticated = vi.fn()
+      setUnauthenticatedHandler(onUnauthenticated)
+
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(errorResponse(401, 'INVALID_TOKEN'))
+        .mockResolvedValueOnce(errorResponse(401, 'SESSION_IDLE_TIMEOUT'))
+      vi.stubGlobal('fetch', fetchMock)
+
+      await expect(api.get('/protected')).rejects.toBeInstanceOf(ApiError)
+
+      // Without the reason the whole server-side half of the timeout is
+      // invisible and the sign-out looks arbitrary.
+      expect(onUnauthenticated).toHaveBeenCalledWith('idle')
+    })
+
     it('sends the retry with the NEW access token', async () => {
       setAccessToken('expired')
       setRefreshToken('refresh-1')

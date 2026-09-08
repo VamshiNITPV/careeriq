@@ -100,6 +100,9 @@ Each story carries acceptance criteria (AC) that become test cases.
 - AC1: Access tokens expire in 30 minutes; refresh tokens in 14 days.
 - AC2: Refresh tokens rotate on use, and reuse of a consumed refresh token revokes the whole family.
 - AC3: Logout invalidates the refresh token server-side.
+- AC4: A session with no refresh activity for `SESSION_IDLE_TIMEOUT_MINUTES` (default 60) is
+  refused server-side and its rotation family revoked; the browser signs the user out at the
+  same deadline and the login page says why.
 
 **US-1.4** As a user, I want to set career preferences, so that ranking reflects what I actually want.
 - AC1: I can set target roles, preferred locations, remote preference, experience level, minimum salary, and currency.

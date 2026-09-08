@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
@@ -14,6 +14,7 @@ from sqlalchemy import (
     Index,
     String,
     Text,
+    func,
     text,
 )
 from sqlalchemy import (
@@ -126,8 +127,10 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 class RefreshToken(Base, UUIDPrimaryKeyMixin, CreatedAtMixin):
     """A single issued refresh token.
 
-    Rows are append-only apart from `revoked_at` and `replaced_by_id`, hence
-    CreatedAtMixin rather than TimestampMixin.
+    Rows are append-only apart from `revoked_at`, `replaced_by_id` and
+    `last_used_at`, hence CreatedAtMixin rather than TimestampMixin.
+    `last_used_at` is a domain fact — when this credential was last exchanged —
+    rather than the generic audit trail an `updated_at` would be.
 
     Rotation works as a family: each refresh issues a new token carrying the same
     `family_id` and marks the old one revoked. Presenting an already-revoked
@@ -151,6 +154,16 @@ class RefreshToken(Base, UUIDPrimaryKeyMixin, CreatedAtMixin):
     family_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
 
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # When this token was last exchanged, which is what the idle timeout reads
+    # (US-1.3 AC4). Written at issue and never again: a rotation creates a new
+    # row, and the old row's `revoked_at` already records when it was consumed.
+    #
+    # The server default is kept for the reason CreatedAtMixin gives, but the
+    # service sets it explicitly too — a column with only a server default is
+    # expired after a flush, and `_issue_token_pair` flushes before returning.
+    last_used_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     replaced_by_id: Mapped[uuid.UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
@@ -176,5 +189,17 @@ class RefreshToken(Base, UUIDPrimaryKeyMixin, CreatedAtMixin):
     def is_expired(self, *, now: datetime | None = None) -> bool:
         return (now or datetime.now(UTC)) >= self.expires_at
 
+    def is_idle(self, *, timeout: timedelta, now: datetime | None = None) -> bool:
+        """True when nothing has exchanged this token within `timeout`.
+
+        The window is passed in rather than read from settings: this module
+        imports no configuration, and a policy value the model read for itself
+        could not be varied by a test without clearing an lru_cache.
+        """
+        return (now or datetime.now(UTC)) - self.last_used_at >= timeout
+
     def is_usable(self, *, now: datetime | None = None) -> bool:
+        # Deliberately not extended with the idle check. `timeout` would have to
+        # become a required argument on a shared shape, and VerificationToken
+        # has its own is_usable with a different meaning.
         return not self.is_revoked and not self.is_expired(now=now)

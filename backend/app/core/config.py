@@ -50,6 +50,14 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = Field(default=30, ge=1)
     refresh_token_expire_days: int = Field(default=14, ge=1)
+    # A session with no token rotation for this long is refused and its whole
+    # rotation family revoked (US-1.3 AC4).
+    #
+    # Costs no per-request write: `last_used_at` is only touched at
+    # /auth/refresh, which already writes. What it therefore measures is minutes
+    # since the last *rotation*, not since the last human input — the browser
+    # side owns that, and architecture.md's ADR-014 amendment records the gap.
+    session_idle_timeout_minutes: int = Field(default=60, ge=5, le=10080)
     # NFR-6 sets the floor at 12. Lower is permitted only under ENVIRONMENT=test,
     # enforced in _check_production_hardening below.
     bcrypt_rounds: int = Field(default=12, ge=4, le=18)
@@ -196,6 +204,28 @@ class Settings(BaseSettings):
         if upper not in allowed:
             raise ValueError(f"LOG_LEVEL must be one of {sorted(allowed)}")
         return upper
+
+    @model_validator(mode="after")
+    def _idle_timeout_is_coherent(self) -> Settings:
+        """Two ways the idle window can be set to a value that cannot work.
+
+        Not in `_check_production_hardening`: every entry there guards something
+        that is broken *in production* specifically. These two are incoherent in
+        every environment, so failing here means a developer meets them locally,
+        where they can be fixed.
+        """
+        if self.session_idle_timeout_minutes < self.access_token_expire_minutes:
+            raise ValueError(
+                "SESSION_IDLE_TIMEOUT_MINUTES must be at least "
+                "ACCESS_TOKEN_EXPIRE_MINUTES: a refresh token only rotates when an "
+                "access token expires, so a shorter window can never bind."
+            )
+        if self.session_idle_timeout_minutes > self.refresh_token_expire_days * 1440:
+            raise ValueError(
+                "SESSION_IDLE_TIMEOUT_MINUTES exceeds REFRESH_TOKEN_EXPIRE_DAYS, so "
+                "the absolute expiry would always fire first. Dead configuration."
+            )
+        return self
 
     @model_validator(mode="after")
     def _jobs_provider_is_usable(self) -> Settings:

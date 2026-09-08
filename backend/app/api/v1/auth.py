@@ -101,8 +101,10 @@ async def login(
         401: {
             "model": ErrorResponse,
             "description": (
-                "Token invalid, expired, or reused. A reused token revokes the "
-                "entire rotation family (US-1.3 AC2)."
+                "Token invalid, expired, reused, or idle. A reused token revokes the "
+                "entire rotation family (US-1.3 AC2); so does a session left unused "
+                "past SESSION_IDLE_TIMEOUT_MINUTES, which answers "
+                "SESSION_IDLE_TIMEOUT so the client can say why (US-1.3 AC4)."
             ),
         }
     },

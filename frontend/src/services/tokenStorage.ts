@@ -61,7 +61,25 @@ export function setRefreshToken(token: string | null): void {
   }
 }
 
+/**
+ * Bumped every time the session ends.
+ *
+ * A refresh can be in flight when the user signs out — from the Sign out
+ * button on a slow network, or routinely once an idle timer is doing the
+ * signing out. Without this the refresh resolves *after* clearTokens() and
+ * writes a live token pair straight back into localStorage, so the UI says
+ * signed out and the next page load restores the session.
+ *
+ * Callers capture it before an async boundary and compare afterwards.
+ */
+let sessionEpoch = 0
+
+export function currentSessionEpoch(): number {
+  return sessionEpoch
+}
+
 export function clearTokens(): void {
+  sessionEpoch += 1
   setAccessToken(null)
   setRefreshToken(null)
 }

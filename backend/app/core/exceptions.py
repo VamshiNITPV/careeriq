@@ -76,6 +76,23 @@ class TokenReuseError(AuthenticationError):
     message = "Session invalidated. Please sign in again."
 
 
+class SessionIdleTimeoutError(AuthenticationError):
+    """The session went unused past SESSION_IDLE_TIMEOUT_MINUTES (US-1.3 AC4).
+
+    Deliberately distinguishable from InvalidTokenError, unlike the verification
+    token errors which collapse every reason into one. The difference is what an
+    attacker can reach: a verification token can be guessed at, so telling a
+    guesser *why* their guess failed is a real oracle. This is only reachable by
+    presenting a valid, unrevoked, unexpired 48-byte refresh token — there is
+    nothing to fish for, and whoever holds a stolen live token already knows it
+    was genuine. What it buys is the only way the login page can say why the
+    user is looking at it.
+    """
+
+    code = "SESSION_IDLE_TIMEOUT"
+    message = "You were signed out after a period of inactivity. Please sign in again."
+
+
 class PermissionDeniedError(CareerIQError):
     """Role check failure only.
 

@@ -126,7 +126,8 @@ Required by US-1.3 — refresh tokens must be revocable and support reuse detect
 | `user_id` | `UUID` | FK → `users.id` CASCADE, NOT NULL | |
 | `token_hash` | `TEXT` | NOT NULL, UNIQUE | SHA-256 of the token. **Never store plaintext.** |
 | `family_id` | `UUID` | NOT NULL | Rotation chain identifier |
-| `expires_at` | `TIMESTAMPTZ` | NOT NULL | |
+| `expires_at` | `TIMESTAMPTZ` | NOT NULL | Absolute expiry |
+| `last_used_at` | `TIMESTAMPTZ` | NOT NULL | Set at issue; only a rotation resets it |
 | `revoked_at` | `TIMESTAMPTZ` | NULL | |
 | `replaced_by_id` | `UUID` | FK → self, NULL | Rotation link |
 | `user_agent`, `ip_address` | `TEXT`, `INET` | NULL | Audit |
@@ -134,6 +135,13 @@ Required by US-1.3 — refresh tokens must be revocable and support reuse detect
 
 > **Reuse detection:** presenting a token whose `revoked_at` is set means it was already rotated —
 > either theft or a race. The response is to revoke the entire `family_id`, forcing re-login.
+
+> **Idle timeout (US-1.3 AC4):** `last_used_at` is what `/auth/refresh` reads to refuse a session
+> that has gone unused past `SESSION_IDLE_TIMEOUT_MINUTES`, revoking the family rather than merely
+> answering 401 — a bare refusal would leave `revoked_at` NULL, so raising the window again would
+> bring dead sessions back. It is written once, at issue: a rotation creates a new row, and the old
+> row's `revoked_at` already records when it was consumed. Deliberately unindexed — it is only ever
+> read on a row already located by `token_hash`, never as a predicate.
 
 #### `profiles`
 One-to-one with `users`. Holds career preferences that feed ranking (ADR-005).

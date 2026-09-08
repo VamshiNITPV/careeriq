@@ -11,7 +11,7 @@ import { Spinner } from './ui/Spinner'
  * is how "hidden" admin panels leak.
  */
 export function ProtectedRoute() {
-  const { status } = useAuth()
+  const { status, signedOutReason } = useAuth()
   const location = useLocation()
 
   if (status === 'loading') {
@@ -29,7 +29,7 @@ export function ProtectedRoute() {
     // `state.from` lets the login page send the user back where they were
     // headed. `replace` keeps the guarded URL out of history, so Back after
     // signing in does not land on a redirect loop.
-    return <Navigate to="/login" replace state={{ from: location }} />
+    return <Navigate to="/login" replace state={{ from: location, reason: signedOutReason }} />
   }
 
   return <Outlet />

@@ -450,6 +450,9 @@ personal data, and file upload plus LLM invocation is a large attack surface.
 - bcrypt password hashing, cost ≥ 12 (NFR-6).
 - Short-lived access JWTs (30 min) + rotating refresh tokens (14 d) with reuse detection.
 - Refresh tokens stored hashed server-side so they can be revoked.
+- **Idle session timeout (US-1.3 AC4, added 2026-09-08).** A session unused for 60 minutes is
+  refused at `/auth/refresh` and its family revoked, plus a browser watcher that signs out at
+  the same deadline. See the amendment below for what each half actually covers.
 - Role-based access (`USER`, `ADMIN`) plus per-resource ownership checks on every owned resource.
 - Cross-user access returns `404`, not `403` (US-1.5 AC1) — do not confirm that other users' data exists.
 
@@ -475,6 +478,36 @@ personal data, and file upload plus LLM invocation is a large attack surface.
   database. Never rendered as raw HTML.
 - **Sensitive data:** resume content sent to third-party model providers is a privacy decision the
   user is told about explicitly.
+
+**Amendment, 2026-09-08 — idle session timeout, and what each half of it actually does.**
+
+Sessions had absolute lifetimes only, so a laptop left open or a refresh token copied out of
+`localStorage` stayed usable for a fortnight. The fix is two layers, and they cover different
+things:
+
+- **The server owns *resumption*.** `refresh_tokens.last_used_at`, and `/auth/refresh` refuses a
+  token idle past the window and revokes its family. This is what covers a closed browser, another
+  machine, and a stolen refresh token. It costs no per-request write, because that endpoint already
+  writes.
+- **The browser owns *the live tab*.** A watcher on real human input that signs out at the same
+  deadline.
+
+**The limit, stated rather than discovered later.** The server does not log anyone out — a row is
+data, and the refusal only materialises when someone presents the token. And what it measures is
+minutes since the last *rotation*, not since the last human input: rotation only happens when an
+access token expires, so background traffic at T+31 moves the server's deadline to T+91 and a user
+returning at T+65 is still signed in. Nothing polls on a long interval today, but this is one
+`refetchInterval` away from silently disabling the feature — which is precisely why the browser
+half is not cosmetic, and why it must not be deleted as redundant.
+
+*Rejected alternatives.*
+- **A per-request `last_seen` write.** Genuine per-request enforcement, at the cost of turning every
+  authenticated GET into a write to enforce a once-an-hour rule.
+- **`jti` denylisting.** `security.py` leaves the claim as headroom for exactly this, but taking it
+  up means a database read on every request, undoing the reason access tokens are JWTs at all.
+- **Counting API calls as activity.** Tempting for a long-running page, but any future poller would
+  become a keep-alive — reproducing the server-side failure above in the one layer that would
+  otherwise still work. Human input only.
 
 **Consequences.** More work upfront, and the security tests are as important as the feature tests.
 Each of these has a corresponding test case; a security control without a test is a claim, not a
@@ -937,4 +970,5 @@ production value. Missing required config fails loudly at startup, not at first 
 | 2026-09-02 | ADR-017 added. Transactional email, password reset and email verification, after review found that a forgotten password left a user permanently locked out. |
 | 2026-09-02 | ADR-018 added. Resume ingestion, object storage, and the interim background task runner. |
 | 2026-09-04 | ADR-019 added. Job data sourcing from permitted APIs, after the corpus reached Phase 6 with seven hand-entered postings and no way to grow. |
+| 2026-09-08 | ADR-014 amended. Idle session timeout (US-1.3 AC4): `/auth/refresh` refuses a session unused for 60 minutes and revokes its family, plus a browser watcher that signs out at the same deadline. |
 | 2026-09-07 | ADR-019 amended. Measurement showed the provider is a slowly-changing index, not a live feed: recency filtering returns nothing and query variety returns everything. Adds the rotation, a database-backed request budget, and a scheduler — reversing the ADR's own rejection of one. |

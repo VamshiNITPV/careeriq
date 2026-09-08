@@ -10,6 +10,7 @@ import { ErrorCode, type ApiErrorBody, type FieldError } from '@/types/api'
 import type { TokenPair } from '@/types/auth'
 import {
   clearTokens,
+  currentSessionEpoch,
   getAccessToken,
   getRefreshToken,
   setAccessToken,
@@ -56,7 +57,8 @@ export class ApiError extends Error {
  * The auth provider registers a handler; keeping it a callback means this
  * module stays free of React and router imports and remains unit-testable.
  */
-type UnauthenticatedHandler = () => void
+/** `reason` is passed on only when the server said why. */
+type UnauthenticatedHandler = (reason?: 'idle') => void
 let onUnauthenticated: UnauthenticatedHandler = () => {}
 
 export function setUnauthenticatedHandler(handler: UnauthenticatedHandler): void {
@@ -85,9 +87,16 @@ type RefreshResult = 'refreshed' | 'rejected' | 'unreachable'
 
 let refreshInFlight: Promise<RefreshResult> | null = null
 
+/** Set by the rejecting refresh, read by the 401 handler immediately after. */
+let lastRejectionReason: 'idle' | undefined
+
 async function performRefresh(): Promise<RefreshResult> {
   const refreshToken = getRefreshToken()
   if (!refreshToken) return 'rejected'
+
+  // Captured before the request. If the session ends while this is in
+  // flight, the tokens that come back belong to a session that is over.
+  const epoch = currentSessionEpoch()
 
   try {
     const response = await fetch(`${API_BASE}/auth/refresh`, {
@@ -97,10 +106,24 @@ async function performRefresh(): Promise<RefreshResult> {
     })
 
     if (!response.ok) {
-      // Expired, revoked, or reuse detected. All terminal — no second attempt
-      // could succeed, so the session is genuinely over.
+      // Expired, revoked, reused, or idle. All terminal — no second attempt
+      // could succeed, so the session is genuinely over. The body is read only
+      // to tell the idle case apart, because that is the one the login page can
+      // explain; anything unreadable simply carries no reason.
+      let reason: 'idle' | undefined
+      try {
+        const body = (await response.json()) as { error?: { code?: string } }
+        if (body.error?.code === ErrorCode.SessionIdleTimeout) reason = 'idle'
+      } catch {
+        // Not JSON, or already consumed. No reason to report.
+      }
+      lastRejectionReason = reason
       return 'rejected'
     }
+
+    // Signed out while we were waiting. Writing these would resurrect the
+            // session on the next page load.
+    if (epoch !== currentSessionEpoch()) return 'rejected'
 
     const tokens = (await response.json()) as TokenPair
     setAccessToken(tokens.access_token)
@@ -195,7 +218,8 @@ async function request<T>(
       // Only a server rejection ends the session. An 'unreachable' result falls
       // through with tokens intact, and the caller sees the original 401.
       clearTokens()
-      onUnauthenticated()
+      onUnauthenticated(lastRejectionReason)
+      lastRejectionReason = undefined
     }
   }
 
@@ -229,4 +253,5 @@ export const api = {
 /** Test-only: reset the shared refresh promise between cases. */
 export function __resetRefreshState(): void {
   refreshInFlight = null
+  lastRejectionReason = undefined
 }

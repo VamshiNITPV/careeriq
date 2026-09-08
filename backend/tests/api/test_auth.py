@@ -8,10 +8,13 @@ does not know why they exist.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.models.profile import Profile
 from app.models.user import RefreshToken, User
 
@@ -416,3 +419,124 @@ class TestChangePassword:
             },
         )
         assert response.status_code == 422
+
+
+class TestIdleSessionTimeout:
+    """US-1.3 AC4 — a session unused past the window is refused and revoked.
+
+    No clock is moved anywhere here. The row is written to *look* old, which is
+    all the check reads, and needs neither freezegun nor an injectable now().
+    """
+
+    @staticmethod
+    def _age(minutes_past_window: int) -> datetime:
+        window = get_settings().session_idle_timeout_minutes
+        return datetime.now(UTC) - timedelta(minutes=window + minutes_past_window)
+
+    async def test_refuses_a_session_left_idle(
+        self, client: AsyncClient, db_session: AsyncSession, registered_user: dict
+    ) -> None:
+        token = registered_user["tokens"]["refresh_token"]
+        stored = (await db_session.scalars(select(RefreshToken))).one()
+        stored.last_used_at = self._age(1)
+        await db_session.flush()
+
+        response = await client.post(f"{API}/auth/refresh", json={"refresh_token": token})
+
+        assert response.status_code == 401
+        # Distinguishable from INVALID_TOKEN on purpose: it is the only way the
+        # login page can say why the user is looking at it, and there is nothing
+        # to fish for — reaching this needs a genuine 48-byte token.
+        assert response.json()["error"]["code"] == "SESSION_IDLE_TIMEOUT"
+
+    async def test_still_refreshes_just_inside_the_window(
+        self, client: AsyncClient, db_session: AsyncSession, registered_user: dict
+    ) -> None:
+        """The off-by-one guard. A refusal test alone would pass with any sign error."""
+        token = registered_user["tokens"]["refresh_token"]
+        stored = (await db_session.scalars(select(RefreshToken))).one()
+        stored.last_used_at = self._age(-1)
+        await db_session.flush()
+
+        response = await client.post(f"{API}/auth/refresh", json={"refresh_token": token})
+
+        assert response.status_code == 200, response.text
+
+    async def test_kills_the_whole_family_not_just_the_row(
+        self, client: AsyncClient, db_session: AsyncSession, registered_user: dict
+    ) -> None:
+        """A bare 401 would leave revoked_at NULL, so the session's death would live
+        only in a computed predicate — and raising the window again would bring
+        dead sessions back."""
+        first = registered_user["tokens"]["refresh_token"]
+        rotated = await client.post(f"{API}/auth/refresh", json={"refresh_token": first})
+        assert rotated.status_code == 200
+
+        live = (
+            await db_session.scalars(select(RefreshToken).where(RefreshToken.revoked_at.is_(None)))
+        ).one()
+        live.last_used_at = self._age(1)
+        await db_session.flush()
+
+        refused = await client.post(
+            f"{API}/auth/refresh", json={"refresh_token": rotated.json()["refresh_token"]}
+        )
+        assert refused.status_code == 401
+
+        # Re-queried rather than read off `live`: the service commits mid-request
+        # and the session is expire_on_commit=False, so the old object is stale.
+        rows = list((await db_session.scalars(select(RefreshToken))).all())
+        for row in rows:
+            await db_session.refresh(row)
+        assert all(row.revoked_at is not None for row in rows)
+        # And no replacement was minted for a session that is over.
+        assert len(rows) == 2
+
+    async def test_reuse_still_beats_idle(
+        self, client: AsyncClient, db_session: AsyncSession, registered_user: dict
+    ) -> None:
+        """The check's position in the sequence, which a refactor is most likely to move.
+
+        A replayed token is a security event however idle it is. Demoting it to
+        an idle timeout would lose the "your sessions were revoked" email that
+        makes the reuse defence legible.
+        """
+        first = registered_user["tokens"]["refresh_token"]
+        await client.post(f"{API}/auth/refresh", json={"refresh_token": first})
+
+        revoked = (
+            await db_session.scalars(
+                select(RefreshToken).where(RefreshToken.revoked_at.is_not(None))
+            )
+        ).one()
+        revoked.last_used_at = self._age(1)
+        await db_session.flush()
+
+        response = await client.post(f"{API}/auth/refresh", json={"refresh_token": first})
+
+        assert response.status_code == 401
+        assert response.json()["error"]["code"] == "TOKEN_REUSE_DETECTED"
+
+    async def test_rotation_resets_the_clock(
+        self, client: AsyncClient, db_session: AsyncSession, registered_user: dict
+    ) -> None:
+        """Asserted on behaviour, not on the column being non-null.
+
+        With a server default the column is populated even if _issue_token_pair
+        forgets to set it, so a null check would pass while the bug shipped.
+        """
+        first = registered_user["tokens"]["refresh_token"]
+        original = (await db_session.scalars(select(RefreshToken))).one()
+        original.last_used_at = self._age(-1)
+        await db_session.flush()
+        was = original.last_used_at
+
+        assert (
+            await client.post(f"{API}/auth/refresh", json={"refresh_token": first})
+        ).status_code == 200
+
+        fresh = (
+            await db_session.scalars(select(RefreshToken).where(RefreshToken.revoked_at.is_(None)))
+        ).one()
+        await db_session.refresh(fresh)
+        assert fresh.last_used_at > was

@@ -119,7 +119,7 @@ A repeat within 24 hours returns the original response instead of re-running the
 |---|---|---|
 | 🔓 `POST` | `/auth/register` | Create account. `201` |
 | 🔓 `POST` | `/auth/login` | Exchange credentials for tokens. `200` |
-| 🔓 `POST` | `/auth/refresh` | Rotate refresh token. `200` |
+| 🔓 `POST` | `/auth/refresh` | Rotate refresh token. `200`, or `401` with `TOKEN_REUSE_DETECTED` / `SESSION_IDLE_TIMEOUT` |
 | `POST` | `/auth/logout` | Revoke the presented refresh token. `204` |
 | 🔓 `GET` | `/auth/google/authorize` | Begin OAuth; returns provider URL + `state` |
 | 🔓 `GET` | `/auth/google/callback` | Complete OAuth; validates `state` (US-1.2 AC2) |

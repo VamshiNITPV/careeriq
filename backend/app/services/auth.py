@@ -18,6 +18,7 @@ from app.core.exceptions import (
     AuthenticationError,
     InvalidTokenError,
     RegistrationFailedError,
+    SessionIdleTimeoutError,
     TokenReuseError,
 )
 from app.core.ids import uuid7
@@ -270,14 +271,7 @@ class AuthService:
             # thief is using it, or it was stolen and the legitimate user has
             # since rotated. We cannot tell which, and in both cases somebody
             # untrusted holds a token in this family, so the family dies.
-            revoked = await self.refresh_tokens.revoke_family(stored.family_id)
-
-            # Commit before raising. The request's session dependency rolls back
-            # on exception, which would otherwise undo the revocation we just
-            # made — leaving the attacker's tokens live while the response
-            # claims the session was invalidated. This is the deliberate
-            # exception to the rule that services do not manage transactions.
-            await self.refresh_tokens.commit()
+            revoked = await self._end_family(stored)
 
             log.warning(
                 "refresh token reuse detected; family revoked",
@@ -300,6 +294,34 @@ class AuthService:
         if stored.is_expired():
             raise InvalidTokenError("The refresh token has expired.")
 
+        # After reuse and after absolute expiry, both deliberately. A replayed
+        # token is a security event however idle it is, and demoting it here
+        # would lose both the family revocation and the email that makes that
+        # defence legible. An absolutely-expired token is already worthless, and
+        # "expired" describes it better than "idle" does. Before the user
+        # lookup, because there is no reason to load a User for a dead session.
+        idle_window = timedelta(minutes=get_settings().session_idle_timeout_minutes)
+        if stored.is_idle(timeout=idle_window):
+            # Revoked, not merely refused. A bare 401 leaves revoked_at NULL, so
+            # the session's death would live only in a computed predicate —
+            # lowering the window and raising it again would bring dead sessions
+            # back to life. The family rather than the row, because the family
+            # is the session and a client that raced may hold a live sibling.
+            revoked = await self._end_family(stored)
+
+            log.info(
+                "refresh refused: session idle",
+                user_id=str(stored.user_id),
+                family_id=str(stored.family_id),
+                idle_minutes=get_settings().session_idle_timeout_minutes,
+                tokens_revoked=revoked,
+            )
+
+            # No send_sessions_revoked here, unlike the reuse branch above. An
+            # idle timeout is routine; sending the security email for it would
+            # train users to ignore the one message that matters.
+            raise SessionIdleTimeoutError()
+
         user = await self.users.get(stored.user_id)
         if user is None or not user.is_active:
             raise InvalidTokenError()
@@ -316,6 +338,19 @@ class AuthService:
         return user, tokens
 
     # ---------------------------------------------------------------- logout
+    async def _end_family(self, stored: RefreshToken) -> int:
+        """Revoke a whole token family and commit, so it survives the caller's raise.
+
+        The commit is the point. The request's session dependency rolls back on
+        exception, which would otherwise undo the revocation — leaving the
+        tokens live while the response claims the session was invalidated. This
+        is the deliberate exception to the rule that services do not manage
+        transactions, and both callers raise immediately afterwards.
+        """
+        revoked = await self.refresh_tokens.revoke_family(stored.family_id)
+        await self.refresh_tokens.commit()
+        return revoked
+
     async def logout(self, *, refresh_token: str) -> None:
         """Revoke the presented token (US-1.3 AC3).
 
@@ -486,6 +521,10 @@ class AuthService:
             token_hash=token_hash,
             family_id=family_id,
             expires_at=refresh_token_expiry(),
+            # Set explicitly as well as by the server default: a column with
+            # only a server default is expired after the flush below, and
+            # reading it back would then need a round trip inside the greenlet.
+            last_used_at=datetime.now(UTC),
             user_agent=user_agent[:500] if user_agent else None,
             ip_address=ip_address,
         )

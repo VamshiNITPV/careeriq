@@ -20,6 +20,9 @@ import type { Profile } from '@/types/profile'
  */
 export type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated'
 
+/** Why a session ended, when it is worth telling the user. */
+export type SignedOutReason = 'idle' | null
+
 export interface AuthContextValue {
   user: User | null
   /**
@@ -35,7 +38,15 @@ export interface AuthContextValue {
   isAuthenticated: boolean
   login: (payload: LoginRequest) => Promise<void>
   register: (payload: RegisterRequest) => Promise<void>
-  logout: () => Promise<void>
+  logout: (reason?: SignedOutReason) => Promise<void>
+  /**
+   * Why the user was signed out, for the login page to explain.
+   *
+   * Held here as well as passed through `location.state` because the
+   * navigation only happens when the user was on a protected route — someone
+   * already sitting on /login gets no state at all.
+   */
+  signedOutReason: SignedOutReason
   /**
    * Apply a user returned by a mutation.
    *

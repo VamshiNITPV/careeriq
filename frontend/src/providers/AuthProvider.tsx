@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { AuthContext, type AuthContextValue, type AuthStatus } from '@/hooks/authContext'
+import {
+  AuthContext,
+  type AuthContextValue,
+  type AuthStatus,
+  type SignedOutReason,
+} from '@/hooks/authContext'
+import { useIdleLogout } from '@/hooks/useIdleLogout'
 import { setUnauthenticatedHandler } from '@/services/apiClient'
 import { authService } from '@/services/authService'
 import { profileService } from '@/services/profileService'
+import { clearActivity, isSessionIdleExpired } from '@/services/idleSession'
 import { clearTokens, hasStoredSession } from '@/services/tokenStorage'
 import type { LoginRequest, RegisterRequest, User } from '@/types/auth'
 import type { Profile } from '@/types/profile'
@@ -15,8 +22,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // at 'loading' unconditionally would show a spinner to every first-time
   // visitor before landing them on the login page — a flash of nothing for the
   // one group guaranteed not to have a session.
-  const [status, setStatus] = useState<AuthStatus>(() =>
-    hasStoredSession() ? 'loading' : 'unauthenticated',
+  const [status, setStatus] = useState<AuthStatus>(() => {
+    if (!hasStoredSession()) return 'unauthenticated'
+    // Idle since before the window closed. Cleared here rather than in an
+    // effect so the restore below sees no stored session and makes no request
+    // for one that is already over. Idempotent, which matters because
+    // StrictMode invokes this initialiser twice.
+    if (isSessionIdleExpired()) {
+      clearTokens()
+      clearActivity()
+      return 'unauthenticated'
+    }
+    return 'loading'
+  })
+  /** Why the user is looking at the login page. Cleared on the next sign-in. */
+  const [signedOutReason, setSignedOutReason] = useState<SignedOutReason>(() =>
+    hasStoredSession() || !isSessionIdleExpired() ? null : 'idle',
   )
 
   const loadProfile = useCallback(async () => {
@@ -74,10 +95,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * refresh token. The API client cannot import React, so it calls back here.
    */
   useEffect(() => {
-    setUnauthenticatedHandler(() => {
+    setUnauthenticatedHandler((reason) => {
       setUser(null)
       setProfile(null)
       setStatus('unauthenticated')
+      // The server refused the refresh because the session had gone idle.
+      // Without this the whole server-side half of the feature is invisible and
+      // the sign-out looks arbitrary.
+      if (reason === 'idle') setSignedOutReason('idle')
     })
     return () => setUnauthenticatedHandler(() => {})
   }, [])
@@ -87,6 +112,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const response = await authService.login(payload)
       setUser(response.user)
       setStatus('authenticated')
+      setSignedOutReason(null)
       // Not awaited: the redirect should not wait on the profile. The header
       // falls back to email-derived initials for one paint.
       void loadProfile()
@@ -99,17 +125,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const response = await authService.register(payload)
       setUser(response.user)
       setStatus('authenticated')
+      setSignedOutReason(null)
       void loadProfile()
     },
     [loadProfile],
   )
 
-  const logout = useCallback(async () => {
-    await authService.logout()
-    setUser(null)
-    setProfile(null)
-    setStatus('unauthenticated')
+  const logout = useCallback(async (reason: SignedOutReason = null) => {
+    try {
+      await authService.logout()
+    } finally {
+      // In a finally, because authService.logout() rejects on a 500 or while
+      // offline. Clearing only on success left the app believing it was signed
+      // in with no tokens, and every request 401ing with no way out.
+      clearActivity()
+      setUser(null)
+      setProfile(null)
+      setStatus('unauthenticated')
+      setSignedOutReason(reason)
+    }
   }, [])
+
+  // The live-tab half of the idle timeout. Failures are swallowed: an offline
+  // sign-out must still clear local state, which the finally above guarantees,
+  // and an unhandled rejection inside an interval callback has nowhere to go.
+  const onIdle = useCallback(() => {
+    void logout('idle').catch(() => {})
+  }, [logout])
+  useIdleLogout(status === 'authenticated', onIdle)
 
   // Memoised so consumers do not re-render on every provider render purely
   // because the context object identity changed.
@@ -122,11 +165,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login,
       register,
       logout,
+      signedOutReason,
       setUser,
       setProfile,
       refreshProfile: loadProfile,
     }),
-    [user, profile, status, login, register, logout, loadProfile],
+    [user, profile, status, signedOutReason, login, register, logout, loadProfile],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
