@@ -285,6 +285,23 @@ for a reason unrelated to fit).
 Per ADR-006: pgvector HNSW recalls top-200 with hard filters in SQL, then full six-dimension
 scoring runs on those 200 only.
 
+**Built in Phase 6.3.** `app/services/matching/recall.py` is stage one,
+`MatchingService.match_many` is stage two. Measured end to end at **47.8 ms p95** for 200 jobs
+against NFR-2's 500 ms budget, on a corpus of 282 — see ADR-006's amendment for what the first cut
+measured and why no cache was built.
+
+Two implementation notes that bear directly on the Recall@200 target below:
+
+- **The hard filters are applied after the approximate scan**, not during it, so a bare `LIMIT 200`
+  returns fewer than 200 whenever the corpus holds expired, duplicate or already-applied postings.
+  `recall.py` over-fetches by a factor of `OVERFETCH = 3` to compensate. That constant is a starting
+  point, not a measured one; **the Recall@200 measurement below is what should settle it**, and it
+  is the first thing to check if recall comes in under target.
+- **`min_score` is deliberately not pushed into stage one.** It is a threshold on the final
+  six-dimension score, which does not exist until stage two has run; filtering on raw cosine as a
+  proxy would drop jobs whose skill or location dimensions would have carried them — precisely the
+  hybrid ranking ADR-005 exists to provide.
+
 ### 4.3 Evaluation
 
 | Metric | Target | Measures |

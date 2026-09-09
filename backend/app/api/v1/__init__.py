@@ -7,7 +7,17 @@ versioning makes it obvious in every access log which contract was used.
 
 from fastapi import APIRouter
 
-from app.api.v1 import applications, auth, career, health, jobs, profile, resumes, skills
+from app.api.v1 import (
+    applications,
+    auth,
+    career,
+    health,
+    jobs,
+    profile,
+    recommendations,
+    resumes,
+    skills,
+)
 
 api_router = APIRouter()
 
@@ -31,5 +41,6 @@ api_router.include_router(skills.profile_skills_router)
 # these.
 api_router.include_router(applications.router)
 api_router.include_router(career.router)
+api_router.include_router(recommendations.router)
 
 __all__ = ["api_router"]

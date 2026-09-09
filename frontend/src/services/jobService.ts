@@ -5,6 +5,7 @@ import type {
   JobListResponse,
   JobSubmitResponse,
   MatchResponse,
+  RecommendationsResponse,
   SimilarJobsResponse,
 } from '@/types/job'
 
@@ -44,6 +45,23 @@ export const jobService = {
    */
   match(jobId: string): Promise<MatchResponse> {
     return api.get<MatchResponse>(`/jobs/${jobId}/match`)
+  },
+
+  /**
+   * Jobs ranked for the signed-in user.
+   *
+   * `cursor` is whatever the previous response returned — opaque, and passed
+   * back verbatim. Parsing it here would freeze the server's sort key against a
+   * client it cannot see.
+   */
+  recommendations(
+    options: { limit?: number; cursor?: string } = {},
+  ): Promise<RecommendationsResponse> {
+    const params = new URLSearchParams()
+    if (options.limit !== undefined) params.set('limit', String(options.limit))
+    if (options.cursor !== undefined) params.set('cursor', options.cursor)
+    const query = params.toString()
+    return api.get<RecommendationsResponse>(`/recommendations${query ? `?${query}` : ''}`)
   },
 
   get(jobId: string): Promise<JobDetail> {

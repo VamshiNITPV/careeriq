@@ -31,11 +31,17 @@ function Tag({ children }: { children: React.ReactNode }) {
 export function JobCard({
   job,
   onApplicationChange,
+  footer,
 }: {
   job: JobSummary
   /** Lets the list swap this row's application in place, with no refetch — so
    *  scroll position, page and filters all survive a tap on the bookmark. */
   onApplicationChange?: (application: ApplicationRead | null) => void
+  /** Extra line under the card, for a list that has something to add — the
+   *  recommendations page puts the match score here. A slot rather than a
+   *  wrapper because this component *is* the `<li>`, so a caller that wrapped
+   *  it to append anything would nest one list item inside another. */
+  footer?: React.ReactNode
 }) {
   const salary = formatSalary(job)
   const experience = formatExperience(job)
@@ -119,6 +125,8 @@ export function JobCard({
         employer never made.
       */}
       <p className="mt-2 text-xs text-slate-500">{formatPostedAge(job.posted_at)}</p>
+
+      {footer}
     </li>
   )
 }

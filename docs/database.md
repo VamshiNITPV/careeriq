@@ -418,13 +418,38 @@ CREATE INDEX ix_job_embeddings_hnsw ON job_embeddings
 #### `job_matches`
 A materialized score, cached so a dashboard load does not recompute everything.
 
-> **Not built as of Phase 6.2.** `GET /jobs/{id}/match` computes the score fresh — six statements and
-> no model. The blocker is `is_stale`: it is specified as "set when preferences or resume change"
-> and **nothing sets it**, so this cache would not degrade, it would go quietly wrong. ADR-006 also
-> argues against precomputing a score that "depends on user preferences that change at any moment".
-> The table earns its complexity at `/recommendations` in 6.3, where one request scores two hundred
-> jobs; `MatchResult` in `app/services/matching/service.py` is already shaped as exactly these
-> columns, so that phase adds a migration and an upsert rather than reworking the computation.
+> **Still not built as of Phase 6.3, and the reason changed.**
+>
+> 6.2 deferred this table on the grounds that `is_stale` has no writer — it is specified as "set
+> when preferences or resume change" and nothing sets it, so the cache would not degrade, it would
+> go quietly wrong. That reasoning stands. But 6.2 also predicted the table would "earn its
+> complexity at `/recommendations` in 6.3, where one request scores two hundred jobs", and **that
+> prediction was wrong**; it is corrected here rather than left as a stale promise.
+>
+> Measured on the real corpus (282 job vectors, 7 indexed candidates), ranking 200 jobs:
+>
+> | | stage 1 recall | stage 2 rank | end to end |
+> |---|---|---|---|
+> | First cut | 2.9 ms | 369 ms median / **535 ms p95** | 538 ms p95 — over NFR-2's budget |
+> | As shipped | 3.2 ms | 28.7 ms median / 44.5 ms p95 | **47.8 ms p95** |
+>
+> The first cut breached the budget, which looked like a case for caching. It was not. The cost was
+> **400 database round trips** — one cosine and one taxonomy lookup per job — not the arithmetic.
+> Caching that would have hidden an N+1 behind a cache: the first uncached request stays slow, and
+> the cache then needs invalidation logic to be wrong in. `MatchingService.match_many` removed both
+> round trips (stage one already computes the cosine; the taxonomy loads once for the union), and
+> the result is an order of magnitude inside budget with no cache at all.
+>
+> **The honest caveat:** 282 jobs, not NFR-2's 10,000. But stage 2 is bounded at 200 by ADR-006
+> regardless of corpus size, and stage 1 is an indexed nearest-neighbour scan — which is precisely
+> the property two-stage retrieval exists to buy.
+>
+> If this table is ever built, note that ADR-006 asks for Redis with preference-derived keys rather
+> than this schema, and `profiles.preferences_updated_at` is already written on every preference
+> change and read by nothing. A key derived from it invalidates **structurally** — change a
+> preference and the old entry is unreachable — where `is_stale` is a flag someone must remember to
+> set. `MatchResult` in `app/services/matching/service.py` is still shaped as exactly these columns
+> either way.
 
 | Column | Type | Notes |
 |---|---|---|

@@ -36,6 +36,7 @@ from app.repositories.career import (
 from app.repositories.job import CompanyRepository, JobRepository, JobSkillRepository
 from app.repositories.job_fetch import JobFetchRunRepository
 from app.repositories.matching import MatchingRepository
+from app.repositories.recommendation import RecommendationFeedbackRepository
 from app.repositories.refresh_token import RefreshTokenRepository
 from app.repositories.resume import ResumeRepository, ResumeVersionRepository
 from app.repositories.skill import CandidateSkillRepository, SkillRepository
@@ -168,6 +169,12 @@ def get_embeddings_provider() -> EmbeddingProvider | None:
     return get_embedding_provider()
 
 
+def get_recommendation_feedback_repository(
+    session: DbSession,
+) -> RecommendationFeedbackRepository:
+    return RecommendationFeedbackRepository(session)
+
+
 def get_matching_repository(session: DbSession) -> MatchingRepository:
     return MatchingRepository(session)
 
@@ -254,6 +261,9 @@ JobSkillRepositoryDep = Annotated[JobSkillRepository, Depends(get_job_skill_repo
 JobProviderDep = Annotated[JobProvider | None, Depends(get_jobs_provider)]
 EmbeddingProviderDep = Annotated[EmbeddingProvider | None, Depends(get_embeddings_provider)]
 MatchingServiceDep = Annotated[MatchingService, Depends(get_matching_service)]
+RecommendationFeedbackRepositoryDep = Annotated[
+    RecommendationFeedbackRepository, Depends(get_recommendation_feedback_repository)
+]
 ApplicationRepositoryDep = Annotated[ApplicationRepository, Depends(get_application_repository)]
 JobFetchRunRepositoryDep = Annotated[JobFetchRunRepository, Depends(get_job_fetch_run_repository)]
 

@@ -29,6 +29,7 @@ from app.models.enums import (
     JobStatus,
     ProcessingStatus,
     ProficiencyLevel,
+    RecommendationFeedback,
     SalaryPeriod,
     SkillRequirement,
     UserRole,
@@ -38,6 +39,7 @@ from app.models.enums import (
 from app.models.job import Company, Job, JobSkill
 from app.models.job_fetch import JobFetchRun
 from app.models.profile import Profile
+from app.models.recommendation import RecommendationFeedbackRow
 from app.models.resume import Resume, ResumeVersion
 from app.models.skill import CandidateSkill, Skill
 from app.models.user import RefreshToken, User
@@ -77,6 +79,8 @@ __all__ = [
     "ProficiencyLevel",
     "Profile",
     "Project",
+    "RecommendationFeedback",
+    "RecommendationFeedbackRow",
     "RefreshToken",
     "Resume",
     "ResumeVersion",

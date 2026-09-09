@@ -291,6 +291,40 @@ This is mitigated by a large recall window (200 ≫ the 20 shown) and is measure
 `ml/evaluation/` reports Recall@200 of the retrieval stage as a distinct metric from final ranking
 quality.
 
+**Amendment, 2026-09-09 — built in Phase 6.3, and the cache it allows for was not needed.**
+
+Stage one is `app/services/matching/recall.py`; stage two is `MatchingService.match_many` behind
+`app/services/matching/recommend.py`. The split held up exactly as argued — and the measurement it
+enabled overturned the caching half of this decision.
+
+Ranking 200 jobs on the real corpus (282 job vectors, 7 indexed candidates):
+
+| | stage 1 recall | stage 2 rank | end to end |
+|---|---|---|---|
+| First cut | 2.9 ms | 369 ms median / **535 ms p95** | 538 ms p95 — over NFR-2 |
+| As shipped | 3.2 ms | 28.7 ms median / 44.5 ms p95 | **47.8 ms p95** |
+
+The first cut breached the budget, which looked like the case for the Redis cache this ADR permits.
+It was not. The cost was **400 database round trips** — one cosine and one taxonomy lookup per job —
+rather than the six-dimension arithmetic. Caching would have hidden an N+1 behind a cache: the first
+uncached request stays slow, and the cache then needs invalidation logic to be wrong in. Two changes
+removed it instead. The cosine is **carried through from stage one**, which ordered its own result by
+that very distance and had therefore already computed it; and the skill taxonomy loads once for the
+union of every job's skills plus the candidate's. **No cache is built, and `job_matches` is still not
+built** — see `database.md` section 3.5.
+
+Two things learned that the original decision did not anticipate:
+
+- **pgvector applies relational filters *after* the approximate scan.** Once the planner chooses
+  HNSW, a bare `LIMIT 200` over a corpus with expired, duplicated or already-applied postings comes
+  back short — silently, and the missing rows are exactly the ones stage two would have ranked. This
+  is the direct threat to the Recall@200 ≥ 0.95 target this ADR sets. `recall.py` over-fetches by
+  `OVERFETCH = 3` before filtering; 6.4's measurement is what will settle that constant.
+- **The sort must be total, not merely descending.** `overall_score` is quantised to one decimal
+  place over a 200-row set, so ties are ordinary. Without a tie-break the cursor can serve a row on
+  two consecutive pages or on neither, with nothing going red — so the key is `(-score, job_id)` and
+  the cursor encodes both.
+
 ---
 
 ### ADR-007 — Provider abstraction for LLM and embeddings
@@ -1055,6 +1089,7 @@ production value. Missing required config fails loudly at startup, not at first 
 | 2026-09-02 | ADR-017 added. Transactional email, password reset and email verification, after review found that a forgotten password left a user permanently locked out. |
 | 2026-09-02 | ADR-018 added. Resume ingestion, object storage, and the interim background task runner. |
 | 2026-09-04 | ADR-019 added. Job data sourcing from permitted APIs, after the corpus reached Phase 6 with seven hand-entered postings and no way to grow. |
+| 2026-09-09 | ADR-006 amended. Phase 6.3: two-stage retrieval built and measured. The Redis cache this ADR permits was **not** needed — the first cut's 535 ms p95 was 400 database round trips, not the scoring, and batching removed it (47.8 ms p95). Also records two things pgvector and cursor paging make you learn the hard way. |
 | 2026-09-09 | ADR-005 amended. Phase 6.2: a dimension whose inputs are missing scores a neutral 0.5 and keeps its documented weight — renormalising would break AC2 and let a job rank higher for an employer's blank field. Scorers live in `app/services/matching/`; no `job_matches` row is written yet. |
 | 2026-09-09 | ADR-007 amended. Phase 6.1: the embedding provider runs in its own container with the model baked in, because a lazy import does not keep torch out of the API *image*. The separation is asserted by a test. |
 | 2026-09-08 | ADR-014 amended. Idle session timeout (US-1.3 AC4): `/auth/refresh` refuses a session unused for 60 minutes and revokes its family, plus a browser watcher that signs out at the same deadline. |

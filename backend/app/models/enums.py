@@ -63,6 +63,26 @@ class ProcessingStatus(StrEnum):
     FAILED = "FAILED"
 
 
+class RecommendationFeedback(StrEnum):
+    """What a user said about a recommendation (api.md section 2.5).
+
+    Nothing reads these yet, and that is the point: a learned ranker needs
+    labelled relevance judgements, and those can only be collected forward in
+    time (ADR-005). Starting to collect them in Phase 6.3 is what stops Phase
+    6.4's evaluation set being built entirely by hand.
+
+    NOT_RELEVANT and NOT_INTERESTED are separate because they mean opposite
+    things to a ranker. "This is not a match for me" is a statement about the
+    scoring being wrong; "I am not interested" can sit on a perfectly scored
+    job the user simply does not want. Collapsing them would teach a future
+    model that a correct prediction was an error.
+    """
+
+    RELEVANT = "RELEVANT"
+    NOT_RELEVANT = "NOT_RELEVANT"
+    NOT_INTERESTED = "NOT_INTERESTED"
+
+
 class ProficiencyLevel(StrEnum):
     BEGINNER = "BEGINNER"
     INTERMEDIATE = "INTERMEDIATE"

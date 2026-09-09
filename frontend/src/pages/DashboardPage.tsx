@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
+import { RecommendedJobs } from '@/components/jobs/RecommendedJobs'
 import { Spinner } from '@/components/ui/Spinner'
 import { authService } from '@/services/authService'
+import { jobService } from '@/services/jobService'
 import { resumeService, skillService } from '@/services/resumeService'
 import { firstNameFor } from '@/utils/initials'
 import { cn } from '@/utils/cn'
@@ -146,17 +148,22 @@ export function DashboardPage() {
   const { user, profile } = useAuth()
   const [resumeCount, setResumeCount] = useState(0)
   const [skillCount, setSkillCount] = useState(0)
+  const [matchCount, setMatchCount] = useState(0)
   const [loaded, setLoaded] = useState(false)
 
   const load = useCallback(async () => {
     // Tolerant of failure: a dashboard that renders nothing because one count
     // could not be fetched is worse than one showing zeros.
-    const [resumes, skills] = await Promise.all([
+    const [resumes, skills, recommended] = await Promise.all([
       resumeService.list().catch(() => []),
       skillService.mySkills().catch(() => []),
+      // `considered` rather than `items.length`: the card is asking how many
+      // jobs were ranked for this user, not how many fit on the panel below.
+      jobService.recommendations({ limit: 1 }).catch(() => null),
     ])
     setResumeCount(resumes.length)
     setSkillCount(skills.length)
+    setMatchCount(recommended?.considered ?? 0)
   }, [])
 
   useEffect(() => {
@@ -176,7 +183,12 @@ export function DashboardPage() {
       caption: skillCount === 0 ? 'Upload a resume to populate' : 'On your profile',
       available: true,
     },
-    { label: 'Job matches', value: '—', caption: 'Arrives with job matching', available: false },
+    {
+      label: 'Job matches',
+      value: String(matchCount),
+      caption: matchCount === 0 ? 'Upload a resume to see matches' : 'Ranked against your resume',
+      available: true,
+    },
     {
       label: 'Applications',
       value: '—',
@@ -220,6 +232,8 @@ export function DashboardPage() {
           ))}
         </div>
       </section>
+
+      <RecommendedJobs />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Panel title="What works today">

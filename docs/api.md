@@ -439,6 +439,49 @@ its complexity at `/recommendations` in 6.3, where one request scores two hundre
 > The feedback endpoint exists from day one even though nothing consumes it yet. It is how we
 > accumulate the labelled relevance data that a learned ranker will eventually need (ADR-005).
 > Collecting it late means starting from zero later.
+>
+> **`GET /recommendations` and `POST /recommendations/{job_id}/feedback` shipped in Phase 6.3.**
+> `POST /recommendations/refresh` did not — see the end of this note.
+>
+> Two-stage retrieval per ADR-006: one SQL statement recalls the ~200 nearest postings to the
+> caller's resume vector with the hard filters applied in the same statement, then the same
+> six-dimension scorer `/jobs/{id}/match` uses ranks those 200. Latency is bounded by the rerank-set
+> size rather than by the corpus, which is what makes NFR-2 a property of the design.
+>
+> The response follows the shape `/similar` and `/match` established: **always 200**, with an
+> `availability` of `READY` / `PENDING` (the resume has no vector yet) / `NO_RESUME`. Each item
+> carries a full `JobSummary` — so the card is the ordinary browse card, with the bookmark, the tags
+> and the applied state already on it — plus the score and the full breakdown, which is already
+> computed and would otherwise need a request per row to explain itself.
+>
+> **`?cursor=` is opaque and must not be parsed.** It encodes `(score, job_id)`, because
+> `overall_score` is quantised to one decimal place and ties are ordinary rather than rare — an
+> unstable sort would serve a row on two consecutive pages, or on neither, silently. A cursor that
+> does not decode is treated as "start from the beginning" rather than as an error: it travels in a
+> URL, so it can be truncated by a mail client or simply invented, and none of that is worth a 500.
+>
+> **`exclude_applied` excludes `APPLIED`, not `SAVED`.** Bookmarking a job is interest, not
+> completion; hiding a saved job would punish the user for the one signal they gave us.
+>
+> **Resolving open question Q1** (*"recompute synchronously on a cache miss, or return 202 and
+> stream?"*): **synchronously, always, and there is no cache.** The cold case Q1 worried about is
+> "no embeddings yet", which is not a slow response — it is `PENDING`, answered immediately. A 202
+> would make the common warm path pay for a rare cold one. Measured end to end at **47.8 ms p95**
+> over 200 jobs; see `database.md` section 3.5 for why no cache was built and what the first cut
+> measured before its N+1 was removed.
+>
+> **The feedback endpoint answers `204` and is idempotent.** A second opinion replaces the first
+> rather than appending: a record of somebody changing their mind is not a training label, and two
+> taps in quick succession on a phone must not become a unique-constraint error the user did nothing
+> to deserve. Each row stores the `ranking_version` it was reacting to, because "this was a bad
+> recommendation" is uninterpretable later without knowing which ranker made it. Its table is
+> `recommendation_feedback` (migration `0011`) and its enum type is `recommendation_rating` — the
+> two cannot share a name, because `CREATE TABLE` implicitly creates a composite type.
+>
+> **`POST /recommendations/refresh` is not implemented**, and deliberately: it forces a recompute of
+> a cache, and there is no cache. An endpoint that force-recomputes nothing is worse than a missing
+> one — it implies a staleness the system does not have. It arrives with the cache, if one is ever
+> needed.
 
 Query params: `limit`, `cursor`, `min_score`, `exclude_applied` (default `true`),
 `resume_version_id` (default: primary resume's current version).

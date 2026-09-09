@@ -5,8 +5,8 @@ parses job descriptions, ranks jobs by personalized fit using hybrid semantic + 
 identifies skill gaps, suggests grounded resume improvements, tracks application outcomes, and
 conducts adaptive AI mock interviews.
 
-> **Status:** Phases 1–5.8 complete, and Phase 6 is under way — 6.1 (embeddings) and 6.2
-> (the explainable match score) are done.
+> **Status:** Phases 1–5.8 complete, and Phase 6 is under way — 6.1 (embeddings), 6.2 (the
+> explainable match score) and 6.3 (recommendations) are done.
 
 ---
 
@@ -110,7 +110,7 @@ Read these in order:
 | 5.8 | Automatic job fetching — query rotation, request budget, scheduler | ✅ Done⁴ |
 | 6.1 | Embeddings — `pgvector`, local model, "Similar jobs" | ✅ Done⁵ |
 | 6.2 | Hybrid explainable score — six dimensions, `/jobs/{id}/match` | ✅ Done⁶ |
-| 6.3 | Recommendations — two-stage retrieval, ranked list, dashboard tile | ⬜ |
+| 6.3 | Recommendations — two-stage retrieval, ranked list, dashboard tile | ✅ Done⁷ |
 | 6.4 | Evaluation — labelled dataset, metrics, weight tuning, near-duplicates | ⬜ |
 | 7 | Career intelligence — skill gaps, learning paths, resume optimization | ⬜ |
 | 8 | Application system — tracking, analytics, outcome analysis | ⬜ |
@@ -186,6 +186,26 @@ Measurement also corrected a constant carried over from 6.1. That phase measured
 *jobs*; this formula compares a *resume* to a job, which turned out to be a different distribution
 entirely — it tops out at 0.751 where job-to-job reaches 0.993. Reusing the old range would have
 capped the best pair in the whole corpus at 0.69.
+
+⁷ **The system brings you jobs, instead of waiting to be asked.** Until now a match score only
+appeared once you had already found a posting yourself, which is backwards. The dashboard now shows
+jobs ranked against your resume, highest fit first, with a link to the full breakdown on each.
+
+Two stages, because scoring the whole corpus on every page load cannot be fast: one SQL query pulls
+the 200 postings nearest your resume by meaning — applying every filter in the same statement, so
+expired postings and jobs you have already applied to never reach the scorer — and then the same
+six-dimension formula from 6.2 ranks those 200. The list score and the job page score come from one
+code path, so they cannot disagree; a test checks every row.
+
+**Measuring it changed the design.** The first version took 535 ms at p95, over the 500 ms budget,
+which looked like a case for adding a cache. It was not: the cost was 400 database round trips —
+one per job, twice — not the arithmetic. Caching would have hidden that instead of fixing it, and
+left the first request slow anyway. Batching the two lookups brought it to **47.8 ms p95**, so no
+cache was built and the docs that had promised one were corrected.
+
+A feedback endpoint ships alongside it, and nothing reads it yet. That is the point: a learned
+ranker needs labelled examples, and those can only be collected going forward — adding the endpoint
+later would mean starting from an empty table.
 
 ⁴ **Variety, not recency.** Measurement settled this: filtering the provider to the last three days
 returned nothing, the last week returned nothing, and an unasked role-and-city combination returned

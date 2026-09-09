@@ -329,3 +329,41 @@ export interface MatchResponse {
   resume_version_id: string | null
   computed_at: string | null
 }
+
+// ------------------------------------------------------------ recommendations
+
+export interface RecommendedJob {
+  job: JobSummary
+  /** 0–100, one decimal place. Decimal over the wire, so a string. */
+  score: string
+  breakdown: MatchDimension[]
+  scored_weight: string
+  skills: {
+    matched: MatchedSkill[]
+    partial: MatchedSkill[]
+    missing: MatchedSkill[]
+  }
+}
+
+export interface RecommendationsResponse {
+  items: RecommendedJob[]
+  /**
+   *   READY      the ranking ran
+   *   PENDING    the resume has no vector yet — the indexer has not reached it
+   *   NO_RESUME  nothing uploaded, so there is nothing to rank against
+   */
+  availability: 'READY' | 'PENDING' | 'NO_RESUME'
+  /** Opaque. Null on the last page — never parse it. */
+  next_cursor: string | null
+  limit: number
+  /**
+   * How many of the recalled set survived the filters. Deliberately not a
+   * corpus-wide total: two-stage retrieval never looks at the whole corpus, so
+   * any "total" would be a number about the recall set dressed as a number
+   * about the market.
+   */
+  considered: number
+  ranking_version: string | null
+  resume_version_id: string | null
+  computed_at: string | null
+}
