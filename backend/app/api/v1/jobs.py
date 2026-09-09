@@ -17,8 +17,14 @@ from app.api.deps import (
     JobFetchRunRepositoryDep,
     JobProviderDep,
     JobServiceDep,
+    MatchingServiceDep,
+    ResumeVersionRepositoryDep,
 )
-from app.core.exceptions import ServiceUnavailableError, ValidationError
+from app.core.exceptions import (
+    ResourceNotFoundError,
+    ServiceUnavailableError,
+    ValidationError,
+)
 from app.core.logging import get_logger
 from app.models.enums import EmploymentType, ExperienceLevel, WorkMode
 from app.models.job import Job
@@ -41,9 +47,11 @@ from app.schemas.job import (
     SimilarJob,
     SimilarJobsResponse,
 )
+from app.schemas.match import MatchDimension, MatchedSkill, MatchResponse, MatchSkills
 from app.services.job.fetch import fetch_and_import
 from app.services.job.pipeline import UnparseableJobError
 from app.services.job.similar import find_similar
+from app.services.matching.dimensions import SkillRequirementInput
 
 log = get_logger(__name__)
 
@@ -430,6 +438,81 @@ async def similar_jobs(
         model_name=model_name,
         model_version=model_version,
     )
+
+
+@router.get(
+    "/{job_id}/match",
+    response_model=MatchResponse,
+    summary="How this caller matches this job",
+    responses={404: {"model": ErrorResponse, "description": "No such job, or no such resume"}},
+)
+async def match_job(
+    job_id: uuid.UUID,
+    user: CurrentUser,
+    service: JobServiceDep,
+    matching: MatchingServiceDep,
+    resume_versions: ResumeVersionRepositoryDep,
+    resume_version_id: Annotated[uuid.UUID | None, Query()] = None,
+) -> MatchResponse:
+    """The six-dimension explainable score (US-4.1, US-4.2, ADR-005).
+
+    Always 200. `availability` says what kind of answer this is, exactly as
+    `/similar` does — an error status would claim something failed, and nothing
+    did. `PARTIAL` is the honest and currently common case: every dimension but
+    the semantic one ran, because one of the two vectors is not built yet.
+
+    `NO_RESUME` returns a **null** score rather than the ~20 the neutral
+    defaults would otherwise produce. A number computed entirely from "we don't
+    know" is not a low score, it is a fabricated judgement about somebody the
+    system has never seen (ADR-012).
+    """
+    # 404 before any work, and the same check GET /jobs/{id} makes so the two
+    # cannot drift.
+    job = await service.get_job(job_id)
+
+    if resume_version_id is not None:
+        # 404 rather than 403 for another user's resume: a 403 would confirm the
+        # id exists, which is a membership oracle over other people's uploads.
+        if await resume_versions.get_owned(resume_version_id, user.id) is None:
+            raise ResourceNotFoundError("Resume version")
+        chosen = resume_version_id
+    else:
+        chosen = await matching.default_resume_version_id(user.id)
+
+    if chosen is None:
+        return MatchResponse(job_id=job_id, availability="NO_RESUME")
+
+    result = await matching.match(user_id=user.id, job=job, resume_version_id=chosen)
+
+    return MatchResponse(
+        job_id=job_id,
+        availability="READY" if result.semantic_available else "PARTIAL",
+        overall_score=result.overall_score,
+        breakdown=[
+            MatchDimension(
+                dimension=row.dimension,
+                score=row.score,
+                weight=row.weight,
+                contribution=row.contribution,
+                status=row.status,
+                reason=row.reason,
+            )
+            for row in result.breakdown
+        ],
+        scored_weight=result.scored_weight,
+        skills=MatchSkills(
+            matched=[_matched_skill(s) for s in result.skills.matched],
+            partial=[_matched_skill(s) for s in result.skills.partial],
+            missing=[_matched_skill(s) for s in result.skills.missing],
+        ),
+        ranking_version=result.ranking_version,
+        resume_version_id=result.resume_version_id,
+        computed_at=result.computed_at,
+    )
+
+
+def _matched_skill(skill: SkillRequirementInput) -> MatchedSkill:
+    return MatchedSkill(id=skill.skill_id, name=skill.name, requirement=skill.requirement)
 
 
 @admin_router.post(

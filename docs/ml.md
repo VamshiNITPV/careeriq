@@ -208,17 +208,56 @@ And this corpus is **entirely tech roles**, so the spread is narrower than a gen
 the same measurement should be repeated once the corpus is broader. For orientation, two Python
 backend postings score 0.82-0.92, and a Python backend posting against a DevOps one scores ~0.60.
 
+**And that measurement is the wrong one for this formula.** The table above is job-to-job. The
+semantic dimension compares a **candidate to a job**, which Phase 6.2 measured for the first time —
+960 pairs from the same corpus:
+
+| | min | p05 | median | p95 | max |
+|---|---|---|---|---|---|
+| candidate → job | 0.218 | 0.383 | 0.582 | 0.698 | **0.751** |
+| job → job | 0.092 | 0.347 | 0.602 | 0.787 | 0.993 |
+
+Resumes and job adverts are different genres of document, so there is no near-duplicate analogue on
+the candidate side and nothing reaches 0.99. Rescaling from `[0.3, 0.95]` would therefore cap **the
+best candidate-job pair in the entire corpus at 0.69** and hold the dimension under 70 permanently.
+
+So 6.2 uses its own constants — `CANDIDATE_JOB_COSINE_FLOOR = 0.35`, `CANDIDATE_JOB_COSINE_CEILING =
+0.78` (`app/services/matching/weights.py`) — deliberately separate from anything the job-to-job path
+uses, because one shared number would be wrong for both. The floor sits just *under* the measured
+p05 rather than on it: anchoring on a percentile saturates 5% of every user's results at zero and
+loses their ordering, and the bottom of the range is exactly where a career-switcher's near-miss
+lives (US-4.3).
+
+**Thin basis, stated plainly: 8 candidates, all Indian tech roles.** Phase 6.4 re-derives both ends
+against the labelled evaluation set.
+
 #### Skill (25%)
 ```
 skill = ( Σ w(r) · m(s) over required+preferred skills ) / ( Σ w(r) )
 
-w(REQUIRED) = 1.0   w(PREFERRED) = 0.5   w(NICE_TO_HAVE) = 0.2
+w(REQUIRED) = 1.0   w(PREFERRED) = 0.5   w(NICE_TO_HAVE) = 0.2   ← unreachable
 
 m(s) = 1.0   exact match, candidate years ≥ required years
-     = 0.7   exact match, insufficient years
+     = 0.7   exact match, insufficient years                    ← unreachable
      = 0.5   parent/child taxonomy match (React ↔ JavaScript)
      = 0.0   absent
 ```
+
+**Two lines above are dead configuration, as built in 6.2.** Recorded here rather than left for a
+reader to discover, because a weight nothing can select reads as an oversight:
+
+- `w(NICE_TO_HAVE)` — `SkillRequirement` has only `REQUIRED` and `PREFERRED`, in `enums.py` and in
+  the database type. No row can carry a third value, so the weight is not written in `weights.py`.
+  (`database.md` §2 still declared a third member and was stale; corrected.)
+- `m(s) = 0.7` — needs `candidate_skills.years_of_experience`, populated on **0 of 207 rows**.
+  Nothing writes it and no user has typed it. The branch is kept, because it is correct and the data
+  may arrive; every exact match currently scores 1.0. This is also why api.md's example reason for a
+  partial skill ("Job asks for 3+ years; you have 1") is a sentence the code cannot yet produce.
+
+The taxonomy rule at 0.5 **is** live: `Skill.parent_skill_id` holds 71 real edges (React→JavaScript,
+FastAPI→Python, EC2→AWS). It is walked **one level only, in both directions** — the tree is
+multi-level (`BCDU-Net → U-Net → … → Machine Learning`), and crediting any ancestor would score
+someone who listed one segmentation architecture as knowing Machine Learning outright.
 
 #### Experience (15%) — asymmetric by design
 ```
@@ -458,7 +497,7 @@ gets constructed to flatter what was already built.
 | # | Question | Resolve by |
 |---|---|---|
 | Q1 | Does `all-mpnet-base-v2` beat `all-MiniLM-L6-v2` enough to justify ~5× inference cost? | Phase 6 — measure both |
-| Q2 | ~~Is the `[0.3, 0.95]` cosine rescaling range correct?~~ **Measured 2026-09-09 — approximately right; see §4.1. The floor is lower than assumed (0.092), so clamp as well as scale.** | Answered |
+| Q2 | ~~Is the `[0.3, 0.95]` cosine rescaling range correct?~~ **Measured 2026-09-09 — see §4.1. Approximately right for job-to-job, and materially wrong for the candidate-to-job case the formula actually uses, which tops out at 0.751. The two paths now carry separate constants.** | Answered |
 | Q3 | Are the six weights right? They are a starting hypothesis, to be tuned against the labelled set. | Phase 6 |
 | Q4 | Can one Gemini call score all five interview dimensions reliably, or does it need separate calls? | Phase 9 |
 | Q5 | Is 0.95 the right near-duplicate threshold? Tune on the labelled set. | Phase 5 |

@@ -35,6 +35,7 @@ from app.repositories.career import (
 )
 from app.repositories.job import CompanyRepository, JobRepository, JobSkillRepository
 from app.repositories.job_fetch import JobFetchRunRepository
+from app.repositories.matching import MatchingRepository
 from app.repositories.refresh_token import RefreshTokenRepository
 from app.repositories.resume import ResumeRepository, ResumeVersionRepository
 from app.repositories.skill import CandidateSkillRepository, SkillRepository
@@ -42,6 +43,7 @@ from app.repositories.user import ProfileRepository, UserRepository
 from app.repositories.verification import VerificationTokenRepository
 from app.services.auth import AuthService
 from app.services.job.service import JobService
+from app.services.matching.service import MatchingService
 from app.services.notifications import NotificationService
 from app.services.profile import ProfileService
 from app.services.resume.pipeline import process_resume_version
@@ -166,6 +168,20 @@ def get_embeddings_provider() -> EmbeddingProvider | None:
     return get_embedding_provider()
 
 
+def get_matching_repository(session: DbSession) -> MatchingRepository:
+    return MatchingRepository(session)
+
+
+def get_matching_service(
+    repo: Annotated[MatchingRepository, Depends(get_matching_repository)],
+    provider: Annotated[EmbeddingProvider | None, Depends(get_embeddings_provider)],
+) -> MatchingService:
+    # The provider is injected to learn *which* model's vectors to compare, not
+    # to run one — the cosine happens in SQL. The same arrangement similar_jobs
+    # uses, and the reason the API image needs no ML dependency.
+    return MatchingService(repo=repo, provider=provider)
+
+
 def get_career_repositories(session: DbSession) -> list[CareerEntityRepository[Any]]:
     """Every entity type a resume can produce.
 
@@ -237,6 +253,7 @@ JobServiceDep = Annotated[JobService, Depends(get_job_service)]
 JobSkillRepositoryDep = Annotated[JobSkillRepository, Depends(get_job_skill_repository)]
 JobProviderDep = Annotated[JobProvider | None, Depends(get_jobs_provider)]
 EmbeddingProviderDep = Annotated[EmbeddingProvider | None, Depends(get_embeddings_provider)]
+MatchingServiceDep = Annotated[MatchingService, Depends(get_matching_service)]
 ApplicationRepositoryDep = Annotated[ApplicationRepository, Depends(get_application_repository)]
 JobFetchRunRepositoryDep = Annotated[JobFetchRunRepository, Depends(get_job_fetch_run_repository)]
 

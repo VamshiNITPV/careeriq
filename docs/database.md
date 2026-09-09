@@ -73,7 +73,7 @@ CREATE TYPE processing_status  AS ENUM ('PENDING','EXTRACTING','PARSING','EMBEDD
 CREATE TYPE job_source         AS ENUM ('USER_SUBMITTED','DATASET_IMPORT','PARTNER_API');
 CREATE TYPE job_status         AS ENUM ('ACTIVE','EXPIRED','DUPLICATE','ARCHIVED');
 CREATE TYPE proficiency_level  AS ENUM ('BEGINNER','INTERMEDIATE','ADVANCED','EXPERT');
-CREATE TYPE skill_requirement  AS ENUM ('REQUIRED','PREFERRED','NICE_TO_HAVE');
+CREATE TYPE skill_requirement  AS ENUM ('REQUIRED','PREFERRED');
 CREATE TYPE gap_severity       AS ENUM ('CRITICAL','HIGH','MEDIUM','LOW');
 -- As built: only SAVED and APPLIED. The rest arrive with the funnel (see 3.7).
 CREATE TYPE application_status AS ENUM ('SAVED','APPLIED');
@@ -417,6 +417,14 @@ CREATE INDEX ix_job_embeddings_hnsw ON job_embeddings
 
 #### `job_matches`
 A materialized score, cached so a dashboard load does not recompute everything.
+
+> **Not built as of Phase 6.2.** `GET /jobs/{id}/match` computes the score fresh — six statements and
+> no model. The blocker is `is_stale`: it is specified as "set when preferences or resume change"
+> and **nothing sets it**, so this cache would not degrade, it would go quietly wrong. ADR-006 also
+> argues against precomputing a score that "depends on user preferences that change at any moment".
+> The table earns its complexity at `/recommendations` in 6.3, where one request scores two hundred
+> jobs; `MatchResult` in `app/services/matching/service.py` is already shaped as exactly these
+> columns, so that phase adds a migration and an upsert rather than reworking the computation.
 
 | Column | Type | Notes |
 |---|---|---|

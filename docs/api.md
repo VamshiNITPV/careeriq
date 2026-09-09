@@ -309,7 +309,8 @@ code `UNEXTRACTABLE_DOCUMENT` (requirements.md §6).
 > composite key — worth doing for `/recommendations` in Phase 6, where the
 > ordering is expensive to recompute per page, and not before.
 >
-> `/jobs/{id}/match` is Phase 6.2 and does not exist yet.
+> `/jobs/{id}/match` **shipped in Phase 6.2.** As built it differs from the sketch below in
+> four ways, each of which exists to stop the payload claiming more than it knows.
 >
 > `/jobs/{id}/similar` **shipped in Phase 6.1.** It answers with an `availability` of `READY`,
 > `PENDING` or `DISABLED`, because an empty `items` has three distinct meanings — the comparison ran
@@ -374,7 +375,55 @@ code `UNEXTRACTABLE_DOCUMENT` (requirements.md §6).
 ```
 
 `contribution` values sum to `overall_score` (US-4.1 AC2). The score is reproducible by hand from
-this payload — which is exactly what makes it debuggable and defensible.
+this payload — which is exactly what makes it debuggable and defensible. That is the sum of the
+**rounded** contributions, not a separately rounded total; rounding the total independently leaves
+it up to 0.1 away from the column beneath it, and the payload then fails its own guarantee.
+
+**As built, four differences from the JSON above.**
+
+**1. `availability`, and always `200`** — `READY` / `PARTIAL` / `NO_RESUME`, the discriminator
+`/similar` established. Nothing here fails, so an error status would be a lie. `PARTIAL` means the
+five non-semantic dimensions ran and the semantic one could not (no provider, or a vector not built
+yet) — **the common case today**, and the breakdown still returns complete and still sums.
+`NO_RESUME` returns `overall_score: null` and an empty `breakdown`: with four dimensions neutral the
+formula would happily emit a `20` for someone the system has never seen, and that is not a low
+score, it is a fabricated judgement about a person (ADR-012).
+
+**2. A per-dimension `status`** — `SCORED` / `NOT_STATED` / `NEEDS_PROFILE` / `NEEDS_DATA`. A
+dimension whose inputs are missing scores a neutral `0.5` and **keeps its documented weight**; it is
+not dropped and the rest are not renormalised, because AC2 says the breakdown sums "under the
+documented weights" and a per-job weight is not something a user can look up. Without `status` the
+client cannot tell that neutral apart from a genuine middling result, and would draw a half-full bar
+for a measurement that never happened. The last two members are distinct on purpose: `NEEDS_PROFILE`
+is the user's to fix and carries a link; `NEEDS_DATA` is the posting's or the index's and never
+does. Telling a reader to complete their profile because an employer left a field blank is the
+failure this enum prevents.
+
+**3. `scored_weight`** — the summed weight of the `SCORED` rows, so the interface can say *"based on
+60% of what we compare"* instead of presenting a partly-uninformed number as a confident one. Note
+the deliberate asymmetry: a `NOT_STATED` education row awards a full 10 points — absence of a
+requirement is not a penalty — but adds **nothing** here, because those points are real and are not
+evidence about this person.
+
+**4. The reasons say less than the example above does.** The `semantic` reason there ("Your API and
+distributed-systems experience closely matches...") claims to know *what* matched; we have one
+cosine between two 768-dimension vectors and no attribution mechanism, so the real strings are
+banded on the rescaled score and never name a topic. The `experience` reason ("You have 3.5 years")
+is only ever produced when we actually hold that figure — a test asserts that no reason on an
+unknown-status row contains a digit at all. And the raw cosine is never returned, unlike `/similar`,
+which returns one for debugging.
+
+`breakdown` is **always the six, in documented weight order**, never sorted by score — a fixed order
+is what makes two payloads diffable and the by-hand check a straight read down one column.
+`?resume_version_id=` selects which resume to score against and is a real input, not merely
+provenance: `candidate_embeddings` is keyed on the version. Someone else's version id is a `404`,
+not a `403`, which would confirm it exists.
+
+**No `job_matches` row is written.** The score is computed fresh — six statements, no model. The
+cache `database.md` section 3.5 specifies has no invalidation writer (`is_stale` is set by nothing),
+and a cache that goes quietly wrong is worse than one that does not exist; ADR-006 argues against
+precomputing a score that "depends on user preferences that change at any moment". The table earns
+its complexity at `/recommendations` in 6.3, where one request scores two hundred jobs.
 </details>
 
 ---

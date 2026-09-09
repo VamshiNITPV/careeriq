@@ -3,6 +3,7 @@ import { Link, useLocation, useParams } from 'react-router-dom'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 import { JobSaveControls, UnsaveConfirmation } from '@/components/JobSaveControls'
+import { MatchBreakdown } from '@/components/jobs/MatchBreakdown'
 import { SimilarJobs } from '@/components/jobs/SimilarJobs'
 import { buttonClass } from '@/components/ui/buttonStyles'
 import { Input } from '@/components/ui/Input'
@@ -365,6 +366,11 @@ function JobDetailView({
           </Alert>
         )}
       </header>
+
+      {/* Above the skills section on purpose. SimilarJobs sits at the bottom
+          because it is an exit ramp; this is the entry judgement — "is this
+          worth reading" — and it has to arrive before the description does. */}
+      <MatchBreakdown jobId={job.id} />
 
       {job.skills.length > 0 && (
         <section className="rounded-xl border border-slate-200 bg-white p-6">

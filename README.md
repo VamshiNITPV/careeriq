@@ -5,7 +5,8 @@ parses job descriptions, ranks jobs by personalized fit using hybrid semantic + 
 identifies skill gaps, suggests grounded resume improvements, tracks application outcomes, and
 conducts adaptive AI mock interviews.
 
-> **Status:** Phases 1–5.8 complete, and Phase 6 has started — 6.1 (embeddings) is done.
+> **Status:** Phases 1–5.8 complete, and Phase 6 is under way — 6.1 (embeddings) and 6.2
+> (the explainable match score) are done.
 
 ---
 
@@ -108,7 +109,7 @@ Read these in order:
 | 5.7 | Saved jobs and applied tracking — bookmark, applied flag, profile lists | ✅ Done³ |
 | 5.8 | Automatic job fetching — query rotation, request budget, scheduler | ✅ Done⁴ |
 | 6.1 | Embeddings — `pgvector`, local model, "Similar jobs" | ✅ Done⁵ |
-| 6.2 | Hybrid explainable score — six dimensions, `/jobs/{id}/match` | ⬜ |
+| 6.2 | Hybrid explainable score — six dimensions, `/jobs/{id}/match` | ✅ Done⁶ |
 | 6.3 | Recommendations — two-stage retrieval, ranked list, dashboard tile | ⬜ |
 | 6.4 | Evaluation — labelled dataset, metrics, weight tuning, near-duplicates | ⬜ |
 | 7 | Career intelligence — skill gaps, learning paths, resume optimization | ⬜ |
@@ -156,6 +157,35 @@ confirmed `ml.md`'s assumed rescaling range was about right, which had never bee
 carry it: the embedder image is ~3.0 GB while the API's stays ~630 MB, and a test fails the build if
 anything in the API's import path so much as imports torch. Off by default —
 `EMBEDDING_PROVIDER=sentence_transformers` plus `docker compose up embedder` turns it on.
+
+⁶ **A score out of 100 you can check by hand — and it says what it does not know.** Every job page
+now carries a breakdown: six weighted dimensions (semantic 35%, skills 25%, experience 15%,
+education 10%, location 10%, salary 5%), each with its own number and a plain-English reason. The
+six contributions add up to the total exactly, so anyone can reproduce the score from what is on
+screen. That is the whole point — a number with no derivation is something you either trust or
+don't, and neither is useful.
+
+**The honest part is the interesting part.** A live audit found most of the formula's inputs simply
+absent: `Profile.years_of_experience` set on 0 of 43 profiles, `highest_education` on 0 of 43, every
+job with a country code naming the same country, and 245 of 256 postings listing no salary. Rather
+than quietly renormalise — which would let a job rank higher because its employer left a field blank
+— a dimension that cannot be computed scores a neutral 0.5, keeps its documented weight, and the
+page says out loud *"based on 60% of what we compare"*. Rows that measured nothing get no progress
+bar, because a half-filled bar is a picture of a mediocre result and we did not measure mediocre, we
+measured nothing.
+
+Measured across 420 real candidate-job pairs: the informed share runs 0.35 to 1.00 with a median of
+0.60, and scores run 21.8 to 91.0. The contributions summed to the total on all 420.
+
+Two rules the reasons follow. A dimension we could not compute never states a figure about you — a
+test asserts that no such reason contains a digit at all. And a row is only allowed to suggest a fix
+when there is one: "this posting doesn't say where it is" must never render a button telling you to
+complete your profile.
+
+Measurement also corrected a constant carried over from 6.1. That phase measured cosine between two
+*jobs*; this formula compares a *resume* to a job, which turned out to be a different distribution
+entirely — it tops out at 0.751 where job-to-job reaches 0.993. Reusing the old range would have
+capped the best pair in the whole corpus at 0.69.
 
 ⁴ **Variety, not recency.** Measurement settled this: filtering the provider to the last three days
 returned nothing, the last week returned nothing, and an unasked role-and-city combination returned

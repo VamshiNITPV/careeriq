@@ -216,6 +216,55 @@ they are configuration, validated against the labelled evaluation set in `ml/eva
 **This is the migration path:** once `applications` holds enough outcome data, the hand-tuned
 weights become the baseline that a learned ranker (LambdaMART or similar) must beat on NDCG@10.
 
+**Amendment, 2026-09-09 — a dimension we cannot compute scores a neutral 0.5 and keeps its weight.**
+
+Built in Phase 6.2. The formula survived contact unchanged; what it did not anticipate is how much
+of itself the data cannot currently feed. A live audit of the corpus:
+
+| Dimension | Weight | State of the data |
+|---|---:|---|
+| Semantic | 35% | 256 job vectors, 8 candidate vectors. Real signal. |
+| Skill | 25% | 254/256 jobs carry skill rows; the taxonomy holds 71 parent/child edges. Real signal. |
+| Experience | 15% | `Profile.years_of_experience` set on **0 of 43** profiles — deliberately: `AUTOFILLABLE` excludes it, because inferring years from free text needs reference data this project lacks. Recovered for some users by summing `work_experiences` spans. |
+| Education | 10% | `Profile.highest_education` **0 of 43**; every job stating a requirement says `BACHELORS`. Recovered by falling back to the best `education_records` row, which is why this scores at all. |
+| Location | 10% | `jobs.country_code` holds **one distinct value**, so three of the four branches cannot fire. |
+| Salary | 5% | 11 of 256 jobs list one; 2 of 43 profiles set a floor. |
+
+**So 60% of the weight carries signal and 40% is a constant offset**, and the design's job is to
+make that visible rather than hide it. A dimension that cannot be computed scores `0.5`, and its
+documented weight does **not** change.
+
+*Rejected: dropping the dimension and renormalising the rest.* It reads as the obvious fix and it is
+worse on three counts. It breaks US-4.1 AC2 as written — "the breakdown sums to the total under the
+documented weights" — because `weight` would become per-job and the user could no longer reproduce
+the score from a table they can look up. It corrupts 6.3's ranking for a reason unrelated to fit:
+the missing data is not purely candidate-side, and a job whose employer omitted a salary (245 of
+256) would have its semantic weight silently inflated and rank higher for it. And it deletes the
+evidence — 0.40 of weight visibly sitting at 0.5 is exactly what lets the interface disclose that
+40% of the score is uninformed, where renormalising produces a confident number with nothing in the
+payload saying why.
+
+**The cost is real, and is measured rather than estimated.** Over 420 real candidate-job pairs:
+`scored_weight` runs 0.35 to 1.00 with a **median of 0.60**, and `overall_score` runs 21.8 to 91.0
+(p05 33.8, median 53.1, p95 72.2). So a typical score rests on about 60% evidence and 40% neutral
+filler, and sits correspondingly closer to the middle than it would on complete data.
+
+Worth correcting a plausible-sounding prediction the measurement overturned: four pinned dimensions
+imply a hard [20, 80] ceiling, and the real maximum is **91**. Two fallbacks are why — summing
+`work_experiences` spans when `years_of_experience` is unset, and reading the best `education_records`
+row when `highest_education` is — so a profile with preferences filled in can score all six. A test
+pins the [20, 80] bound for the four-neutral case specifically, so that "fixing the range" by
+renormalising later cannot pass as a cosmetic change; the answer to the compression is
+`scored_weight`, a disclosure, not a second undocumented transform on the output.
+
+Two smaller deviations, recorded so they are not mistaken for drift. The scorers live in
+**`app/services/matching/`**, not ml.md section 8's `ml/ranking/`: `ml/` is not on the import path,
+and 6.1 set the same precedent one phase earlier. And `/jobs/{id}/match` **writes no `job_matches`
+row** — that table's `is_stale` column is specified as "set when preferences or resume change" and
+nothing sets it, so a cache there would not degrade, it would go quietly wrong. ADR-006 already
+argues against precomputing a score that depends on preferences changing at any moment; the table
+earns its complexity in 6.3.
+
 ---
 
 ### ADR-006 — Two-stage retrieval: recall then rank
@@ -1006,6 +1055,7 @@ production value. Missing required config fails loudly at startup, not at first 
 | 2026-09-02 | ADR-017 added. Transactional email, password reset and email verification, after review found that a forgotten password left a user permanently locked out. |
 | 2026-09-02 | ADR-018 added. Resume ingestion, object storage, and the interim background task runner. |
 | 2026-09-04 | ADR-019 added. Job data sourcing from permitted APIs, after the corpus reached Phase 6 with seven hand-entered postings and no way to grow. |
+| 2026-09-09 | ADR-005 amended. Phase 6.2: a dimension whose inputs are missing scores a neutral 0.5 and keeps its documented weight — renormalising would break AC2 and let a job rank higher for an employer's blank field. Scorers live in `app/services/matching/`; no `job_matches` row is written yet. |
 | 2026-09-09 | ADR-007 amended. Phase 6.1: the embedding provider runs in its own container with the model baked in, because a lazy import does not keep torch out of the API *image*. The separation is asserted by a test. |
 | 2026-09-08 | ADR-014 amended. Idle session timeout (US-1.3 AC4): `/auth/refresh` refuses a session unused for 60 minutes and revokes its family, plus a browser watcher that signs out at the same deadline. |
 | 2026-09-07 | ADR-019 amended. Measurement showed the provider is a slowly-changing index, not a live feed: recency filtering returns nothing and query variety returns everything. Adds the rotation, a database-backed request budget, and a scheduler — reversing the ADR's own rejection of one. |

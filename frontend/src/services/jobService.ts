@@ -4,6 +4,7 @@ import type {
   JobFilters,
   JobListResponse,
   JobSubmitResponse,
+  MatchResponse,
   SimilarJobsResponse,
 } from '@/types/job'
 
@@ -32,6 +33,17 @@ export const jobService = {
    */
   similar(jobId: string, limit = 6): Promise<SimilarJobsResponse> {
     return api.get<SimilarJobsResponse>(`/jobs/${jobId}/similar?limit=${limit}`)
+  },
+
+  /**
+   * This caller's explainable score for one job.
+   *
+   * Always resolves with a payload when the request succeeds — `availability`
+   * carries the "we couldn't" cases rather than an error status, so a rejection
+   * here means the network or the session, never "no match".
+   */
+  match(jobId: string): Promise<MatchResponse> {
+    return api.get<MatchResponse>(`/jobs/${jobId}/match`)
   },
 
   get(jobId: string): Promise<JobDetail> {

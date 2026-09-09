@@ -268,3 +268,64 @@ export function formatExperience(job: {
   if (min !== null) return `${n(min)}+ years`
   return `up to ${n(max!)} years`
 }
+
+// ---------------------------------------------------------------- match score
+
+/** The six dimensions of the ranking formula, in documented weight order. */
+export type MatchDimensionName =
+  | 'semantic'
+  | 'skill'
+  | 'experience'
+  | 'education'
+  | 'location'
+  | 'salary'
+
+/**
+ * Why a dimension scored what it did.
+ *
+ * The distinction that matters to the interface is the last two. Both score a
+ * neutral 0.5, but `NEEDS_PROFILE` is something the user can fix and
+ * `NEEDS_DATA` is not — showing "complete your profile" because an employer
+ * left a field blank would be blaming the reader for someone else's omission.
+ */
+export type MatchDimensionStatus = 'SCORED' | 'NOT_STATED' | 'NEEDS_PROFILE' | 'NEEDS_DATA'
+
+export interface MatchDimension {
+  dimension: MatchDimensionName
+  /** [0, 1]. Decimal over the wire, so a string. */
+  score: string
+  weight: string
+  /** `score × weight × 100`, to one place. The six sum to `overall_score`. */
+  contribution: string
+  status: MatchDimensionStatus
+  reason: string
+}
+
+export interface MatchedSkill {
+  id: string
+  name: string
+  requirement: 'REQUIRED' | 'PREFERRED'
+}
+
+export interface MatchResponse {
+  job_id: string
+  /**
+   *   READY      all six dimensions ran
+   *   PARTIAL    the semantic dimension could not run — no provider, or a
+   *              vector that is not built yet. The breakdown still sums
+   *   NO_RESUME  nothing uploaded, so there is no score at all
+   */
+  availability: 'READY' | 'PARTIAL' | 'NO_RESUME'
+  overall_score: string | null
+  breakdown: MatchDimension[]
+  /** Weight of the rows that measured something — the honesty disclosure. */
+  scored_weight: string
+  skills: {
+    matched: MatchedSkill[]
+    partial: MatchedSkill[]
+    missing: MatchedSkill[]
+  }
+  ranking_version: string | null
+  resume_version_id: string | null
+  computed_at: string | null
+}
