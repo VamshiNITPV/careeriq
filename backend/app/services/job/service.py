@@ -259,6 +259,9 @@ class JobService:
         ]
         return await self.job_skills.replace_for_job(job_id=job_id, rows=rows)
 
+    async def get_many(self, job_ids: list[uuid.UUID]) -> list[Job]:
+        return await self.jobs.get_many(job_ids)
+
     async def get_job(self, job_id: uuid.UUID) -> Job:
         job = await self.jobs.get(job_id)
         if job is None:

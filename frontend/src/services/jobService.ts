@@ -1,5 +1,11 @@
 import { api } from './apiClient'
-import type { JobDetail, JobFilters, JobListResponse, JobSubmitResponse } from '@/types/job'
+import type {
+  JobDetail,
+  JobFilters,
+  JobListResponse,
+  JobSubmitResponse,
+  SimilarJobsResponse,
+} from '@/types/job'
 
 export const jobService = {
   /**
@@ -16,6 +22,16 @@ export const jobService = {
     }
     const query = params.toString()
     return api.get<JobListResponse>(`/jobs${query ? `?${query}` : ''}`)
+  },
+
+  /**
+   * Nearest neighbours by embedding.
+   *
+   * A side section, not a page: callers must treat a rejection as "render
+   * nothing", never as a page-level error.
+   */
+  similar(jobId: string, limit = 6): Promise<SimilarJobsResponse> {
+    return api.get<SimilarJobsResponse>(`/jobs/${jobId}/similar?limit=${limit}`)
   },
 
   get(jobId: string): Promise<JobDetail> {

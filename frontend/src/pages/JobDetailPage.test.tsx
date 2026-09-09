@@ -78,6 +78,17 @@ function renderPage(state?: JobDetailLocationState) {
 describe('JobDetailPage', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    // The page now mounts <SimilarJobs>, which fetches on its own. Stubbed to
+    // DISABLED so these tests make no real request: the component swallows a
+    // rejection silently, so an unmocked call would pass while attempting the
+    // network — a latent flake rather than a failure.
+    vi.spyOn(jobService, 'similar').mockResolvedValue({
+      items: [],
+      availability: 'DISABLED',
+      limit: 6,
+      model_name: null,
+      model_version: null,
+    })
   })
 
   it('shows the parsed facts', async () => {

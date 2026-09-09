@@ -281,6 +281,42 @@ rather than at every call site.
 invalidates every stored vector, so `job_embeddings` and `candidate_embeddings` carry a
 `model_name` and `model_version` column, and a re-embedding migration is a supported operation.
 
+**Amendment, 2026-09-09 — the embedding provider runs in its own container.**
+
+Built in Phase 6.1. The abstraction above survived contact unchanged; what it did not anticipate is
+*where* the adapter runs.
+
+`sentence-transformers` pulls in torch, and the risk table below names "keep ML models out of the API
+container's import path" as the mitigation for cold starts. **A lazy import is necessary but not
+sufficient**: it stops the API paying the multi-second torch import, but the dependency would still be
+*installed* in the API image, and image pull time is a large share of what a cold start actually is.
+Measured: the `embedder` image is ~3.0 GB against the API's ~630 MB.
+
+So:
+
+- `backend/Dockerfile` gains an **`ml` stage**, installing `requirements-ml.txt` on top of the shared
+  `requirements.txt` and **baking the model into the image** at build time. Baking rather than
+  downloading at runtime makes the image reproducible, lets the container start with no network, and
+  means a crash loop cannot re-download 420 MB per restart. `HF_HUB_OFFLINE=1` turns a typo in the
+  model name into a millisecond failure rather than a DNS hang.
+- The API image installs only `pgvector` — the SQLAlchemy column type and the index DDL. **The API
+  compares vectors in SQL (`<=>`) and never loads a model.** Its one use of the provider interface is
+  to learn which model's vectors to read.
+- **The separation is asserted, not merely intended.** `tests/unit/test_embedding_provider.py` runs
+  `import app.main` in a subprocess and fails if `torch` or `sentence_transformers` appears in
+  `sys.modules`. A subprocess because pytest has already imported half the application by the time
+  any test runs. Without it, one stray top-level import would add seconds to every cold start with
+  nothing anywhere going red.
+- **`embed()` stays `async` as specified, and the adapter — not the caller — reconciles that** with a
+  synchronous CPU-bound model: `anyio.to_thread.run_sync` behind a `CapacityLimiter(1)`. The limiter
+  is correctness rather than throughput; the model is one shared object whose `encode` is not
+  documented thread-safe, and anyio's default limiter of 40 would allow exactly that race.
+
+*Rejected:* calling the model in-process from the API behind a lazy import (the image cost remains,
+which is the cost that matters); and a real task queue (ADR-008 and ADR-018 put that in Phase 10, and
+the database's own backlog query is sufficient until then — the worker polls, in the shape
+`job_fetch_scheduler` already established).
+
 ---
 
 ### ADR-008 — Redis for cache, queue, and rate limiting
@@ -970,5 +1006,6 @@ production value. Missing required config fails loudly at startup, not at first 
 | 2026-09-02 | ADR-017 added. Transactional email, password reset and email verification, after review found that a forgotten password left a user permanently locked out. |
 | 2026-09-02 | ADR-018 added. Resume ingestion, object storage, and the interim background task runner. |
 | 2026-09-04 | ADR-019 added. Job data sourcing from permitted APIs, after the corpus reached Phase 6 with seven hand-entered postings and no way to grow. |
+| 2026-09-09 | ADR-007 amended. Phase 6.1: the embedding provider runs in its own container with the model baked in, because a lazy import does not keep torch out of the API *image*. The separation is asserted by a test. |
 | 2026-09-08 | ADR-014 amended. Idle session timeout (US-1.3 AC4): `/auth/refresh` refuses a session unused for 60 minutes and revokes its family, plus a browser watcher that signs out at the same deadline. |
 | 2026-09-07 | ADR-019 amended. Measurement showed the provider is a slowly-changing index, not a live feed: recency filtering returns nothing and query variety returns everything. Adds the rotation, a database-backed request budget, and a scheduler — reversing the ADR's own rejection of one. |

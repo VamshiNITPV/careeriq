@@ -31,6 +31,30 @@ COPY . .
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
+# ---------------------------------------------------------------- ml
+# The embedding worker, and nothing else.
+#
+# Same source tree, different dependency set. torch and sentence-transformers
+# are well over a gigabyte and are never imported by the API, so putting them in
+# `development` or `production` would put that cost on every API cold start for
+# code the API never runs — the risk architecture.md's table names directly.
+FROM base AS ml
+
+COPY requirements.txt requirements-ml.txt ./
+RUN pip install -r requirements.txt -r requirements-ml.txt
+
+# The model is baked in rather than downloaded at runtime. That makes the image
+# reproducible, lets the container work with no network, and means a crash loop
+# cannot re-download 420 MB on every restart.
+ENV HF_HOME=/opt/hf
+ARG EMBEDDING_MODEL=sentence-transformers/all-mpnet-base-v2
+RUN python -c "from sentence_transformers import SentenceTransformer; \
+    SentenceTransformer('${EMBEDDING_MODEL}')"
+
+COPY . .
+
+CMD ["python", "-m", "app.workers.embedding_worker"]
+
 # ---------------------------------------------------------------- production
 FROM base AS production
 

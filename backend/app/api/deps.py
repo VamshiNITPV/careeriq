@@ -21,6 +21,7 @@ from app.core.exceptions import (
 )
 from app.core.security import decode_access_token
 from app.integrations.email import get_email_provider
+from app.integrations.embeddings import EmbeddingProvider, get_embedding_provider
 from app.integrations.jobs import JobProvider, get_job_provider
 from app.integrations.storage import ObjectStorage, get_object_storage
 from app.models.user import User
@@ -158,6 +159,13 @@ def get_jobs_provider() -> JobProvider | None:
     return get_job_provider()
 
 
+def get_embeddings_provider() -> EmbeddingProvider | None:
+    # A dependency rather than a direct call to the factory, for the same reason
+    # the jobs provider is one: it is what lets the suite substitute a fake and
+    # never load a model, even on a machine configured to run a real one.
+    return get_embedding_provider()
+
+
 def get_career_repositories(session: DbSession) -> list[CareerEntityRepository[Any]]:
     """Every entity type a resume can produce.
 
@@ -228,6 +236,7 @@ CandidateSkillRepositoryDep = Annotated[
 JobServiceDep = Annotated[JobService, Depends(get_job_service)]
 JobSkillRepositoryDep = Annotated[JobSkillRepository, Depends(get_job_skill_repository)]
 JobProviderDep = Annotated[JobProvider | None, Depends(get_jobs_provider)]
+EmbeddingProviderDep = Annotated[EmbeddingProvider | None, Depends(get_embeddings_provider)]
 ApplicationRepositoryDep = Annotated[ApplicationRepository, Depends(get_application_repository)]
 JobFetchRunRepositoryDep = Annotated[JobFetchRunRepository, Depends(get_job_fetch_run_repository)]
 

@@ -111,6 +111,31 @@ export interface JobDetailLocationState {
   isDuplicate?: boolean
 }
 
+export interface SimilarJob {
+  job: JobSummary
+  /**
+   * Raw cosine in [0, 1], for debugging and evaluation — **never rendered**.
+   * Raw cosine on this model needs rescaling before it means anything (ml.md
+   * §4.1), and that rescaling belongs to the scoring step. A bare 0.71 on a
+   * card would look like a percentage and would not be one.
+   */
+  similarity: number
+}
+
+export interface SimilarJobsResponse {
+  items: SimilarJob[]
+  /**
+   * Why `items` is empty, because it has three different reasons:
+   *   READY    the comparison ran and nothing was close enough
+   *   PENDING  this posting has no vector yet
+   *   DISABLED embeddings are switched off entirely (the default)
+   */
+  availability: 'READY' | 'PENDING' | 'DISABLED'
+  limit: number
+  model_name: string | null
+  model_version: string | null
+}
+
 export interface JobFilters {
   q?: string
   work_mode?: WorkMode

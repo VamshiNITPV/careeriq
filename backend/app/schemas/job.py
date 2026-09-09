@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -135,6 +136,36 @@ class JobDetail(JobSummary):
     min_education: EducationLevel | None = None
     expires_at: datetime | None = None
     skills: list[JobSkillRead] = Field(default_factory=list)
+
+
+class SimilarJob(BaseModel):
+    job: JobSummary
+    #: Raw cosine in [0, 1]. Returned for evaluation and debugging and
+    #: **deliberately not shown to the user**: ml.md is explicit that raw cosine
+    #: on this model needs rescaling from its observed [0.3, 0.95] range before
+    #: it means anything, and that rescaling belongs to the scoring step. A bare
+    #: 0.71 on a card would look like a percentage and would not be one.
+    similarity: float
+
+
+class SimilarJobsResponse(BaseModel):
+    """Nearest neighbours by embedding.
+
+    `availability` exists because an empty `items` has three different meanings
+    and the interface has to say which:
+
+      READY    the comparison ran; nothing cleared the similarity floor
+      PENDING  this posting has no vector yet, so there was nothing to compare
+      DISABLED no embedding provider is configured at all (the default)
+    """
+
+    items: list[SimilarJob]
+    availability: Literal["READY", "PENDING", "DISABLED"]
+    limit: int
+    #: Which vectors produced this, so a result is attributable — the same
+    #: reason the rows carry it (ADR-007).
+    model_name: str | None = None
+    model_version: str | None = None
 
 
 class JobListResponse(BaseModel):

@@ -12,6 +12,8 @@ from app.api.deps import (
     AdminUser,
     ApplicationRepositoryDep,
     CurrentUser,
+    DbSession,
+    EmbeddingProviderDep,
     JobFetchRunRepositoryDep,
     JobProviderDep,
     JobServiceDep,
@@ -36,9 +38,12 @@ from app.schemas.job import (
     JobSubmitRequest,
     JobSubmitResponse,
     JobSummary,
+    SimilarJob,
+    SimilarJobsResponse,
 )
 from app.services.job.fetch import fetch_and_import
 from app.services.job.pipeline import UnparseableJobError
+from app.services.job.similar import find_similar
 
 log = get_logger(__name__)
 
@@ -339,6 +344,91 @@ async def set_application_link(
         await service.set_application_link(
             job_id=job_id, source_url=payload.source_url, actor_user_id=user.id
         )
+    )
+
+
+@router.get(
+    "/{job_id}/similar",
+    response_model=SimilarJobsResponse,
+    summary="Jobs nearest this one by embedding",
+    responses={404: {"model": ErrorResponse, "description": "No such job"}},
+)
+async def similar_jobs(
+    job_id: uuid.UUID,
+    user: CurrentUser,
+    service: JobServiceDep,
+    applications_repo: ApplicationRepositoryDep,
+    provider: EmbeddingProviderDep,
+    session: DbSession,
+    limit: Annotated[int, Query(ge=1, le=20)] = 6,
+) -> SimilarJobsResponse:
+    """Nearest neighbours of this posting, by cosine distance over embeddings.
+
+    The comparison happens entirely in SQL — the API never loads a model, which
+    is what lets its image omit torch altogether (architecture.md's cold-start
+    risk). The provider is injected only to learn *which* model's vectors to read,
+    and is None when embeddings are switched off.
+
+    Three distinguishable outcomes, because an empty list has three meanings:
+    DISABLED when nothing is configured, PENDING when this posting has no vector
+    yet, and READY when the comparison genuinely found nothing close enough.
+    Collapsing them would make "no similar jobs" indistinguishable from "the
+    feature is off", which is the sort of thing that gets debugged twice.
+    """
+    # 404s for an unknown id, and for another user's — the same check
+    # GET /jobs/{id} makes, so the two cannot drift.
+    await service.get_job(job_id)
+
+    if provider is None:
+        return SimilarJobsResponse(items=[], availability="DISABLED", limit=limit)
+
+    rows = await find_similar(
+        session=session,
+        job_id=job_id,
+        model_name=provider.model_name,
+        limit=limit,
+    )
+    if rows is None:
+        return SimilarJobsResponse(items=[], availability="PENDING", limit=limit)
+
+    neighbours, model_name, model_version = rows
+    if not neighbours:
+        return SimilarJobsResponse(
+            items=[],
+            availability="READY",
+            limit=limit,
+            model_name=model_name,
+            model_version=model_version,
+        )
+
+    ids = [job_id_ for job_id_, _ in neighbours]
+    jobs = {job.id: job for job in await service.get_many(ids)}
+    applications = await applications_repo.for_jobs(user_id=user.id, job_ids=ids)
+
+    items = [
+        SimilarJob(
+            job=summary_of(
+                jobs[found_id],
+                application=(
+                    ApplicationRead.model_validate(applications[found_id])
+                    if found_id in applications
+                    else None
+                ),
+            ),
+            similarity=similarity,
+        )
+        # Ordered by the query, not by the dict — a mapping would lose the
+        # ordering that is the entire result.
+        for found_id, similarity in neighbours
+        if found_id in jobs
+    ]
+
+    return SimilarJobsResponse(
+        items=items,
+        availability="READY",
+        limit=limit,
+        model_name=model_name,
+        model_version=model_version,
     )
 
 

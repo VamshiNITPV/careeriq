@@ -547,9 +547,7 @@ class TestVersionDetail:
         # which cannot see this test's uncommitted rows. Run it here instead.
         await run_pipeline(uuid.UUID(version_id))
 
-        response = await client.get(
-            f"{API}/resumes/versions/{version_id}", headers=auth_headers
-        )
+        response = await client.get(f"{API}/resumes/versions/{version_id}", headers=auth_headers)
 
         assert response.status_code == 200
         body = response.json()

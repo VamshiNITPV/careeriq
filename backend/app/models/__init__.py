@@ -6,6 +6,9 @@ that metadata — so autogenerate silently emits a migration that drops its tabl
 Importing here makes `from app.models import Base` sufficient to see everything.
 """
 
+from pgvector.sqlalchemy import Vector as _Vector
+from sqlalchemy.dialects.postgresql.base import ischema_names as _pg_ischema_names
+
 from app.models.application import Application
 from app.models.base import (
     Base,
@@ -15,6 +18,7 @@ from app.models.base import (
     UUIDPrimaryKeyMixin,
 )
 from app.models.career import Certification, EducationRecord, Project, WorkExperience
+from app.models.embedding import CandidateEmbedding, JobEmbedding
 from app.models.enums import (
     ApplicationStatus,
     AuthProvider,
@@ -39,11 +43,22 @@ from app.models.skill import CandidateSkill, Skill
 from app.models.user import RefreshToken, User
 from app.models.verification import VerificationToken
 
+# Teach the PostgreSQL dialect about `vector`, so reflection returns the real
+# type rather than NullType.
+#
+# `env.py` sets compare_type=True, and without this Alembic reflects an
+# embedding column as NullType and reports a phantom type change on every
+# `alembic check` run, forever. A check that is always dirty is one nobody
+# reads, which costs more than the drift it was meant to catch.
+_pg_ischema_names.setdefault("vector", _Vector)
+
+
 __all__ = [
     "Application",
     "ApplicationStatus",
     "AuthProvider",
     "Base",
+    "CandidateEmbedding",
     "CandidateSkill",
     "Certification",
     "Company",
@@ -53,6 +68,7 @@ __all__ = [
     "EmploymentType",
     "ExperienceLevel",
     "Job",
+    "JobEmbedding",
     "JobFetchRun",
     "JobSkill",
     "JobSource",

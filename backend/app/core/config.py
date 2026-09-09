@@ -113,6 +113,36 @@ class Settings(BaseSettings):
     # whenever the app happens to be running.
     jobs_auto_fetch_interval_minutes: int = Field(default=60, ge=5, le=1440)
 
+    # ---------------------------------------------------------------- embeddings
+    # none                  -> no vectors are produced; /jobs/{id}/similar reports
+    #                          DISABLED and nothing else changes (default)
+    # sentence_transformers -> the real model, CPU, local, free (ml.md §3.1)
+    # fake                  -> deterministic synthetic vectors; tests and a local
+    #                          walkthrough. Refused in production.
+    #
+    # Only the `embedder` container ever sets this to a real provider. The API
+    # compares vectors in SQL and never loads a model — architecture.md's
+    # cold-start risk names keeping ML out of its import path as the mitigation.
+    embedding_provider: str = "none"
+    embedding_model: str = "sentence-transformers/all-mpnet-base-v2"
+    #: Stored on every row beside `model_name`. Bump it when the *document*
+    #: built for a model changes in a way that should invalidate its vectors
+    #: without the model itself changing.
+    embedding_model_version: str = "v1"
+    #: Fixed at 768 by the column type — pgvector requires a declared dimension
+    #: (database.md §3.4). A provider that disagrees is a configuration error
+    #: caught at startup rather than a table full of uncomparable rows.
+    embedding_dimensions: int = Field(default=768, ge=1, le=4096)
+    #: torch would otherwise take one thread per core, which on a developer
+    #: laptop also running Postgres and Vite starves everything else — and for
+    #: batches this small is measurably slower than one or two threads.
+    embedding_threads: int = Field(default=2, ge=1, le=32)
+    #: How many documents one indexing pass handles. Small enough that a tick
+    #: stays interruptible, large enough that the model's fixed cost per batch
+    #: is amortised.
+    embedding_batch_size: int = Field(default=16, ge=1, le=256)
+    embedding_interval_seconds: int = Field(default=60, ge=5, le=3600)
+
     # ---------------------------------------------------------------- email
     # console  -> render to the log, send nothing (default; no setup required)
     # smtp     -> a real SMTP server (Mailpit locally, a provider in production)
@@ -206,6 +236,13 @@ class Settings(BaseSettings):
         return upper
 
     @model_validator(mode="after")
+    def _embedding_provider_is_usable(self) -> Settings:
+        allowed = {"none", "sentence_transformers", "fake"}
+        if self.embedding_provider not in allowed:
+            raise ValueError(f"EMBEDDING_PROVIDER must be one of {sorted(allowed)}")
+        return self
+
+    @model_validator(mode="after")
     def _idle_timeout_is_coherent(self) -> Settings:
         """Two ways the idle window can be set to a value that cannot work.
 
@@ -256,6 +293,10 @@ class Settings(BaseSettings):
             # Console delivery in production means password reset silently never
             # arrives, locking users out with no error anywhere.
             problems.append("EMAIL_PROVIDER must not be 'console' in production.")
+        if self.embedding_provider == "fake":
+            # Synthetic vectors would rank real jobs for real candidates using
+            # a hash of the words, which is inventing evidence (ADR-012).
+            problems.append("EMBEDDING_PROVIDER must not be 'fake' in production.")
         if self.jobs_provider == "fake":
             # Synthetic postings in a live corpus are invented market data that
             # real candidates would be ranked against (ADR-012, ADR-019).

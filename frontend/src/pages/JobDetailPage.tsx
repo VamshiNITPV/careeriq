@@ -3,6 +3,7 @@ import { Link, useLocation, useParams } from 'react-router-dom'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 import { JobSaveControls, UnsaveConfirmation } from '@/components/JobSaveControls'
+import { SimilarJobs } from '@/components/jobs/SimilarJobs'
 import { buttonClass } from '@/components/ui/buttonStyles'
 import { Input } from '@/components/ui/Input'
 import { Spinner } from '@/components/ui/Spinner'
@@ -457,7 +458,9 @@ function JobDetailView({
         {/* Once for the page, not once per control: both copies above read the
             same hook, and a dialog inside each would put two <dialog> elements
             into showModal() for one event. */}
-        <UnsaveConfirmation state={application} />
+        <SimilarJobs jobId={job.id} />
+
+      <UnsaveConfirmation state={application} />
       </div>
     </div>
   )

@@ -1,0 +1,28 @@
+# CareerIQ — embedding model dependencies.
+#
+# Installed ONLY into the `ml` image stage (Dockerfile), which the `embedder`
+# compose service runs. Deliberately never into the API image: architecture.md's
+# risk table names "keep ML models out of the API container's import path" as
+# the mitigation for cold starts, and torch alone is roughly ten times the size
+# of every other dependency in this project combined.
+#
+# The API reads vectors in SQL (`<=>`) and never loads a model, so it needs
+# `pgvector` from requirements.txt and nothing from this file.
+
+# CPU-only wheels.
+#
+# Without this index the default PyPI `torch` wheel for linux x86_64 drags in
+# the nvidia-cu* packages — roughly 2.5-3.5 GB installed, for a GPU no machine
+# in this project has. The `+cpu` local version sorts above the plain one under
+# PEP 440, so `>=` resolves to the CPU build.
+#
+# Verify after a build: `torch.__version__` must end in `+cpu`.
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+# 2.6 is the floor for cp313 wheels, and the image is python:3.13-slim. Below
+# it pip finds no matching wheel and falls back to building from source, which
+# does not fail fast — it compiles for an hour and then fails.
+torch>=2.6
+
+# The model wrapper. Pulls transformers, tokenizers, safetensors and scipy.
+sentence-transformers>=3.3

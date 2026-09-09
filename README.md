@@ -5,7 +5,7 @@ parses job descriptions, ranks jobs by personalized fit using hybrid semantic + 
 identifies skill gaps, suggests grounded resume improvements, tracks application outcomes, and
 conducts adaptive AI mock interviews.
 
-> **Status:** Phases 1–5.8 complete. Phase 6 (AI matching) is next.
+> **Status:** Phases 1–5.8 complete, and Phase 6 has started — 6.1 (embeddings) is done.
 
 ---
 
@@ -107,7 +107,10 @@ Read these in order:
 | 5.6 | Live job ingestion — jobs API provider, admin fetch, `PARTNER_API` source | ✅ Done² |
 | 5.7 | Saved jobs and applied tracking — bookmark, applied flag, profile lists | ✅ Done³ |
 | 5.8 | Automatic job fetching — query rotation, request budget, scheduler | ✅ Done⁴ |
-| 6 | AI matching — embeddings, pgvector, semantic search, hybrid ranking | ⬜ |
+| 6.1 | Embeddings — `pgvector`, local model, "Similar jobs" | ✅ Done⁵ |
+| 6.2 | Hybrid explainable score — six dimensions, `/jobs/{id}/match` | ⬜ |
+| 6.3 | Recommendations — two-stage retrieval, ranked list, dashboard tile | ⬜ |
+| 6.4 | Evaluation — labelled dataset, metrics, weight tuning, near-duplicates | ⬜ |
 | 7 | Career intelligence — skill gaps, learning paths, resume optimization | ⬜ |
 | 8 | Application system — tracking, analytics, outcome analysis | ⬜ |
 | 9 | AI interview — question generation, adaptive engine, evaluation | ⬜ |
@@ -137,6 +140,22 @@ drops below the fetched ones. That is correct, not data loss.
 log, no lifecycle beyond those two, and no funnel analytics. Applied is always the user's own
 assertion: nothing infers it, and auto-submitting applications is explicitly out of scope. The
 tracker and its analytics remain Phase 8.
+
+⁵ **Meaning, not keywords — and it is measurable.** Every job and resume is turned into 768 numbers
+that capture what it is *about*, by a model that runs locally on CPU: free, no API quota, no network.
+So "Built REST APIs using Python" can match "backend service development" despite sharing no words.
+`pgvector` stores the vectors and finds the closest ones in one SQL statement.
+
+Measured on the real corpus rather than asserted: 255 jobs indexed in under four minutes; two Python
+backend postings score 0.82–0.92 against each other, a Python backend posting against a DevOps one
+scores ~0.60, and across 3,586 random pairs the median is 0.602. That last number is the reason raw
+cosine is never shown to a user — unrescaled, an unrelated pair already looks like 60%. It also
+confirmed `ml.md`'s assumed rescaling range was about right, which had never been checked against data.
+
+**The model runs in its own container.** `sentence-transformers` brings torch, and the API must not
+carry it: the embedder image is ~3.0 GB while the API's stays ~630 MB, and a test fails the build if
+anything in the API's import path so much as imports torch. Off by default —
+`EMBEDDING_PROVIDER=sentence_transformers` plus `docker compose up embedder` turns it on.
 
 ⁴ **Variety, not recency.** Measurement settled this: filtering the provider to the last three days
 returned nothing, the last week returned nothing, and an unasked role-and-city combination returned

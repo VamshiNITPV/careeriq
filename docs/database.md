@@ -697,7 +697,7 @@ code that can be bypassed.
 
 | # | Question | Resolve by |
 |---|---|---|
-| Q1 | Embedding dimension is fixed at 768 for `all-mpnet-base-v2`. If we switch to a Gemini embedding model (3072-dim), the column type changes. Store both, or migrate? | Phase 6 |
+| Q1 | Embedding dimension is fixed at 768 for `all-mpnet-base-v2`. If we switch to a Gemini embedding model (3072-dim), the column type changes. Store both, or migrate? | **Still open.** 6.1 built the 768 column and a `CHECK (dimensions = 768)` so a mismatched vector cannot be stored at all. `model_name` + `model_version` in the unique key already let two *same-width* generations coexist; a different width is a migration, and the indexer raises `DimensionMismatchError` at startup rather than writing rows that can never be compared. |
 | Q2 | Does `skill_gaps` need history, or is the latest computation enough? History enables "gaps closed over time". | Phase 7 |
 | Q3 | Should `job_matches` be pruned? Every user × every job is unbounded. Likely a TTL on stale rows. | Phase 8 |
 | Q4 | Multi-tenancy via row-level security instead of application-level `user_id` filters — stronger, but harder to test. | Phase 10 |

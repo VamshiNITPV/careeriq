@@ -47,6 +47,13 @@ aiosmtplib>=3.0
 # the network — that comment in requirements-dev.txt now covers only the tests.
 httpx>=0.28
 
+# --- vectors ---
+# The SQLAlchemy column type and the HNSW index DDL, and nothing else. The API
+# compares vectors *in SQL* (`<=>`) and never loads a model, so this is a small
+# pure-Python package with no native extension. sentence-transformers and torch
+# are deliberately NOT here — see requirements-ml.txt.
+pgvector>=0.3.6
+
 # --- misc ---
 structlog>=24.4
 python-multipart>=0.0.20

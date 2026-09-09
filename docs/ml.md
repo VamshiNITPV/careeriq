@@ -109,6 +109,18 @@ rate limit, deterministic.
 Selection is a config value, not a code change. The comparison is a Phase 6 evaluation task, not an
 assumption.
 
+**Measured on the real corpus, 2026-09-09** (255 job vectors, `all-mpnet-base-v2`, CPU):
+
+| | |
+|---|---|
+| Model load | ~21 s, once per process |
+| Throughput | 255 documents in ~226 s — about 0.9 s/document on two threads |
+| Image cost | the `embedder` image is ~3.0 GB; the API image is **unchanged** at ~630 MB |
+
+So local CPU inference is comfortable for a corpus this size and for the few-hundred-a-month the
+jobs API can supply. It would not be comfortable for a bulk backfill of tens of thousands, which is
+the point at which the MiniLM fallback or a batched API provider earns a second look.
+
 ### 3.2 What gets embedded
 
 Not raw text. A structured, normalized representation, because a resume's formatting noise and
@@ -138,9 +150,24 @@ Symmetric structure on both sides matters — the model compares like with like 
 a formatted resume against a job-board advertisement full of company marketing copy.
 
 ### 3.3 Chunking
-Long resumes exceed the model's 384-token window. Strategy: embed per section, then store both the
-per-section vectors and a weighted mean as the document vector. Retrieval uses the document vector;
-per-section vectors support "which part of my resume matches this requirement" in Phase 7.
+
+**Decided in Phase 6.1: one vector per document. Per-section vectors are not built, and the storage
+for them is not built either.**
+
+The original plan here was to embed per section and store both the per-section vectors and a weighted
+mean. That contradicts the committed schema: `database.md` §3.4's unique key is
+`(job_id, model_name, model_version)` — one row per document per model, with no slot for a section
+and no second table. Adding one would put `section` in the unique key, which changes what a row *is*,
+and every read in the ranking path would then have to answer "which of these rows is *the* vector?".
+
+Per-section vectors exist to serve one Phase 7 feature — "which part of my resume matches this
+requirement" — so the schema question belongs to that phase, alongside the feature that needs it.
+Recorded as a decision rather than left as an omission, because the two documents disagreed and a
+reader had no way to tell which was current.
+
+What 6.1 does instead: the document builders in `backend/app/services/embedding/documents.py` cap
+their input (twelve bullets per section, 6,000 characters total), so a long resume is truncated
+rather than silently dominating its own vector.
 
 ### 3.4 Storage & search
 `pgvector` with HNSW, cosine distance (ADR-002, database.md §3.4). Search is a single SQL statement
@@ -164,6 +191,22 @@ Each dimension returns `[0.0, 1.0]` plus a human-readable reason.
 `cosine_similarity(candidate_vector, job_vector)`, rescaled from the observed `[0.3, 0.95]` range to
 `[0, 1]`. Raw cosine on this model rarely falls below 0.3 for any two career documents; without
 rescaling, everything scores 60%+ and the dimension loses its ability to discriminate.
+
+**Measured, 2026-09-09** — 3,586 random job-to-job pairs from the live corpus, which is the first
+real data this assumption has ever been checked against:
+
+| min | p05 | median | p95 | max |
+|---|---|---|---|---|
+| 0.092 | **0.347** | 0.602 | 0.787 | 0.993 |
+
+The assumed `[0.3, 0.95]` range is close to right. The p05 of 0.347 confirms the claim that raw
+cosine rarely falls below 0.3, and the median of 0.602 confirms the problem rescaling exists to
+solve: unrescaled, the typical unrelated pair already scores 60%.
+
+Two honest caveats. The floor is lower than assumed — 0.092 — so clamping matters, not just scaling.
+And this corpus is **entirely tech roles**, so the spread is narrower than a general one would be;
+the same measurement should be repeated once the corpus is broader. For orientation, two Python
+backend postings score 0.82-0.92, and a Python backend posting against a DevOps one scores ~0.60.
 
 #### Skill (25%)
 ```
@@ -415,7 +458,7 @@ gets constructed to flatter what was already built.
 | # | Question | Resolve by |
 |---|---|---|
 | Q1 | Does `all-mpnet-base-v2` beat `all-MiniLM-L6-v2` enough to justify ~5× inference cost? | Phase 6 — measure both |
-| Q2 | Is the `[0.3, 0.95]` cosine rescaling range correct? Needs measurement on real data, not assumption. | Phase 6 |
+| Q2 | ~~Is the `[0.3, 0.95]` cosine rescaling range correct?~~ **Measured 2026-09-09 — approximately right; see §4.1. The floor is lower than assumed (0.092), so clamp as well as scale.** | Answered |
 | Q3 | Are the six weights right? They are a starting hypothesis, to be tuned against the labelled set. | Phase 6 |
 | Q4 | Can one Gemini call score all five interview dimensions reliably, or does it need separate calls? | Phase 9 |
 | Q5 | Is 0.95 the right near-duplicate threshold? Tune on the labelled set. | Phase 5 |

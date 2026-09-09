@@ -149,7 +149,47 @@ services:
     depends_on:
       - backend
 
+  # ------------------------------------------------------------------ embedder
+  # Produces the vectors the API reads. Its own container because it needs torch
+  # and the API must not: architecture.md's risk table names keeping ML out of
+  # the API's import path as the cold-start mitigation, and a lazy import would
+  # not help — the dependency would still be installed and still be pulled.
+  #
+  # There is no queue until Phase 10, so this polls the database for work in the
+  # same shape job_fetch_scheduler established.
+  embedder:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: ml
+    container_name: careeriq-embedder
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://careeriq:careeriq_dev_password@postgres:5432/careeriq
+      REDIS_URL: redis://redis:6379/0
+      # Only this container ever produces vectors. The API keeps whatever is in
+      # .env, which defaults to `none`.
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-none}
+      HF_HOME: /opt/hf
+      # A typo in EMBEDDING_MODEL then fails in milliseconds with "not found in
+      # cache" rather than hanging on a DNS timeout.
+      HF_HUB_OFFLINE: "1"
+    volumes:
+      - ./backend:/app
+      - hfcache:/opt/hf
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   pgdata:
   redisdata:
   uploads:
+  # Model weights. A named volume rather than a bind mount for the reason
+  # `uploads` gives: hundreds of megabytes have no business in a synced folder.
+  # The default model is baked into the image, so this only earns its keep when
+  # EMBEDDING_MODEL is pointed at a different one — it then downloads once and
+  # survives restarts without a rebuild.
+  hfcache:

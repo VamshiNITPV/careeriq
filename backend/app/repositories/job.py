@@ -193,6 +193,17 @@ class JobRepository(BaseRepository[Job]):
         rows = [(job, application) for job, application in (await self.session.execute(stmt)).all()]
         return rows, total
 
+    async def get_many(self, job_ids: list[uuid.UUID]) -> list[Job]:
+        """Load several jobs by id, order unspecified.
+
+        The caller owns the ordering — for similarity search it is the query's
+        distance ordering, which a dict lookup would silently discard.
+        """
+        if not job_ids:
+            return []
+        rows = await self.session.scalars(select(Job).where(Job.id.in_(job_ids)))
+        return list(rows.unique().all())
+
     async def count_active(self) -> int:
         return (
             await self.session.scalar(

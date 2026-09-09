@@ -309,7 +309,18 @@ code `UNEXTRACTABLE_DOCUMENT` (requirements.md §6).
 > composite key — worth doing for `/recommendations` in Phase 6, where the
 > ordering is expensive to recompute per page, and not before.
 >
-> `/jobs/{id}/match` and `/jobs/{id}/similar` are Phases 6-8 and do not exist yet.
+> `/jobs/{id}/match` is Phase 6.2 and does not exist yet.
+>
+> `/jobs/{id}/similar` **shipped in Phase 6.1.** It answers with an `availability` of `READY`,
+> `PENDING` or `DISABLED`, because an empty `items` has three distinct meanings — the comparison ran
+> and found nothing close enough, this posting has no vector yet, or embeddings are switched off
+> entirely (the default). Collapsing them would make a feature that is merely behind look identical
+> to one that is off.
+>
+> It returns each neighbour's raw cosine as `similarity`, for evaluation and debugging. **The client
+> does not render it.** Raw cosine on this model needs rescaling before it means anything (ml.md
+> §4.1), and that rescaling belongs to 6.2; an unrescaled `0.71` on a card would look like a
+> percentage and would not be one.
 >
 > `POST /jobs/{id}/save` became **`PUT` and `DELETE /jobs/{id}/application`** (US-7.0). A verb in a
 > path has nowhere to put the other three writes — it grows into `/save`, `/unsave`, `/apply`,

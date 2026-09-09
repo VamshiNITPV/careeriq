@@ -148,11 +148,21 @@ class TestProductionHardening:
             "email_provider": "smtp",
             "frontend_base_url": "https://app.example.com",
             "storage_provider": "gcs",
+            # conftest sets EMBEDDING_PROVIDER=fake so the suite never loads a
+            # model, and pydantic reads the real environment regardless of
+            # _env_file=None — so the baseline has to state this explicitly.
+            "embedding_provider": "sentence_transformers",
         }
         build(**{**defaults, **overrides})._check_production_hardening()
 
     def test_valid_production_config_passes(self) -> None:
         self._check()
+
+    def test_fake_embedding_provider_is_rejected(self) -> None:
+        # Synthetic vectors would rank real jobs for real candidates using a
+        # hash of the words — inventing evidence rather than measuring it.
+        with pytest.raises(ValueError, match="EMBEDDING_PROVIDER"):
+            self._check(embedding_provider="fake")
 
     def test_console_email_provider_is_rejected(self) -> None:
         # Console delivery in production means password reset silently never

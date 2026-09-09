@@ -82,6 +82,26 @@ class ApplicationRepository(BaseRepository[Application]):
             )
         )
 
+    async def for_jobs(
+        self, *, user_id: uuid.UUID, job_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, Application]:
+        """This caller's live applications for several jobs, keyed by job id.
+
+        One query rather than one per card. At most one row per (user, job) is
+        possible — a partial unique index guarantees it — so the mapping cannot
+        lose anything.
+        """
+        if not job_ids:
+            return {}
+        rows = await self.session.scalars(
+            select(Application).where(
+                Application.user_id == user_id,
+                Application.job_id.in_(job_ids),
+                Application.deleted_at.is_(None),
+            )
+        )
+        return {row.job_id: row for row in rows.all()}
+
     async def soft_delete(self, *, user_id: uuid.UUID, job_id: uuid.UUID) -> bool:
         """Remove the user's application to this job. Returns whether one went.
 

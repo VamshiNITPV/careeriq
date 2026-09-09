@@ -41,6 +41,16 @@ os.environ["LOG_LEVEL"] = "WARNING"
 os.environ.setdefault(
     "JWT_SECRET_KEY", "test-secret-key-that-is-long-enough-to-pass-validation-0123456789"
 )
+# The suite must never download a model. Three independent guards, so removing
+# any one of them does not silently open the hole:
+#   1. this, which makes the configured provider a fake
+#   2. the dependency override below, which covers a .env that says otherwise
+#   3. tests/unit/test_embedding_provider.py, which fails if anything in the
+#      API's import path so much as imports torch
+os.environ["EMBEDDING_PROVIDER"] = "fake"
+# Belt and braces: were a real provider ever constructed by mistake, it must
+# fail in milliseconds with "not in cache" rather than pull 420 MB into CI.
+os.environ["HF_HUB_OFFLINE"] = "1"
 
 import pytest  # noqa: E402
 from alembic import command  # noqa: E402
@@ -51,6 +61,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine  # noqa: E4
 from sqlalchemy.pool import NullPool  # noqa: E402
 
 from app.api.deps import (  # noqa: E402
+    get_embeddings_provider,
     get_jobs_provider,
     get_notification_service,
     get_pipeline_runner,
@@ -58,6 +69,7 @@ from app.api.deps import (  # noqa: E402
 )
 from app.core.database import dispose_engine, get_db_session  # noqa: E402
 from app.integrations.email import CapturingEmailProvider  # noqa: E402
+from app.integrations.embeddings import FakeEmbeddingProvider  # noqa: E402
 from app.integrations.jobs.fake import FakeJobProvider  # noqa: E402
 from app.integrations.storage import LocalObjectStorage  # noqa: E402
 from app.main import create_app  # noqa: E402
@@ -143,6 +155,17 @@ async def _dispose_global_engine() -> AsyncGenerator[None]:
 
 
 @pytest.fixture
+def embedding_provider() -> FakeEmbeddingProvider:
+    """Deterministic vectors, no model, no network.
+
+    Shared by the client fixture's override so that every API test sees the same
+    provider a test can also inspect — the call counter is how the indexer tests
+    prove work was skipped rather than merely repeated.
+    """
+    return FakeEmbeddingProvider()
+
+
+@pytest.fixture
 def job_provider() -> FakeJobProvider:
     """A jobs provider that makes no network calls.
 
@@ -207,6 +230,7 @@ async def client(
     emails: CapturingEmailProvider,
     storage: LocalObjectStorage,
     job_provider: FakeJobProvider,
+    embedding_provider: FakeEmbeddingProvider,
 ) -> AsyncGenerator[AsyncClient]:
     """HTTP client wired to the app, sharing the test's rolled-back session.
 
@@ -239,6 +263,7 @@ async def client(
     # guarantees it even on a machine whose .env holds a real JOBS_API_KEY —
     # Settings reads .env regardless of ENVIRONMENT=test.
     app.dependency_overrides[get_jobs_provider] = lambda: job_provider
+    app.dependency_overrides[get_embeddings_provider] = lambda: embedding_provider
 
     # Tests drive the pipeline explicitly via the run_pipeline fixture, which
     # injects this test's session and storage. Left in place, the real
