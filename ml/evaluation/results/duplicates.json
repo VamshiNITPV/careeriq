@@ -1,0 +1,140 @@
+{
+  "generated_at": "2026-09-10T07:24:13.908990+00:00",
+  "pairs": 72,
+  "duplicates": 3,
+  "same_company_pairs": 6,
+  "caught_by_content_hash": 0,
+  "shared_opening": 3,
+  "shared_opening_not_duplicates": 2,
+  "false_positives_with_shared_opening": 1,
+  "pool_floor": 0.88,
+  "targets": {
+    "precision": 0.95,
+    "recall": 0.85
+  },
+  "sweep": [
+    {
+      "threshold": 0.88,
+      "true_positives": 3,
+      "false_positives": 69,
+      "false_negatives": 0,
+      "true_negatives": 0,
+      "precision": 0.041666666666666664,
+      "recall": 1.0,
+      "f1": 0.07999999999999999
+    },
+    {
+      "threshold": 0.9,
+      "true_positives": 3,
+      "false_positives": 29,
+      "false_negatives": 0,
+      "true_negatives": 40,
+      "precision": 0.09375,
+      "recall": 1.0,
+      "f1": 0.17142857142857143
+    },
+    {
+      "threshold": 0.92,
+      "true_positives": 3,
+      "false_positives": 11,
+      "false_negatives": 0,
+      "true_negatives": 58,
+      "precision": 0.21428571428571427,
+      "recall": 1.0,
+      "f1": 0.35294117647058826
+    },
+    {
+      "threshold": 0.94,
+      "true_positives": 3,
+      "false_positives": 2,
+      "false_negatives": 0,
+      "true_negatives": 67,
+      "precision": 0.6,
+      "recall": 1.0,
+      "f1": 0.7499999999999999
+    },
+    {
+      "threshold": 0.95,
+      "true_positives": 3,
+      "false_positives": 1,
+      "false_negatives": 0,
+      "true_negatives": 68,
+      "precision": 0.75,
+      "recall": 1.0,
+      "f1": 0.8571428571428571
+    },
+    {
+      "threshold": 0.96,
+      "true_positives": 2,
+      "false_positives": 1,
+      "false_negatives": 1,
+      "true_negatives": 68,
+      "precision": 0.6666666666666666,
+      "recall": 0.6666666666666666,
+      "f1": 0.6666666666666666
+    },
+    {
+      "threshold": 0.97,
+      "true_positives": 2,
+      "false_positives": 0,
+      "false_negatives": 1,
+      "true_negatives": 69,
+      "precision": 1.0,
+      "recall": 0.6666666666666666,
+      "f1": 0.8
+    },
+    {
+      "threshold": 0.98,
+      "true_positives": 2,
+      "false_positives": 0,
+      "false_negatives": 1,
+      "true_negatives": 69,
+      "precision": 1.0,
+      "recall": 0.6666666666666666,
+      "f1": 0.8
+    },
+    {
+      "threshold": 0.99,
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 2,
+      "true_negatives": 69,
+      "precision": 1.0,
+      "recall": 0.3333333333333333,
+      "f1": 0.5
+    }
+  ],
+  "shipped": {
+    "threshold": 0.97,
+    "true_positives": 2,
+    "false_positives": 0,
+    "false_negatives": 1,
+    "true_negatives": 69,
+    "precision": 1.0,
+    "recall": 0.6666666666666666,
+    "f1": 0.8
+  },
+  "specified": {
+    "threshold": 0.95,
+    "true_positives": 3,
+    "false_positives": 1,
+    "false_negatives": 0,
+    "true_negatives": 68,
+    "precision": 0.75,
+    "recall": 1.0,
+    "f1": 0.8571428571428571
+  },
+  "duplicate_similarities": [
+    0.9925,
+    0.9857,
+    0.9512
+  ],
+  "false_positives_at_specified": [
+    {
+      "similarity": 0.96,
+      "a": "Senior Engineering Manager - Machine Learning",
+      "b": "Senior Machine Learning Engineer, Data Insights",
+      "company": "Roku"
+    }
+  ]
+}

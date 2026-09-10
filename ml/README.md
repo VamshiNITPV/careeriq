@@ -34,8 +34,11 @@ POSIX paths inside `-v` and `-e` arguments, which silently turns `/app:/ml` into
 | `evaluation/build_pool.py` | Builds the candidate pool for labelling. Run once per corpus refresh. |
 | `evaluation/make_review.py` | Turns the pool into `REVIEW.md` for a human to correct. |
 | `evaluation/run_matching_eval.py` | Scores every ranker and writes `results/`. |
+| `evaluation/build_duplicate_pool.py` | Builds the near-duplicate pair pool (needs the database). |
+| `evaluation/run_duplicate_eval.py` | Threshold sweep and confusion matrix. Pure arithmetic, no database. |
 | `evaluation/results/` | **Committed.** A metric in a closed terminal cannot show a regression. |
 | `datasets/matching/` | `queries.jsonl`, `pairs.jsonl`, `labels.json`, `REVIEW.md`. |
+| `datasets/duplicates/` | `pairs.jsonl`, `labels.json` — 72 job pairs, binary labels. |
 
 `ml/embeddings/`, `ml/ranking/` and `ml/classification/` are placeholders from
 the original layout in ml.md section 8. The embedding provider and the scorers

@@ -403,7 +403,41 @@ Two stages (database.md §3.3):
    ingest and unnecessary.
 
 **Evaluation:** `ml/datasets/duplicates/` — labelled duplicate/non-duplicate pairs. Targets:
-precision ≥ 0.95, recall ≥ 0.85, with a reported confusion matrix.
+precision >= 0.95, recall >= 0.85, with a reported confusion matrix.
+
+**Built and measured in Phase 6.3-6.4.** `backend/app/services/job/near_duplicate.py` is stage two;
+`ml/evaluation/results/duplicates.md` holds the numbers over 72 labelled pairs.
+
+| Threshold | Precision | Recall | F1 |
+|---|---|---|---|
+| 0.95 (specified above) | 0.750 | **1.000** | **0.857** |
+| **0.97 (shipped)** | **1.000** | 0.667 | 0.800 |
+| _target_ | 0.95 | 0.85 | |
+
+**Neither threshold meets both targets**, and with three true duplicates in the corpus neither could
+be shown to — reclassifying one pair moves recall by a third. 0.95 has the better F1 and perfect
+recall; 0.97 ships anyway because the errors are asymmetric. A false positive sets
+`status = 'DUPLICATE'` and hides a real posting from every user; a false negative leaves a duplicate
+in a list that already shows it. Precision is the side to protect when the action is destructive.
+
+Three things the measurement established that this section assumed:
+
+- **Stage one catches none of these.** The content hash finds a posting pasted twice verbatim, and
+  none of the 72 pooled pairs are that. Stage two is doing work stage one cannot, which was the
+  premise but had never been checked.
+- **Company boilerplate dominates the cosine.** The single false positive at 0.95 is a same-employer
+  pair — a 15-year engineering *manager* against a 5-year *engineer* — scoring 0.960 on several
+  identical paragraphs of marketing copy that describe neither role. `description_clean` is
+  documented as boilerplate-stripped and does not remove this kind. **Fixing that is a better lever
+  than moving any threshold**, it helps the semantic ranking dimension equally, and unlike a
+  threshold it needs no larger labelled set to justify.
+- **The pool floor has to sit well below the threshold.** It starts at 0.88, because pooling only
+  pairs above the decision boundary makes recall 1.0 by construction — the same trap Recall@200 fell
+  into in section 4.3.
+
+**Nothing is marked automatically.** The detector returns candidates; no code sets
+`status = 'DUPLICATE'`. At 0.750 precision that would hide real jobs, and the column plus
+`canonical_job_id` have been in place since Phase 5 for when the evidence supports acting.
 
 > Precision is weighted heavily. A false positive **hides a real job from the user** — a silent
 > failure they can never discover. A false negative shows a duplicate, which is merely annoying and

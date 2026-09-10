@@ -5,9 +5,9 @@ parses job descriptions, ranks jobs by personalized fit using hybrid semantic + 
 identifies skill gaps, suggests grounded resume improvements, tracks application outcomes, and
 conducts adaptive AI mock interviews.
 
-> **Status:** Phases 1–5.8 complete, and Phase 6 is nearly done — 6.1 (embeddings), 6.2 (the
-> explainable match score) and 6.3 (recommendations) are finished, and 6.4's matching
-> evaluation is built and reported. Near-duplicate detection is the remaining piece.
+> **Status:** Phases 1–6 complete. 6.1 (embeddings), 6.2 (the explainable match score),
+> 6.3 (recommendations) and 6.4 (evaluation, including near-duplicate detection) are all
+> done and measured. Phase 7 is next.
 
 ---
 
@@ -112,7 +112,7 @@ Read these in order:
 | 6.1 | Embeddings — `pgvector`, local model, "Similar jobs" | ✅ Done⁵ |
 | 6.2 | Hybrid explainable score — six dimensions, `/jobs/{id}/match` | ✅ Done⁶ |
 | 6.3 | Recommendations — two-stage retrieval, ranked list, dashboard tile | ✅ Done⁷ |
-| 6.4 | Evaluation — labelled dataset, metrics, weight tuning, near-duplicates | ◐ Part done⁸ |
+| 6.4 | Evaluation — labelled dataset, metrics, weight tuning, near-duplicates | ✅ Done⁸ ⁹ |
 | 7 | Career intelligence — skill gaps, learning paths, resume optimization | ⬜ |
 | 8 | Application system — tracking, analytics, outcome analysis | ⬜ |
 | 9 | AI interview — question generation, adaptive engine, evaluation | ⬜ |
@@ -243,7 +243,34 @@ deliberately includes jobs the retrieval stage never returned**; without them it
 `Python- React, Next JS Fullstack Engineer` posting that matches the real resume closely and which
 stage one simply lost.
 
-Still to do in this step: near-duplicate detection and its own labelled dataset.
+Near-duplicate detection, the other half of this step, is covered in the next note.
+
+⁹ **Catching the same job posted twice — and finding out the harder problem is boilerplate.**
+
+The first stage of duplicate detection has existed since Phase 5: a hash of the cleaned description,
+which catches a posting pasted twice verbatim. This is the second stage, for the same role *reworded*
+— or listed by both an agency and the employer — where no hash can match. It compares embeddings,
+but only against postings from the same company or with a similar title, so it stays cheap per
+posting instead of scanning the corpus.
+
+**Measured on 72 labelled pairs, of which three are genuinely duplicates.** The threshold `ml.md`
+specified (0.95) catches all three but also flags one real job as a copy: precision 0.750, recall
+1.000. Raising it to 0.97 gives perfect precision and misses one duplicate: 1.000 and 0.667. Neither
+hits both targets, and with three positives neither could — reclassifying one pair swings recall by a
+third.
+
+It ships at 0.97 because **the two mistakes cost differently**. Flagging a real posting as a
+duplicate hides it from everyone; missing one leaves a duplicate in a list that already has it. And
+**nothing is marked automatically** — the detector reports candidates and a person decides, because
+at 0.750 precision an automatic rule would quietly hide real jobs.
+
+Two things worth more than the threshold. Stage one catches **none** of these 72 pairs, which
+confirms stage two is doing work the hash cannot — that was the assumption and had never been
+checked. And the one false positive is revealing: a 15-year engineering *manager* role scored 0.960
+against a 5-year *engineer* role at the same company, almost entirely on several identical paragraphs
+of company marketing copy opening both adverts. `description_clean` is supposed to strip boilerplate
+and does not strip that. Fixing it would sharpen duplicate detection *and* the semantic match score,
+and needs no extra labelling to justify — which makes it the better thing to do next.
 
 ⁴ **Variety, not recency.** Measurement settled this: filtering the provider to the last three days
 returned nothing, the last week returned nothing, and an unasked role-and-city combination returned

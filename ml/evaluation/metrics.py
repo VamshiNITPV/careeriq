@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 #: Labels at or above this count as relevant for the binary metrics.
 RELEVANT_AT = 2
@@ -165,3 +166,77 @@ def _tied_ranks(values: Sequence[float]) -> list[float]:
             ranks[order[index]] = shared
         position = end + 1
     return ranks
+
+
+@dataclass(frozen=True, slots=True)
+class Confusion:
+    """A binary confusion matrix, for detection rather than ranking.
+
+    Named fields rather than a 2x2 list, because `matrix[1][0]` is a coin flip
+    between false positive and false negative every time someone reads it, and
+    the two have completely different costs here: a false positive hides a real
+    job from users, a false negative leaves a duplicate in the list.
+    """
+
+    true_positives: int
+    false_positives: int
+    false_negatives: int
+    true_negatives: int
+
+    @property
+    def precision(self) -> float | None:
+        """Of what was flagged, how much should have been.
+
+        `None` when nothing was flagged at all — 0/0. Reporting 0.0 would say the
+        detector was wrong about everything it claimed, when it claimed nothing.
+        """
+        flagged = self.true_positives + self.false_positives
+        return self.true_positives / flagged if flagged else None
+
+    @property
+    def recall(self) -> float | None:
+        """Of what should have been flagged, how much was.
+
+        `None` when there is nothing to find, which is a statement about the
+        dataset rather than about the detector.
+        """
+        actual = self.true_positives + self.false_negatives
+        return self.true_positives / actual if actual else None
+
+    @property
+    def f1(self) -> float | None:
+        p, r = self.precision, self.recall
+        if p is None or r is None or p + r == 0:
+            return None
+        return 2 * p * r / (p + r)
+
+
+def confusion_at(scores: Sequence[float], labels: Sequence[int], threshold: float) -> Confusion:
+    """Classify by `score >= threshold` and count the four outcomes.
+
+    `>=` rather than `>`, so a threshold quoted as "0.95" includes a pair that
+    scores exactly 0.95. The difference is invisible until a score lands on the
+    boundary, and then it silently changes the answer.
+    """
+    if len(scores) != len(labels):
+        raise ValueError("scores and labels must be the same length")
+
+    counts = {"tp": 0, "fp": 0, "fn": 0, "tn": 0}
+    for score, label in zip(scores, labels, strict=True):
+        flagged = score >= threshold
+        positive = label == 1
+        if flagged and positive:
+            counts["tp"] += 1
+        elif flagged:
+            counts["fp"] += 1
+        elif positive:
+            counts["fn"] += 1
+        else:
+            counts["tn"] += 1
+
+    return Confusion(
+        true_positives=counts["tp"],
+        false_positives=counts["fp"],
+        false_negatives=counts["fn"],
+        true_negatives=counts["tn"],
+    )

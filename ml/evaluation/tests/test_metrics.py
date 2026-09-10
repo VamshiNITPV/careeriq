@@ -14,6 +14,7 @@ import pytest
 
 from evaluation.metrics import (
     RELEVANT_AT,
+    confusion_at,
     dcg,
     ndcg_at_k,
     precision_at_k,
@@ -175,3 +176,54 @@ class TestSpearman:
         )
         assert spearman(xs, ys) == pytest.approx(expected)
         assert not math.isnan(expected)
+
+
+class TestConfusion:
+    def test_counts_the_four_outcomes(self):
+        scores = [0.99, 0.96, 0.90, 0.50]
+        labels = [1, 0, 1, 0]
+        c = confusion_at(scores, labels, 0.95)
+        assert (c.true_positives, c.false_positives, c.false_negatives, c.true_negatives) == (
+            1,
+            1,
+            1,
+            1,
+        )
+        assert c.precision == pytest.approx(0.5)
+        assert c.recall == pytest.approx(0.5)
+        assert c.f1 == pytest.approx(0.5)
+
+    def test_the_boundary_is_inclusive(self):
+        """A threshold quoted as 0.95 must include a pair scoring exactly 0.95.
+
+        Invisible until a score lands on the boundary, and then it silently
+        changes the answer — which is why it is pinned.
+        """
+        assert confusion_at([0.95], [1], 0.95).true_positives == 1
+        assert confusion_at([0.95], [1], 0.9500001).false_negatives == 1
+
+    def test_flagging_nothing_gives_no_precision_rather_than_zero(self):
+        """0/0. Reporting 0.0 would say the detector was wrong about everything
+        it claimed, when it claimed nothing at all."""
+        c = confusion_at([0.1, 0.2], [1, 0], 0.95)
+        assert c.precision is None
+        assert c.recall == 0.0
+
+    def test_nothing_to_find_gives_no_recall_rather_than_zero(self):
+        # A statement about the dataset, not about the detector.
+        c = confusion_at([0.99], [0], 0.95)
+        assert c.recall is None
+        assert c.precision == 0.0
+
+    def test_f1_is_none_when_either_side_is_undefined(self):
+        assert confusion_at([0.1], [0], 0.95).f1 is None
+
+    def test_a_perfect_detector(self):
+        c = confusion_at([0.99, 0.10], [1, 0], 0.95)
+        assert c.precision == 1.0
+        assert c.recall == 1.0
+        assert c.f1 == 1.0
+
+    def test_mismatched_lengths_are_a_programming_error(self):
+        with pytest.raises(ValueError):
+            confusion_at([0.9], [1, 0], 0.5)

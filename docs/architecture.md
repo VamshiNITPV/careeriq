@@ -646,6 +646,14 @@ plausible." That is unmeasurable and unfalsifiable.
 | Job matching / ranking | ≥100 labelled resume–JD pairs (high/medium/low relevance) | Precision@5, Precision@10, NDCG@10, Recall@200 (retrieval stage) |
 | Skill extraction | Hand-annotated resumes with gold skill sets | Precision, Recall, F1 |
 | Duplicate detection | Labelled duplicate/non-duplicate job pairs | Precision, Recall, confusion matrix |
+
+> **Discharged in Phase 6.4, and the result is a trade-off rather than a pass.** 72 labelled pairs,
+> three of them duplicates. ml.md's 0.95 threshold measures precision 0.750 / recall 1.000; the
+> shipped 0.97 measures 1.000 / 0.667. Neither meets both targets and three positives cannot settle
+> it. 0.97 ships because marking a posting `DUPLICATE` hides it from users, so precision is the side
+> to protect — and **nothing marks automatically**, which is the decision that follows from 0.750.
+> The more useful finding was that company boilerplate dominates the cosine: the one false positive
+> pairs a manager role with an engineer role at the same employer on shared marketing copy.
 | Interview scoring | Human-scored answers | Correlation and mean absolute error vs human scores |
 
 **Amendment, 2026-09-10 — the matching harness is built, and the sample size is the finding.**
@@ -1116,6 +1124,7 @@ production value. Missing required config fails loudly at startup, not at first 
 | 2026-09-02 | ADR-017 added. Transactional email, password reset and email verification, after review found that a forgotten password left a user permanently locked out. |
 | 2026-09-02 | ADR-018 added. Resume ingestion, object storage, and the interim background task runner. |
 | 2026-09-04 | ADR-019 added. Job data sourcing from permitted APIs, after the corpus reached Phase 6 with seven hand-entered postings and no way to grow. |
+| 2026-09-10 | ADR-015: the duplicate-detection row discharged. 72 labelled pairs, 3 duplicates; ml.md's 0.95 threshold gives precision 0.750 / recall 1.000, the shipped 0.97 gives 1.000 / 0.667, and neither meets both targets on three positives. Nothing is marked automatically. Boilerplate in `description_clean` is the real lever. |
 | 2026-09-10 | ADR-015 amended. Phase 6.4: the matching harness is built and the hybrid beats every baseline on NDCG@10 (0.611 vs 0.400 for raw cosine), vindicating ADR-005; NDCG@10 misses its 0.75 target. The dataset requirement is met at 122 pairs but covers only **2 distinct people**, so per-query metrics are anecdote-grade and weight tuning is refused in favour of an ablation. |
 | 2026-09-09 | ADR-006 amended. Phase 6.3: two-stage retrieval built and measured. The Redis cache this ADR permits was **not** needed — the first cut's 535 ms p95 was 400 database round trips, not the scoring, and batching removed it (47.8 ms p95). Also records two things pgvector and cursor paging make you learn the hard way. |
 | 2026-09-09 | ADR-005 amended. Phase 6.2: a dimension whose inputs are missing scores a neutral 0.5 and keeps its documented weight — renormalising would break AC2 and let a job rank higher for an employer's blank field. Scorers live in `app/services/matching/`; no `job_matches` row is written yet. |
