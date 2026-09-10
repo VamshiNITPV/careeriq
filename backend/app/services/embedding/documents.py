@@ -65,11 +65,13 @@ def _lines(label: str, values: list[str]) -> list[str]:
 def build_job_document(job: Job) -> str:
     """The text embedded for one job.
 
-    Requirements and responsibilities come from the parser rather than
-    `description_raw`, so company boilerplate never reaches the model. When the
-    parse found neither, the raw description is the fallback — a job with no
-    document at all would simply be missing from every comparison, which is
-    worse than a noisy one.
+    Requirements and responsibilities come from the parser and lead the document,
+    because they describe the role rather than the employer.
+
+    **The description follows as well, not only as a fallback.** It was either/or
+    until that was measured, on the reasoning that company boilerplate should be
+    kept away from the model. The measurement contradicted it — see the comment at
+    the description line.
     """
     required: list[str] = []
     preferred: list[str] = []
@@ -91,8 +93,23 @@ def build_job_document(job: Job) -> str:
     parts.extend(_lines("Responsibilities", job.responsibilities))
     parts.extend(_lines("Requirements", job.requirements))
 
-    if not job.responsibilities and not job.requirements:
-        parts.append(f"Description: {job.description_raw.strip()}")
+    # The description is included **as well as** the extracted sections, not only
+    # when they are missing.
+    #
+    # That was either/or until it was measured. Improving the parser so 62 more
+    # postings yielded sections made ranking *worse*, not better — hybrid NDCG@10
+    # 0.661 to 0.624, embedding-only 0.400 to 0.302, Recall@200 0.954 to 0.917 —
+    # because a dozen extracted bullets carry less than the paragraphs they came
+    # from. Skills named in prose, seniority cues and domain context all live in
+    # the text the either/or was discarding.
+    #
+    # Structured fields lead because they are the highest-signal part and the
+    # character cap truncates from the end. `description_clean`, never
+    # `description_raw`: the raw text still holds the zero-width characters,
+    # non-breaking spaces and inconsistent dashes `clean_description` removes.
+    description = (job.description_clean or job.description_raw or "").strip()
+    if description:
+        parts.append(f"Description: {description}")
 
     return "\n".join(parts)[:_MAX_CHARS]
 

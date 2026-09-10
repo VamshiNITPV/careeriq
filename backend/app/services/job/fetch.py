@@ -24,6 +24,7 @@ from app.integrations.jobs.base import (
 from app.models.enums import JobSource
 from app.schemas.job import MAX_JOB_URL
 from app.schemas.urls import normalize_url
+from app.services.job.demand import recompute_demand_scores
 from app.services.job.pipeline import UnparseableJobError
 from app.services.job.service import ImportFailure, JobService, is_duplicate_row
 
@@ -216,6 +217,18 @@ async def fetch_and_import(
         cursor = page.next_cursor
         if cursor is None:
             break
+
+    if created:
+        # Demand is a property of the live corpus, so it is stale the moment the
+        # corpus changes — and it weights 25% of every match score through
+        # `score_skill`. Recomputed here rather than on a timer because this is
+        # the only place postings are added in bulk, and one UPDATE over 267
+        # skills is cheaper than the decision to schedule it.
+        #
+        # Only when something was created: a fetch that found nothing new has
+        # changed nothing to recompute.
+        scored, total, _ = await recompute_demand_scores(service.jobs.session)
+        log.info("skill demand recomputed", scored=scored, total=total)
 
     log.info(
         "job fetch finished",

@@ -41,6 +41,7 @@ change.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import pathlib
 import statistics
@@ -213,9 +214,19 @@ async def main() -> dict[str, Any]:
             )
 
             for job_id, score in hybrid.items():
-                pair_rows.append({"score": score, "label": pooled_labels[job_id]})
+                pair_rows.append(
+                    # `key` identifies the pair for the comparability digest: two
+                    # runs over the same pairs must produce the same digest, and a
+                    # different one is the signal that cross-run deltas are
+                    # confounded by a moved comparison set.
+                    {
+                        "key": f"{query_id}:{job_id}",
+                        "score": score,
+                        "label": pooled_labels[job_id],
+                    }
+                )
 
-    return _assemble(per_query, pair_rows)
+    return _assemble(per_query, pair_rows, labelled_pairs=len(pairs))
 
 
 def _write_report(report: dict[str, Any]) -> None:
@@ -266,7 +277,21 @@ def _mean(values: list[float | None]) -> float | None:
     return statistics.fmean(present) if present else None
 
 
-def _assemble(per_query: list[dict[str, Any]], pair_rows: list[dict[str, Any]]) -> dict[str, Any]:
+def _ranked_pairs_digest(pair_rows: list[dict[str, Any]]) -> str:
+    """A short, order-independent fingerprint of which pairs were actually ranked.
+
+    Scores are deliberately excluded: the digest answers "was this measured over
+    the same pairs?", which must stay true when the ranker improves.
+    """
+    joined = "|".join(sorted(row["key"] for row in pair_rows))
+    return hashlib.sha256(joined.encode()).hexdigest()[:12]
+
+
+def _assemble(
+    per_query: list[dict[str, Any]],
+    pair_rows: list[dict[str, Any]],
+    labelled_pairs: int,
+) -> dict[str, Any]:
     names = list(per_query[0]["rankers"])
     overall = {
         name: {
@@ -283,6 +308,8 @@ def _assemble(per_query: list[dict[str, Any]], pair_rows: list[dict[str, Any]]) 
         "relevant_threshold": RELEVANT_AT,
         "queries": len(per_query),
         "pairs": len(pair_rows),
+        "labelled_pairs": labelled_pairs,
+        "ranked_pairs_digest": _ranked_pairs_digest(pair_rows),
         "label_distribution": dict(sorted(Counter(r["label"] for r in pair_rows).items())),
         "per_query": per_query,
         "rankers": overall,
@@ -300,6 +327,34 @@ def _assemble(per_query: list[dict[str, Any]], pair_rows: list[dict[str, Any]]) 
 
 def _cell(value: float | None) -> str:
     return "n/a" if value is None else f"{value:.3f}"
+
+
+def _embedding_vs_random(report: dict[str, Any]) -> list[str]:
+    """State which of raw cosine and a shuffle won, rather than asserting it.
+
+    This paragraph used to hardcode "random also beats embedding-only", which was
+    true when it was written and false two runs later — a generated report that
+    contradicts the table printed directly above it. The observation about
+    seniority is an observation and survives either way; the comparison is read
+    off the numbers.
+    """
+    cosine = report["rankers"]["embedding_only"]["ndcg@10"]
+    shuffle = report["rankers"]["random"]["ndcg@10"]
+    verdict = (
+        f"**A shuffle beats raw cosine on NDCG@10** ({_cell(shuffle)} against {_cell(cosine)}), "
+        "which is worth dwelling on rather than dismissing."
+        if shuffle > cosine
+        else f"**Raw cosine beats a shuffle on NDCG@10** ({_cell(cosine)} against "
+        f"{_cell(shuffle)}), so similarity alone does carry ordering information — but not much."
+    )
+    return [
+        verdict + " Raw cosine reliably surfaces postings that *read* like the resume and are "
+        "wrong on seniority — a near-duplicate of the candidate's own words attached to a role "
+        "demanding eight years. That is the failure ADR-005 predicted of pure similarity, and the "
+        f"hybrid's {_cell(report['rankers']['hybrid']['ndcg@10'])} against cosine's "
+        f"{_cell(cosine)} is the clearest evidence here that the extra dimensions earn their "
+        "complexity.",
+    ]
 
 
 def _markdown(report: dict[str, Any]) -> str:
@@ -368,14 +423,21 @@ def _markdown(report: dict[str, Any]) -> str:
         "relevant and landing one first is close to a coin toss. A metric a shuffle can max out "
         "discriminates nothing here.",
         "",
-        "**Random also beats embedding-only on NDCG@10** "
-        f"({_cell(report['rankers']['random']['ndcg@10'])} against "
-        f"{_cell(report['rankers']['embedding_only']['ndcg@10'])}), which is worth dwelling on "
-        "rather than dismissing. Raw cosine reliably surfaces postings that *read* like the resume "
-        "and are wrong on seniority — a near-duplicate of the candidate's own words attached to a "
-        "role demanding eight years. That is precisely the failure ADR-005 predicted of pure "
-        "similarity, and it is the clearest evidence in this report that the hybrid is earning its "
-        "complexity.",
+        *_embedding_vs_random(report),
+        "",
+        "### Is this run comparable with the last one?",
+        "",
+        f"**Ranked-pair digest `{report['ranked_pairs_digest']}`** over "
+        f"{report['pairs']} of {report['labelled_pairs']} labelled pairs, label distribution "
+        f"{report['label_distribution']}. "
+        "`pairs.jsonl` is pinned in git, but only pairs whose jobs are still active and embedded "
+        "get ranked, so the *comparison set* can move even when the dataset does not. "
+        "**If the digest differs from the run you are comparing against, the deltas are "
+        "confounded** — part of any change is a different set of pairs, not a better ranker.",
+        "",
+        "`random` is the detector for exactly this. It is a seeded shuffle of the job ids and "
+        "never reads an embedding, so it cannot move when the model or the documents change. "
+        "A shifted `random` means the comparison set shifted.",
         "",
         "## Pair-level",
         "",

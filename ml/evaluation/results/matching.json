@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-10T07:00:42.023297+00:00",
+  "generated_at": "2026-09-10T11:06:20.584684+00:00",
   "ranking_version": "v1-hand-tuned",
   "weights": {
     "semantic": "0.35",
@@ -12,11 +12,13 @@
   "relevant_threshold": 2,
   "queries": 2,
   "pairs": 102,
+  "labelled_pairs": 122,
+  "ranked_pairs_digest": "b7d87d92a229",
   "label_distribution": {
-    "0": 11,
-    "1": 30,
+    "0": 13,
+    "1": 29,
     "2": 39,
-    "3": 22
+    "3": 21
   },
   "per_query": [
     {
@@ -24,51 +26,53 @@
       "kind": "real-resume",
       "resume_chars": 3701,
       "labelled": 63,
-      "ranked": 53,
+      "ranked": 50,
       "relevant": 27,
-      "recall@200": 0.9629629629629629,
+      "recall@200": 0.8888888888888888,
       "recall_missed": [
-        "Python- React, Next JS Fullstack Engineer"
+        "Python- React, Next JS Fullstack Engineer",
+        "Python With Gen AI Developer",
+        "AI Engineering Interns | Claude & Engineering AI (Pune)"
       ],
       "rankers": {
         "hybrid": {
-          "precision@5": 0.8,
+          "precision@5": 1.0,
           "precision@10": 0.8,
-          "ndcg@10": 0.5898514941114159,
+          "ndcg@10": 0.6268405331332917,
           "mrr": 1.0
         },
         "embedding_only": {
-          "precision@5": 0.2,
-          "precision@10": 0.4,
-          "ndcg@10": 0.2861904295860419,
-          "mrr": 0.25
+          "precision@5": 0.4,
+          "precision@10": 0.3,
+          "ndcg@10": 0.40642205582742985,
+          "mrr": 1.0
         },
         "skill_only": {
           "precision@5": 0.8,
-          "precision@10": 0.8,
-          "ndcg@10": 0.59732551084333,
+          "precision@10": 0.9,
+          "ndcg@10": 0.7882150800797864,
           "mrr": 1.0
         },
         "tfidf": {
-          "precision@5": 0.4,
+          "precision@5": 0.6,
           "precision@10": 0.6,
-          "ndcg@10": 0.3851888363027646,
+          "ndcg@10": 0.4064088494217605,
           "mrr": 0.5
         },
         "random": {
-          "precision@5": 0.8,
-          "precision@10": 0.6,
-          "ndcg@10": 0.5609763816000234,
+          "precision@5": 0.6,
+          "precision@10": 0.4,
+          "ndcg@10": 0.3294590906164143,
           "mrr": 1.0
         }
       },
       "ablation": {
-        "semantic": 0.5296848506614973,
-        "skill": 0.5996981506964159,
-        "experience": 0.3063495001443122,
-        "education": 0.6087146263635635,
-        "location": 0.7301785569464296,
-        "salary": 0.5505636382182982
+        "semantic": 0.6534759259254199,
+        "skill": 0.6101200233808042,
+        "experience": 0.6042049285714728,
+        "education": 0.6268405331332917,
+        "location": 0.7679398519954083,
+        "salary": 0.6386737646027655
       }
     },
     {
@@ -76,30 +80,29 @@
       "kind": "test-fixture",
       "resume_chars": 1402,
       "labelled": 59,
-      "ranked": 49,
+      "ranked": 52,
       "relevant": 37,
-      "recall@200": 0.9459459459459459,
+      "recall@200": 0.972972972972973,
       "recall_missed": [
-        "AI/ML Engineer (Open-Source LLM \u2013 BFSI Domain)",
-        "python developer 5 ,pyspark ,django flask (Bengaluru)"
+        "AI/ML Engineer (Open-Source LLM \u2013 BFSI Domain)"
       ],
       "rankers": {
         "hybrid": {
           "precision@5": 0.8,
           "precision@10": 0.9,
-          "ndcg@10": 0.632761848760762,
+          "ndcg@10": 0.629441600910576,
           "mrr": 0.5
         },
         "embedding_only": {
-          "precision@5": 0.8,
-          "precision@10": 0.8,
-          "ndcg@10": 0.5137991835459235,
+          "precision@5": 1.0,
+          "precision@10": 0.9,
+          "ndcg@10": 0.5540632311430144,
           "mrr": 1.0
         },
         "skill_only": {
           "precision@5": 0.8,
           "precision@10": 0.8,
-          "ndcg@10": 0.4281758294776367,
+          "ndcg@10": 0.42899746596727273,
           "mrr": 0.5
         },
         "tfidf": {
@@ -111,61 +114,61 @@
         "random": {
           "precision@5": 0.4,
           "precision@10": 0.5,
-          "ndcg@10": 0.45436607308023724,
+          "ndcg@10": 0.36022773465228564,
           "mrr": 1.0
         }
       },
       "ablation": {
-        "semantic": 0.48500967674812706,
-        "skill": 0.8791712690774833,
-        "experience": 0.5343245806000888,
-        "education": 0.5665137284741505,
-        "location": 0.632761848760762,
-        "salary": 0.632761848760762
+        "semantic": 0.4934539514793977,
+        "skill": 0.8357442077318847,
+        "experience": 0.575288469944156,
+        "education": 0.5604197010641754,
+        "location": 0.629441600910576,
+        "salary": 0.629441600910576
       }
     }
   ],
   "rankers": {
     "hybrid": {
-      "precision@5": 0.8,
+      "precision@5": 0.9,
       "precision@10": 0.8500000000000001,
-      "ndcg@10": 0.611306671436089,
+      "ndcg@10": 0.6281410670219338,
       "mrr": 0.75
     },
     "embedding_only": {
-      "precision@5": 0.5,
-      "precision@10": 0.6000000000000001,
-      "ndcg@10": 0.3999948065659827,
-      "mrr": 0.625
+      "precision@5": 0.7,
+      "precision@10": 0.6,
+      "ndcg@10": 0.4802426434852221,
+      "mrr": 1.0
     },
     "skill_only": {
       "precision@5": 0.8,
-      "precision@10": 0.8,
-      "ndcg@10": 0.5127506701604834,
+      "precision@10": 0.8500000000000001,
+      "ndcg@10": 0.6086062730235295,
       "mrr": 0.75
     },
     "tfidf": {
-      "precision@5": 0.6000000000000001,
+      "precision@5": 0.7,
       "precision@10": 0.6499999999999999,
-      "ndcg@10": 0.40767906316060576,
+      "ndcg@10": 0.41828906972010366,
       "mrr": 0.75
     },
     "random": {
-      "precision@5": 0.6000000000000001,
-      "precision@10": 0.55,
-      "ndcg@10": 0.5076712273401303,
+      "precision@5": 0.5,
+      "precision@10": 0.45,
+      "ndcg@10": 0.34484341263435,
       "mrr": 1.0
     }
   },
-  "recall@200": 0.9544544544544544,
-  "score_label_spearman": 0.3917075653705541,
+  "recall@200": 0.9309309309309309,
+  "score_label_spearman": 0.38595313705269396,
   "ablation_ndcg@10": {
-    "semantic": 0.5073472637048122,
-    "skill": 0.7394347098869496,
-    "experience": 0.42033704037220054,
-    "education": 0.587614177418857,
-    "location": 0.6814702028535958,
-    "salary": 0.5916627434895301
+    "semantic": 0.5734649387024088,
+    "skill": 0.7229321155563444,
+    "experience": 0.5897466992578144,
+    "education": 0.5936301170987335,
+    "location": 0.6986907264529921,
+    "salary": 0.6340576827566707
   },
   "targets": {
     "precision@5": 0.7,

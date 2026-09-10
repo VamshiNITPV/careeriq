@@ -16,6 +16,7 @@ import pytest
 
 from app.models.enums import EducationLevel, SalaryPeriod, SkillRequirement, WorkMode
 from app.services.matching.dimensions import (
+    _RARITY_FLOOR,
     DimensionScore,
     SkillRequirementInput,
     classify_skills,
@@ -25,6 +26,7 @@ from app.services.matching.dimensions import (
     score_salary,
     score_semantic,
     score_skill,
+    skill_rarity,
     years_from_history,
 )
 from app.services.matching.weights import (
@@ -532,3 +534,110 @@ def test_every_unknown_reason_says_what_we_did_instead():
     nowhere, and the breakdown then looks broken rather than honest."""
     for reason in _every_unknown_reason():
         assert "neutral" in reason, reason
+
+
+class TestSkillRarity:
+    """Weighting requirements by how rare they are in the live market.
+
+    Added in the quality pass after Phase 6.4: the ablation showed the skill
+    dimension was *subtracting* from NDCG@10, and the measured cause was
+    dilution — jobs list 18.5 skills on average and the commonest are close to
+    universal.
+    """
+
+    def test_no_demand_score_reproduces_the_flat_behaviour(self):
+        """A fresh database has never run the recompute.
+
+        The weighting must collapse to exactly what it replaced, or deploying
+        this would silently change every score in an environment that cannot
+        support it yet.
+        """
+        held, missing = req("Python"), req("COBOL")
+        buckets = classify_skills(
+            requirements=[held, missing], candidate_skill_ids=[held.skill_id], parent_of={}
+        )
+        flat = score_skill(buckets=buckets, has_candidate_skills=True)
+        explicit_none = score_skill(
+            buckets=buckets,
+            has_candidate_skills=True,
+            demand={held.skill_id: None, missing.skill_id: None},
+        )
+        assert flat.score == explicit_none.score == Decimal("0.5000")
+
+    def test_a_rare_skill_you_have_outweighs_a_common_one_you_lack(self):
+        """The whole point of the change.
+
+        Under flat weights, holding one of two required skills always scores
+        0.5 regardless of which. Missing a skill three quarters of the market
+        asks for says far less about fit than missing a specialism.
+        """
+        rare, common = req("Rust"), req("Communication")
+        buckets = classify_skills(
+            requirements=[rare, common], candidate_skill_ids=[rare.skill_id], parent_of={}
+        )
+        result = score_skill(
+            buckets=buckets,
+            has_candidate_skills=True,
+            demand={rare.skill_id: Decimal("0.02"), common.skill_id: Decimal("0.75")},
+        )
+        assert result.score > Decimal("0.8")
+
+    def test_and_the_reverse_costs_you(self):
+        rare, common = req("Rust"), req("Communication")
+        buckets = classify_skills(
+            requirements=[rare, common], candidate_skill_ids=[common.skill_id], parent_of={}
+        )
+        result = score_skill(
+            buckets=buckets,
+            has_candidate_skills=True,
+            demand={rare.skill_id: Decimal("0.02"), common.skill_id: Decimal("0.75")},
+        )
+        assert result.score < Decimal("0.2")
+
+    def test_rarity_rises_as_demand_falls(self):
+        assert skill_rarity(Decimal("0.75")) < skill_rarity(Decimal("0.40"))
+        assert skill_rarity(Decimal("0.40")) < skill_rarity(Decimal("0.05"))
+
+    def test_a_universal_skill_is_worth_almost_nothing(self):
+        # log(1/1) = 0. A requirement every posting names cannot separate one
+        # candidate from another, and the weight says so.
+        assert skill_rarity(Decimal("1.0")) == Decimal("0")
+
+    def test_the_floor_caps_how_much_one_obscure_tag_can_dominate(self):
+        """Without it, `demand` of 0 divides by zero and 0.0001 would decide the
+        dimension by itself on the strength of being rare rather than important."""
+        assert skill_rarity(Decimal("0")) == skill_rarity(Decimal("0.001"))
+        assert skill_rarity(Decimal("0")) == skill_rarity(_RARITY_FLOOR)
+
+    def test_a_posting_of_only_universal_skills_is_neutral_not_zero(self):
+        """Every weight is zero, so there is no ratio to take.
+
+        Scoring it 0 would tell the candidate they match nothing, when what
+        actually happened is that the posting listed nothing discriminating.
+        """
+        everyday = req("Communication")
+        buckets = classify_skills(
+            requirements=[everyday], candidate_skill_ids=[uuid.uuid4()], parent_of={}
+        )
+        result = score_skill(
+            buckets=buckets,
+            has_candidate_skills=True,
+            demand={everyday.skill_id: Decimal("1.0")},
+        )
+        assert result.status is DimensionStatus.NEEDS_DATA
+        assert result.score == NEUTRAL
+
+    def test_a_skill_absent_from_the_demand_map_falls_back_to_flat(self):
+        # A job requiring a skill added since the last recompute must still be
+        # scored, not skipped.
+        held, unknown = req("Python"), req("BrandNewFramework")
+        buckets = classify_skills(
+            requirements=[held, unknown], candidate_skill_ids=[held.skill_id], parent_of={}
+        )
+        result = score_skill(
+            buckets=buckets,
+            has_candidate_skills=True,
+            demand={held.skill_id: Decimal("0.5")},
+        )
+        assert result.status is DimensionStatus.SCORED
+        assert Decimal("0") < result.score < Decimal("1")

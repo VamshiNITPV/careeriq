@@ -37,6 +37,9 @@ _HEADINGS: tuple[tuple[JobSectionType, tuple[str, ...]], ...] = (
             "preferred qualifications",
             "preferred skills",
             "preferred experience",
+            "preferred candidate profile",
+            "good-to-have skills",
+            "good to have skills",
             "nice to have",
             "nice-to-have",
             "nice to haves",
@@ -73,6 +76,24 @@ _HEADINGS: tuple[tuple[JobSectionType, tuple[str, ...]], ...] = (
             "our ideal candidate",
             "candidate profile",
             "eligibility",
+            # Also mined from real failures. Several of these are Naukri and
+            # Indian-portal standards, which is why the gap was this wide on a
+            # corpus of Indian postings.
+            "job requirements",
+            "candidate requirements",
+            "skills required",
+            "mandatory skills",
+            "key skills",
+            "technical skills",
+            "desired candidate profile",
+            "what you bring",
+            "what you'll bring",
+            "what you will bring",
+            "about you",
+            "ideal candidate",
+            "knowledge skills and abilities",
+            "you'll need",
+            "you will need",
         ),
     ),
     (
@@ -93,6 +114,23 @@ _HEADINGS: tuple[tuple[JobSectionType, tuple[str, ...]], ...] = (
             "in this role you will",
             "job description",
             "the opportunity",
+            # Mined from the 131 postings this parser produced nothing for.
+            # Folded form matters: `classify_heading` turns "&" into a space and
+            # collapses, so "Role & Responsibilities" arrives as
+            # "role responsibilities" — the ampersand spellings need their own
+            # entries rather than relying on the "and" forms above.
+            "role responsibilities",
+            "roles responsibilities",
+            "your responsibilities",
+            "role overview",
+            "about the role",
+            "what is the role",
+            "job summary",
+            "position summary",
+            "what you'll be working on",
+            "what you will be working on",
+            "essential duties",
+            "key deliverables",
         ),
     ),
     (
@@ -223,15 +261,55 @@ def section_map(sections: list[JobSection]) -> dict[JobSectionType, str]:
 
 
 # Bullet markers, for pulling responsibilities and requirements out as lists.
-_BULLET = re.compile(r"^[\s]*[•●▪◦‣*\-\u2013\u2014]\s+|^[\s]*\d+[.)]\s+")
+#
+# Extended after measuring this corpus rather than from a style guide: U+00B7
+# (middle dot) and U+2219 arrive in provider payloads, `o` is Word's
+# second-level bullet surviving a copy-paste, and U+00BB, `>` and `+` all
+# appear in real postings here.
+#
+# Written as escapes, not glyphs: en dash, em dash and middle dot are
+# indistinguishable from a hyphen and a full stop in source, so the escape is
+# what makes the intent reviewable. normalization.py makes the same choice.
+#
+# Two deliberate loosenings. Trailing whitespace is optional, because
+# "-Design APIs" with no space after the dash is common and was silently
+# skipped. And `o` matches only when whitespace follows, so a line opening
+# "or the team will..." is not read as a bullet.
+_BULLET = re.compile(
+    r"^[ \t]*(?:"
+    r"[\u2022\u25cf\u25aa\u25e6\u2023\u2219\u00b7*+>\u00bb\-\u2013\u2014]"
+    r"|o(?=\s)|\d+[.)])\s*"
+)
 
 
 def extract_bullets(text: str, *, limit: int = 30) -> list[str]:
-    """Pull bullet lines out of a section.
+    """Pull a section's items out as a list.
 
-    Only genuine bullets, never every line: a description written as prose
-    paragraphs would otherwise produce a "responsibilities" array containing the
-    whole posting, which is worse than an empty one.
+    Bullets first. When a section carries none, its **sentences** are used
+    instead — which is a deliberate reversal of the original rule here, so it is
+    worth saying why.
+
+    That rule was: never take every line, because prose would otherwise produce a
+    "responsibilities" array containing the whole posting. The concern was right
+    about an *unlabelled* description and wrong about a labelled section. When a
+    heading has been recognised, the text beneath it is bounded and is about that
+    subject, so sentences from it are exactly the items wanted. The whole-posting
+    failure cannot happen here: with no recognised heading there is no section to
+    read, and this is never reached.
+
+    Measured on the live corpus: 38 of 131 postings that produced nothing had a
+    correctly identified Responsibilities or Requirements section whose body was
+    prose, or bullets whose markers had been stripped upstream. Three shapes, all
+    handled by sentence splitting:
+
+      - genuine paragraphs
+      - one item per line with the marker gone, hard-wrapped mid-item, which
+        rejoins once newlines collapse to spaces
+      - items run together with no separator at all, "...using FastAPI.Build and
+        maintain..." — the boundary is the full stop against a capital
+
+    Sentences are only a fallback. A section with real bullets is unaffected, so
+    this cannot change what already worked.
     """
     bullets: list[str] = []
     for line in text.splitlines():
@@ -244,4 +322,37 @@ def extract_bullets(text: str, *, limit: int = 30) -> list[str]:
             bullets.append(cleaned)
         if len(bullets) >= limit:
             break
-    return bullets
+    return bullets or _sentences(text, limit=limit)
+
+
+#: A sentence boundary: a full stop, question or exclamation mark, followed
+#: either by whitespace or straight into a capital letter.
+#:
+#: The second case is the one that matters here. Provider payloads arrive with
+#: list markup flattened away, leaving "...using FastAPI.Build and maintain..."
+#: — no space, so splitting on "period plus space" alone finds nothing.
+#:
+#: The lookahead excludes a digit after the stop, so "3.5 years" and version
+#: numbers are not cut in half.
+_SENTENCE_END = re.compile(r"(?<=[.!?])(?=[ \t]+[A-Z]|[A-Z])")
+
+
+def _sentences(text: str, *, limit: int) -> list[str]:
+    """A section's prose as a list of items, for sections with no bullets."""
+    # Newlines first: an item hard-wrapped across two lines is one sentence, and
+    # it has to be rejoined before the boundaries can be found.
+    flat = re.sub(r"\s+", " ", text).strip()
+    if not flat:
+        return []
+
+    items: list[str] = []
+    for piece in _SENTENCE_END.split(flat):
+        cleaned = piece.strip(" .;")
+        # The same filters the bullet path uses, for the same reasons: two words
+        # excludes fragments, 300 characters excludes a wall of text that happens
+        # to contain no sentence boundary at all.
+        if len(cleaned.split()) >= 2 and len(cleaned) <= 300:
+            items.append(cleaned)
+        if len(items) >= limit:
+            break
+    return items

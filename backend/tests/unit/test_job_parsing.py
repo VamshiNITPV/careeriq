@@ -154,9 +154,24 @@ class TestBullets:
         text = "This is a prose paragraph that is not a bullet.\n- Build APIs\n* Review code"
         assert extract_bullets(text) == ["Build APIs", "Review code"]
 
-    def test_prose_only_yields_nothing(self) -> None:
-        # An array containing the whole posting is worse than an empty one.
-        assert extract_bullets("We are looking for someone great. You will do things.") == []
+    def test_prose_falls_back_to_sentences(self) -> None:
+        """Reversed deliberately in the Phase 6 quality pass.
+
+        This asserted `== []`, on the reasoning that an array containing the
+        whole posting is worse than an empty one. That was right about an
+        *unlabelled* description and wrong about a labelled section — and
+        `extract_bullets` is only ever called on a section body, never on a whole
+        description (`pipeline.parse_description`, `reparse.reparse_jobs`).
+
+        Measured cost of the old rule: 38 of 132 live postings had a correctly
+        identified Responsibilities or Requirements section whose body was prose,
+        and returned nothing, so the posting was embedded from its whole
+        description instead. See `test_job_parsing_real.py`.
+        """
+        assert extract_bullets("We are looking for someone great. You will do things.") == [
+            "We are looking for someone great",
+            "You will do things",
+        ]
 
 
 class TestWorkMode:

@@ -25,6 +25,20 @@ from app.models.skill import CandidateSkill, Skill
 
 
 @dataclass(frozen=True, slots=True)
+class SkillFacts:
+    """The two things the skill dimension needs to know about a skill.
+
+    Returned together because they live on the same row and are always wanted
+    together — `parent_of` for the one-level taxonomy credit, `demand` for the
+    rarity weight. A `demand` value of `None` means the score has never been
+    computed, which `skill_rarity` treats as "weight everything flat".
+    """
+
+    parent_of: dict[uuid.UUID, uuid.UUID | None]
+    demand: dict[uuid.UUID, Decimal | None]
+
+
+@dataclass(frozen=True, slots=True)
 class CandidateSnapshot:
     """One candidate, reduced to the fields the six dimensions read.
 
@@ -126,23 +140,29 @@ class MatchingRepository:
             return None
         return max(levels, key=lambda level: level.rank)
 
-    async def taxonomy_parents(
-        self, skill_ids: set[uuid.UUID]
-    ) -> dict[uuid.UUID, uuid.UUID | None]:
-        """Immediate parent of each of these skills, in one query.
+    async def skill_facts(self, skill_ids: set[uuid.UUID]) -> SkillFacts:
+        """Parent and market demand for each of these skills, in one query.
 
-        The one-level rule in `classify_skills` needs the parent of every skill
-        on both sides at once. Fetching them per requirement would be an N+1 in
-        the request path, and 6.3 multiplies that by two hundred jobs.
+        Both halves are needed together and both are columns on the same row, so
+        asking for them separately would be two round trips for one read. The
+        one-level taxonomy rule in `classify_skills` needs the parent of every
+        skill on both sides at once, and `score_skill` needs the demand score of
+        every requirement — fetching either per skill would be an N+1 in the
+        request path, multiplied by two hundred jobs in a recommendations call.
         """
         if not skill_ids:
-            return {}
+            return SkillFacts(parent_of={}, demand={})
         rows = (
             await self.session.execute(
-                select(Skill.id, Skill.parent_skill_id).where(Skill.id.in_(skill_ids))
+                select(Skill.id, Skill.parent_skill_id, Skill.demand_score).where(
+                    Skill.id.in_(skill_ids)
+                )
             )
         ).all()
-        return {row[0]: row[1] for row in rows}
+        return SkillFacts(
+            parent_of={row[0]: row[1] for row in rows},
+            demand={row[0]: row[2] for row in rows},
+        )
 
     #: Cosine between one resume version's vector and one job's, computed in the
     #: database. **No vector crosses the wire** — both are scalar subqueries, so

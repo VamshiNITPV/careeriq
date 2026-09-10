@@ -7,6 +7,7 @@ import { AddJobPage } from '@/pages/AddJobPage'
 import { DashboardPage } from '@/pages/DashboardPage'
 import { ForgotPasswordPage } from '@/pages/ForgotPasswordPage'
 import { JobDetailPage } from '@/pages/JobDetailPage'
+import { RecommendationsPage } from '@/pages/RecommendationsPage'
 import { JobsPage } from '@/pages/JobsPage'
 import { LoginPage } from '@/pages/LoginPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
@@ -61,6 +62,7 @@ export function App() {
                 {/* /jobs/new before /jobs/:jobId — otherwise the parameter
                     route matches "new" and the detail page looks up a job
                     whose id is the word new. */}
+                <Route path="/recommendations" element={<RecommendationsPage />} />
                 <Route path="/jobs" element={<JobsPage />} />
                 <Route path="/jobs/new" element={<AddJobPage />} />
                 <Route path="/jobs/:jobId" element={<JobDetailPage />} />

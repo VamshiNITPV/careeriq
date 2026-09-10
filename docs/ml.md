@@ -320,38 +320,58 @@ Two implementation notes that bear directly on the Recall@200 target below:
 `ml/evaluation/results/matching.{json,md}` holds the committed numbers. 122 labelled pairs over
 **2 queries** — and the sample size is the first thing to understand about every figure below.
 
-| Ranker | P@5 | P@10 | NDCG@10 | MRR |
+Two runs are shown: 6.4 as first measured, and after the 6.5 quality pass (skill rarity weighting
+and section parsing). **Read the comparability note below the table before reading the deltas.**
+
+| Ranker | P@5 | P@10 | NDCG@10 (6.4) | NDCG@10 (6.5) |
 |---|---|---|---|---|
-| **hybrid** | **0.800** | **0.850** | **0.611** | 0.750 |
-| embedding-only | 0.500 | 0.600 | 0.400 | 0.625 |
-| skill-only | 0.800 | 0.800 | 0.513 | 0.750 |
-| TF-IDF | 0.600 | 0.650 | 0.408 | 0.750 |
-| random | 0.600 | 0.550 | 0.508 | **1.000** |
-| _target_ | 0.70 | 0.60 | 0.75 | 0.65 |
+| **hybrid** | **0.900** | **0.850** | 0.611 | **0.628** |
+| embedding-only | 0.700 | 0.600 | 0.400 | **0.480** |
+| skill-only | 0.800 | 0.850 | 0.513 | **0.609** |
+| TF-IDF | 0.700 | 0.650 | 0.408 | 0.418 |
+| random | 0.500 | 0.450 | 0.508 | 0.345 |
+| _target_ | 0.70 | 0.60 | 0.75 | 0.75 |
 
-Recall@200 = **0.954** (target 0.95). Spearman(score, label) = **0.392** over 122 pairs.
+P@5 and P@10 are the 6.5 figures. Recall@200 = **0.931**, down from 0.954 and **now below the 0.95
+target**. Spearman(score, label) = **0.386** over 102 ranked pairs of 122 labelled.
 
-**The hybrid beats every baseline on NDCG@10, which is the comparison this section exists for.**
-0.611 against embedding-only's 0.400 settles the question ADR-005 posed: the six dimensions earn
-their complexity, and raw cosine alone does not rank acceptably.
+**The two deltas that mean something, and the one that does not:**
 
-**NDCG@10 misses its 0.75 target** (0.611). The hybrid gets relevant jobs into the top five (P@5 0.800) but
-does not order HIGH above MEDIUM well enough. That is the one unmet target and it is not explained
-away.
+- **skill-only 0.513 → 0.609** is the cleanest result in this table. That ranker uses nothing but the
+  skill dimension, so it measures the rarity weighting directly rather than diluted to 25% of a
+  blend. The dimension got better at ordering, which is what it was changed to do.
+- **embedding-only 0.400 → 0.480** is the document change: `build_job_document` now includes the
+  description *as well as* the parsed sections. Sections alone were measured at 0.302 — **lossier
+  than raw prose** — which was the opposite of the expectation and is why both are included.
+- **hybrid 0.611 → 0.628** should not be read as a +0.017 improvement. `random` moved 0.508 → 0.345
+  over the same runs, and `random` is a seeded shuffle that never reads an embedding — so it can only
+  move if the *set of pairs being ranked* moved. It did: 102 of the 122 labelled pairs are rankable
+  (the rest have jobs no longer active or embedded), and which 102 changed. The report now prints a
+  **ranked-pair digest** so this is visible rather than inferred. At two queries, a 0.017 difference
+  across a shifted comparison set is not a result.
 
-Four things the run revealed that were not anticipated:
+**Recall@200 regressed to 0.931.** Four labelled-relevant jobs are now ranked below 200th by the
+embedding, against three before. The cause is the same document change that helped ranking: a longer
+document moves every cosine slightly. This is a real unmet target, recorded rather than rounded.
+
+**NDCG@10 still misses its 0.75 target** (0.628). The hybrid gets relevant jobs into the top five
+(P@5 0.900) but does not order HIGH above MEDIUM well enough. That remains the headline gap.
+
+Four things the runs revealed that were not anticipated:
 
 - **MRR is useless on this pool.** Random scores 1.000 — with 48% of pooled pairs relevant, landing
   one first is close to a coin toss. It should not be read as a pass for anything.
-- **Random beats embedding-only on NDCG@10** (0.508 vs 0.400). Raw cosine reliably surfaces postings
-  that *read* like the resume and are wrong on seniority, which is exactly the failure ADR-005
-  predicted of pure similarity. This is the strongest evidence in the report for the hybrid design.
+- **Whether raw cosine beats a shuffle depends on the run** (0.400 vs 0.508 in 6.4; 0.480 vs 0.345 in
+  6.5). The report used to assert the 6.4 direction as a finding and that assertion went stale — it
+  is now derived from the numbers. What holds across both runs is that the *hybrid* beats raw cosine
+  (0.611 vs 0.400, then 0.628 vs 0.480), which is the comparison ADR-005 staked itself on.
 - **An ablation replaces weight tuning.** Two queries cannot fit six parameters; removing one
-  dimension at a time asks a question the data can answer. Removing *skill* **improves** NDCG@10 to
-  0.739, and removing *location* improves it to 0.681 — while removing *experience* costs the most
-  (0.420). That is a strong signal and **not yet a licence to change the weights**: the labels were
-  proposed by the same process that designed the formula, and the rubric weighted seniority heavily,
-  so the experience dimension is being graded against a rubric partly built around it.
+  dimension at a time asks a question the data can answer. Removing *skill* improved NDCG@10 by
+  **+0.128** before the rarity weighting and **+0.095** after — so the weighting reduced the harm
+  without eliminating it. The dimension still costs the ranking. Removing *location* gains +0.071.
+  That is a strong signal and **not yet a licence to change the weights**: the labels were proposed
+  by the same process that designed the formula, and the rubric weighted seniority heavily, so the
+  experience dimension is being graded against a rubric partly built around it.
 - **The corpus has two distinct people in it**, not three. Eight candidate vectors exist and three
   distinct resume texts, but two of those texts are the same person with different extraction. The
   pool builder deduplicates on a normalised prefix for that reason.
@@ -405,18 +425,29 @@ Two stages (database.md §3.3):
 **Evaluation:** `ml/datasets/duplicates/` — labelled duplicate/non-duplicate pairs. Targets:
 precision >= 0.95, recall >= 0.85, with a reported confusion matrix.
 
-**Built and measured in Phase 6.3-6.4.** `backend/app/services/job/near_duplicate.py` is stage two;
-`ml/evaluation/results/duplicates.md` holds the numbers over 72 labelled pairs.
+**Built and measured in Phase 6.3-6.4, re-measured in 6.5.** `backend/app/services/job/near_duplicate.py`
+is stage two; `ml/evaluation/results/duplicates.md` holds the numbers over 72 labelled pairs.
 
-| Threshold | Precision | Recall | F1 |
-|---|---|---|---|
-| 0.95 (specified above) | 0.750 | **1.000** | **0.857** |
-| **0.97 (shipped)** | **1.000** | 0.667 | 0.800 |
-| _target_ | 0.95 | 0.85 | |
+The 72 pairs are pinned in git and **their similarities are re-read from the database on every run**,
+not stored in the labelled file. Keeping both together conflated the stable part (which pairs a human
+judged, and how) with the measured part (the cosines), and when re-embedding moved every similarity it
+moved pairs across the pooling threshold — rebuilding the pool then produced 75 pairs with 33
+unlabelled. A dataset that moves with the code cannot show a regression.
 
-**Neither threshold meets both targets**, and with three true duplicates in the corpus neither could
-be shown to — reclassifying one pair moves recall by a third. 0.95 has the better F1 and perfect
-recall; 0.97 ships anyway because the errors are asymmetric. A false positive sets
+| Threshold | Precision (6.4) | Recall (6.4) | Precision (6.5) | Recall (6.5) | F1 (6.5) |
+|---|---|---|---|---|---|
+| 0.95 (specified above) | 0.750 | **1.000** | **1.000** | **1.000** | **1.000** |
+| **0.97 (shipped)** | **1.000** | 0.667 | **1.000** | 0.667 | 0.800 |
+| _target_ | 0.95 | 0.85 | 0.95 | 0.85 | |
+
+**0.95 now meets both targets, and 0.97 does not.** The 6.5 document change (description plus parsed
+sections) pushed the one false positive below 0.95, so the threshold specified in this document is now
+the one the evidence supports. **The shipped threshold is still 0.97** and changing it is a separate,
+explicit decision — not something to fold into a parsing commit — because with **three** true
+duplicates in the corpus, reclassifying one pair moves recall by a third. A perfect confusion matrix
+on three positives is not strong evidence.
+
+The asymmetry argument is unchanged and still favours the conservative side: a false positive sets
 `status = 'DUPLICATE'` and hides a real posting from every user; a false negative leaves a duplicate
 in a list that already shows it. Precision is the side to protect when the action is destructive.
 
@@ -425,19 +456,22 @@ Three things the measurement established that this section assumed:
 - **Stage one catches none of these.** The content hash finds a posting pasted twice verbatim, and
   none of the 72 pooled pairs are that. Stage two is doing work stage one cannot, which was the
   premise but had never been checked.
-- **Company boilerplate dominates the cosine.** The single false positive at 0.95 is a same-employer
-  pair — a 15-year engineering *manager* against a 5-year *engineer* — scoring 0.960 on several
-  identical paragraphs of marketing copy that describe neither role. `description_clean` is
-  documented as boilerplate-stripped and does not remove this kind. **Fixing that is a better lever
-  than moving any threshold**, it helps the semantic ranking dimension equally, and unlike a
-  threshold it needs no larger labelled set to justify.
+- **Company boilerplate dominated the cosine, and this is the one place fixing it measurably paid.**
+  The single false positive at 0.95 was a same-employer pair — a 15-year engineering *manager*
+  against a 5-year *engineer* — scoring 0.960 on identical paragraphs of marketing copy describing
+  neither role. After 6.5 rebuilt the documents around parsed sections it falls below 0.95 and the
+  false positive is gone. Note what this does *not* say: the same hypothesis was tested twice as a
+  *ranking* improvement and rejected both times (cosine spread 0.138 vs 0.133; relevance 60% vs 46%,
+  the wrong direction). It helps duplicate detection, where two postings differ only in the
+  role-specific text, and not ranking, where the resume is a different genre of document entirely.
 - **The pool floor has to sit well below the threshold.** It starts at 0.88, because pooling only
   pairs above the decision boundary makes recall 1.0 by construction — the same trap Recall@200 fell
   into in section 4.3.
 
 **Nothing is marked automatically.** The detector returns candidates; no code sets
-`status = 'DUPLICATE'`. At 0.750 precision that would hide real jobs, and the column plus
-`canonical_job_id` have been in place since Phase 5 for when the evidence supports acting.
+`status = 'DUPLICATE'`. Three true positives are not enough to justify destructive automation
+whatever the precision reads, and the column plus `canonical_job_id` have been in place since
+Phase 5 for when the evidence supports acting.
 
 > Precision is weighted heavily. A false positive **hides a real job from the user** — a silent
 > failure they can never discover. A false negative shows a duplicate, which is merely annoying and

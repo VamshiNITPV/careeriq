@@ -38,6 +38,7 @@ never printed — the rule `SimilarJobs` already follows.
 
 from __future__ import annotations
 
+import math
 import re
 import uuid
 from collections.abc import Iterable, Mapping, Sequence
@@ -64,6 +65,14 @@ _Q = Decimal("0.0001")
 
 ONE = Decimal("1")
 ZERO = Decimal("0")
+
+#: Lower bound on `demand_score` when converting it to a rarity weight.
+#:
+#: Guards a division by zero, and caps how much a single obscure requirement can
+#: dominate a posting: at 1% the weight is log(100) ≈ 4.6, about sixteen times a
+#: skill half the market names. Below that the curve grows without limit and one
+#: rare tag would decide the dimension on its own.
+_RARITY_FLOOR = Decimal("0.01")
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,10 +229,49 @@ def classify_skills(
     return SkillBuckets(matched=tuple(matched), partial=tuple(partial), missing=tuple(missing))
 
 
-def score_skill(*, buckets: SkillBuckets, has_candidate_skills: bool) -> DimensionScore:
+def skill_rarity(demand: Decimal | None) -> Decimal:
+    """How much a requirement discriminates, from its share of the live market.
+
+    `demand` is `skills.demand_score` — the fraction of active postings asking
+    for it. The weight is the textbook inverse document frequency, `log(1 /
+    demand)`, so a skill every employer names tends to zero and a specialism
+    carries several times the weight of a commonplace.
+
+    **This exists because the flat version measurably hurt.** Phase 6.4's
+    ablation found that removing the skill dimension entirely raised NDCG@10
+    from 0.611 to 0.739. The cause was dilution: jobs list 18.5 skills on
+    average and up to 54, and the commonest are near-universal (Python 74.9%,
+    AWS 46.7%, Communication 45.0%). Counting "Communication" as heavily as a
+    specialism drags every candidate toward the same score.
+
+    `None` means the score has never been computed — a fresh database, or a
+    fixture that never ran `recompute_demand_scores`. That returns 1, which
+    reproduces the old flat behaviour exactly, so this cannot break an
+    environment that has not run the recompute.
+
+    The floor is not decorative: `demand` of 0 would divide by zero, and a skill
+    at 0.001 would otherwise dominate every other requirement in the posting on
+    the strength of being rare rather than being important.
+    """
+    if demand is None:
+        return ONE
+    floored = max(demand, _RARITY_FLOOR)
+    return Decimal(str(math.log(1 / float(floored))))
+
+
+def score_skill(
+    *,
+    buckets: SkillBuckets,
+    has_candidate_skills: bool,
+    demand: Mapping[uuid.UUID, Decimal | None] | None = None,
+) -> DimensionScore:
     """Weighted coverage of the skills this job asks for.
 
-        skill = Σ w(r)·m(s) / Σ w(r)
+        skill = Σ w(r)·idf(s)·m(s) / Σ w(r)·idf(s)
+
+    `idf(s)` weights each requirement by how rare it is in the live market — see
+    `skill_rarity`. Passing no `demand` map, or one whose values are all None,
+    collapses this to the original `Σ w(r)·m(s) / Σ w(r)`.
 
     `has_candidate_skills` is passed rather than inferred from the buckets,
     because an empty profile and a profile that simply matches nothing produce
@@ -245,6 +293,7 @@ def score_skill(*, buckets: SkillBuckets, has_candidate_skills: bool) -> Dimensi
             "Upload a resume or add them by hand.",
         )
 
+    rarity = demand or {}
     total_weight = ZERO
     earned = ZERO
     for match_value, bucket in (
@@ -253,9 +302,22 @@ def score_skill(*, buckets: SkillBuckets, has_candidate_skills: bool) -> Dimensi
         (SKILL_MATCH_ABSENT, buckets.missing),
     ):
         for req in bucket:
-            weight = SKILL_REQUIREMENT_WEIGHT[req.requirement]
+            weight = SKILL_REQUIREMENT_WEIGHT[req.requirement] * skill_rarity(
+                rarity.get(req.skill_id)
+            )
             total_weight += weight
             earned += weight * match_value
+
+    if total_weight == ZERO:
+        # Every requirement weighed nothing, which happens only when a posting
+        # asks solely for skills the whole market asks for. There is no ratio to
+        # take, and the honest answer is that these requirements cannot separate
+        # one candidate from another — not that the candidate scored zero.
+        return _unknown(
+            DimensionStatus.NEEDS_DATA,
+            "The skills this role lists are ones nearly every posting asks for, "
+            "so they can't tell candidates apart. This counts as neutral.",
+        )
 
     reason = _reason_skill(
         len(everything),

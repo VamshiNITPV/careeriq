@@ -661,8 +661,24 @@ plausible." That is unmeasurable and unfalsifiable.
 Phase 6.4 delivered `ml/evaluation/` (metrics, four baselines, pooled dataset builder, runner) with
 41 unit tests over the metrics and baselines, and committed results under
 `ml/evaluation/results/`. The hybrid beats every baseline on NDCG@10 — 0.611 against embedding-only's
-0.400 — which is the comparison ADR-005 staked itself on, and it passes. NDCG@10 misses its 0.75
-target, which is reported rather than explained away.
+0.400, and 0.628 against 0.480 after the 6.5 quality pass — which is the comparison ADR-005 staked
+itself on, and it passes in both runs. NDCG@10 misses its 0.75 target in both, which is reported
+rather than explained away.
+
+**A second amendment follows from running the harness twice: ADR-015 needs a comparability rule.**
+A committed metric is only half of a regression test; the other half is knowing that two runs measured
+the same thing. `pairs.jsonl` was pinned in git, yet the hybrid's +0.017 between runs turned out to be
+confounded — only 102 of 122 pairs are rankable (the others' jobs are no longer active or embedded) and
+*which* 102 changed. The `random` baseline detected it: a seeded shuffle that never reads an embedding
+cannot move unless the comparison set moves, and it moved 0.508 to 0.345. The runner now emits a
+**ranked-pair digest** so the question is answered in the report instead of reconstructed afterwards.
+Two rules fall out, and both are now code rather than intention:
+
+- **Never rebuild an evaluation dataset because the system changed.** Attempting it produced 75
+  duplicate pairs with 33 unlabelled, replacing a fully-labelled 72.
+- **Separate dataset membership from measured values.** The duplicate pool stored its cosines in the
+  labelled file, so re-embedding silently changed the dataset; similarities are now re-read from the
+  database each run and only the human judgements are committed.
 
 What this ADR did not anticipate is that **the dataset requirement is satisfiable while the metrics
 it feeds are not meaningful.** "≥100 labelled pairs" is met (122), but those pairs cover **two
@@ -1126,6 +1142,7 @@ production value. Missing required config fails loudly at startup, not at first 
 | 2026-09-04 | ADR-019 added. Job data sourcing from permitted APIs, after the corpus reached Phase 6 with seven hand-entered postings and no way to grow. |
 | 2026-09-10 | ADR-015: the duplicate-detection row discharged. 72 labelled pairs, 3 duplicates; ml.md's 0.95 threshold gives precision 0.750 / recall 1.000, the shipped 0.97 gives 1.000 / 0.667, and neither meets both targets on three positives. Nothing is marked automatically. Boilerplate in `description_clean` is the real lever. |
 | 2026-09-10 | ADR-015 amended. Phase 6.4: the matching harness is built and the hybrid beats every baseline on NDCG@10 (0.611 vs 0.400 for raw cosine), vindicating ADR-005; NDCG@10 misses its 0.75 target. The dataset requirement is met at 122 pairs but covers only **2 distinct people**, so per-query metrics are anecdote-grade and weight tuning is refused in favour of an ablation. |
+| 2026-09-10 | ADR-015 amended again after the 6.5 quality pass. A committed metric is not a regression test unless two runs measured the same pairs: the hybrid's 0.611 -> 0.628 was confounded by a shifted comparison set, caught by the `random` baseline moving 0.508 -> 0.345. The runner now emits a ranked-pair digest, evaluation datasets are never rebuilt to follow the code, and measured values (cosines) are separated from human judgements. Real gains: skill-only 0.513 -> 0.609 (rarity weighting) and embedding-only 0.400 -> 0.480 (documents include description *and* sections). Recall@200 regressed 0.954 -> 0.931, below target. |
 | 2026-09-09 | ADR-006 amended. Phase 6.3: two-stage retrieval built and measured. The Redis cache this ADR permits was **not** needed — the first cut's 535 ms p95 was 400 database round trips, not the scoring, and batching removed it (47.8 ms p95). Also records two things pgvector and cursor paging make you learn the hard way. |
 | 2026-09-09 | ADR-005 amended. Phase 6.2: a dimension whose inputs are missing scores a neutral 0.5 and keeps its documented weight — renormalising would break AC2 and let a job rank higher for an employer's blank field. Scorers live in `app/services/matching/`; no `job_matches` row is written yet. |
 | 2026-09-09 | ADR-007 amended. Phase 6.1: the embedding provider runs in its own container with the model baked in, because a lazy import does not keep torch out of the API *image*. The separation is asserted by a test. |

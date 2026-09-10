@@ -17,7 +17,7 @@ from decimal import Decimal
 from app.integrations.embeddings.base import EmbeddingProvider
 from app.models.enums import SkillRequirement
 from app.models.job import Job
-from app.repositories.matching import CandidateSnapshot, MatchingRepository
+from app.repositories.matching import CandidateSnapshot, MatchingRepository, SkillFacts
 from app.services.matching import dimensions as dim
 from app.services.matching.weights import (
     RANKING_VERSION,
@@ -190,8 +190,8 @@ class MatchingService:
         )
         # Both sides in one query: the one-level rule looks up the parent of a
         # job's skill *and* of the candidate's, and either direction can produce
-        # the match.
-        parent_of = await self._repo.taxonomy_parents(
+        # the match. The same row carries the demand score the rarity weight needs.
+        facts = await self._repo.skill_facts(
             {js.skill_id for js in job.skills} | set(candidate.skill_ids)
         )
         return self._score(
@@ -199,7 +199,7 @@ class MatchingService:
             job=job,
             resume_version_id=resume_version_id,
             cosine=cosine,
-            parent_of=parent_of,
+            facts=facts,
         )
 
     async def match_many(
@@ -231,7 +231,7 @@ class MatchingService:
         wanted: set[uuid.UUID] = set(candidate.skill_ids)
         for job in jobs:
             wanted.update(js.skill_id for js in job.skills)
-        parent_of = await self._repo.taxonomy_parents(wanted)
+        facts = await self._repo.skill_facts(wanted)
 
         return [
             self._score(
@@ -239,7 +239,7 @@ class MatchingService:
                 job=job,
                 resume_version_id=resume_version_id,
                 cosine=cosines.get(job.id),
-                parent_of=parent_of,
+                facts=facts,
             )
             for job in jobs
         ]
@@ -251,7 +251,7 @@ class MatchingService:
         job: Job,
         resume_version_id: uuid.UUID,
         cosine: Decimal | None,
-        parent_of: Mapping[uuid.UUID, uuid.UUID | None],
+        facts: SkillFacts,
     ) -> MatchResult:
         """The formula itself, with every input already resolved.
 
@@ -286,7 +286,7 @@ class MatchingService:
         buckets = dim.classify_skills(
             requirements=requirements,
             candidate_skill_ids=candidate.skill_ids,
-            parent_of=parent_of,
+            parent_of=facts.parent_of,
         )
         user_id = candidate.user_id
 
@@ -300,7 +300,9 @@ class MatchingService:
         scores = {
             Dimension.SEMANTIC: dim.score_semantic(cosine),
             Dimension.SKILL: dim.score_skill(
-                buckets=buckets, has_candidate_skills=bool(candidate.skill_ids)
+                buckets=buckets,
+                has_candidate_skills=bool(candidate.skill_ids),
+                demand=facts.demand,
             ),
             Dimension.EXPERIENCE: dim.score_experience(
                 candidate_years=candidate_years,

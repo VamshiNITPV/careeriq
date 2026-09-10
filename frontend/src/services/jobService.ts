@@ -55,11 +55,20 @@ export const jobService = {
    * client it cannot see.
    */
   recommendations(
-    options: { limit?: number; cursor?: string } = {},
+    options: {
+      limit?: number
+      cursor?: string
+      minScore?: number
+      excludeApplied?: boolean
+    } = {},
   ): Promise<RecommendationsResponse> {
     const params = new URLSearchParams()
     if (options.limit !== undefined) params.set('limit', String(options.limit))
     if (options.cursor !== undefined) params.set('cursor', options.cursor)
+    if (options.minScore !== undefined) params.set('min_score', String(options.minScore))
+    // Sent only when false: the API already defaults it to true, and omitting it
+    // keeps the common request short and its URL readable in a log.
+    if (options.excludeApplied === false) params.set('exclude_applied', 'false')
     const query = params.toString()
     return api.get<RecommendationsResponse>(`/recommendations${query ? `?${query}` : ''}`)
   },

@@ -134,11 +134,29 @@ def normalize_title(title: str) -> str:
     return stripped or folded
 
 
+#: Spaces that are not the space character: non-breaking, the en-quad-to-hair
+#: range, narrow no-break, medium mathematical, and ideographic.
+#:
+#: Written as code points rather than a regex class because the characters are
+#: invisible in source — a reviewer cannot tell a stray literal space from a
+#: U+2009 by looking, and a typo here silently stops normalising one of them.
+#:
+#: Measured need: one real posting in this corpus joins almost every word with
+#: U+00A0. The `[ 	]+` collapse below does not match it, so that text reached
+#: the hash, the embedding and the section parser with spacing that only
+#: *looks* like spacing to a reader.
+_SPACE_LIKE = dict.fromkeys(
+    [0x00A0, *range(0x2000, 0x200B), 0x202F, 0x205F, 0x3000], " "
+)
+
+
 def clean_description(text: str) -> str:
     """Normalise a description for hashing and, later, embedding.
 
-    Collapses whitespace and strips zero-width characters, so the same posting
-    copied from two sites hashes identically. Deliberately does NOT lowercase or
+    Collapses whitespace, converts the spaces that are not spaces, and strips
+    zero-width characters, so the same posting copied from two sites hashes
+    identically. It does **not** remove boilerplate — nothing here drops content,
+    and a comment elsewhere claiming otherwise was wrong. Deliberately does NOT lowercase or
     remove punctuation: `description_clean` is also what gets embedded in Phase
     6, and case and sentence structure carry meaning to a sentence transformer.
     """
@@ -157,7 +175,13 @@ def clean_description(text: str) -> str:
             }
         )
     )
-    lines = [re.sub(r"[ \t]+", " ", line).strip() for line in translated.splitlines()]
+    # Non-breaking and exotic spaces become ordinary ones. Measured need: one
+    # real posting in this corpus joins almost every word with U+00A0, and the
+    # `[ \t]+` collapse below does not touch it — so that text reached the hash,
+    # the embedding and the section parser with spacing that only *looks* like
+    # spacing to a reader.
+    spaced = translated.translate(_SPACE_LIKE)
+    lines = [re.sub(r"[ \t]+", " ", line).strip() for line in spaced.splitlines()]
     # Drop runs of blank lines but keep single ones: paragraph breaks are what
     # section detection reads.
     out: list[str] = []

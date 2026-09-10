@@ -108,8 +108,16 @@ class Job(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # Never mutated. Everything else on this row is derived from it, so a better
     # parser can be re-run without asking anyone to paste the posting again.
     description_raw: Mapped[str] = mapped_column(Text, nullable=False)
-    # Whitespace-collapsed and boilerplate-stripped. What gets hashed for exact
-    # dedup, and what gets embedded in Phase 6.
+    # Whitespace-collapsed, with the spaces that are not spaces converted and
+    # zero-width characters removed. What gets hashed for exact dedup, and part
+    # of what gets embedded.
+    #
+    # **Not boilerplate-stripped**, despite what this comment said until it was
+    # checked: `clean_description` removes no content at all, and on the postings
+    # that matter it differs from `description_raw` by about one character. The
+    # employer's marketing blurb reaches the hash and the embedding intact, which
+    # is what put a manager role and an engineer role at 0.960 cosine in the
+    # duplicate evaluation.
     description_clean: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     responsibilities: Mapped[list[str]] = mapped_column(

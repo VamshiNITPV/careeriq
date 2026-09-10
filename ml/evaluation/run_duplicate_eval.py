@@ -3,8 +3,15 @@
     docker compose run --rm --no-deps -v "$(pwd -W)/ml:/ml" backend \
         sh -c 'cd /ml && python -m evaluation.run_duplicate_eval'
 
-No database needed: the pool already carries each pair's cosine, so this is pure
-arithmetic over the labelled file. Writes `results/duplicates.{json,md}`.
+**Similarities are read from the database, not from the labelled file.** The file
+is the stable part — which job pairs a human judged, and how — and it must not
+change when the system does, or it cannot show a regression. The cosines are the
+*measured* part and go stale the moment anything re-embeds.
+
+Keeping both in one file conflated them: re-embedding the corpus shifted every
+similarity, which moved pairs across the pooling threshold, which changed the
+dataset's membership and left a third of it unlabelled. Membership is fixed here
+and scores are fetched fresh. Writes `results/duplicates.{json,md}`.
 
 Targets from ml.md section 5: **precision >= 0.95, recall >= 0.85**, with a
 reported confusion matrix. The sweep is reported too, because a single threshold
@@ -14,10 +21,15 @@ positive class is this small.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import pathlib
+import uuid
 from datetime import UTC, datetime
 from typing import Any
+
+from app.core.database import get_session_factory
+from sqlalchemy import text
 
 from evaluation.metrics import Confusion, confusion_at
 
@@ -52,6 +64,33 @@ def _row(threshold: float, c: Confusion) -> dict[str, Any]:
     }
 
 
+#: Current cosine for one labelled pair, under whatever vectors exist now.
+_COSINE = text("""
+    SELECT 1 - (a.embedding <=> b.embedding)
+    FROM job_embeddings a, job_embeddings b
+    WHERE a.job_id = :a AND b.job_id = :b
+      AND a.model_name = b.model_name AND a.model_version = b.model_version
+    LIMIT 1
+""")
+
+
+async def current_similarities(pairs: list[dict[str, Any]]) -> dict[str, float | None]:
+    """Re-measure every labelled pair against today's vectors.
+
+    `None` for a pair whose jobs are no longer both indexed — reported rather
+    than silently dropped, because a shrinking denominator would quietly flatter
+    recall.
+    """
+    async with get_session_factory()() as session:
+        out: dict[str, float | None] = {}
+        for pair in pairs:
+            value = await session.scalar(
+                _COSINE, {"a": uuid.UUID(pair["a"]["id"]), "b": uuid.UUID(pair["b"]["id"])}
+            )
+            out[pair["pair_id"]] = None if value is None else round(float(value), 4)
+        return out
+
+
 def main() -> dict[str, Any]:
     pairs = [
         json.loads(line) for line in (DATA / "pairs.jsonl").read_text(encoding="utf-8").splitlines()
@@ -59,6 +98,15 @@ def main() -> dict[str, Any]:
     unlabelled = [p for p in pairs if p["label"] is None]
     if unlabelled:
         raise SystemExit(f"{len(unlabelled)} pairs are still unlabelled")
+
+    fresh = asyncio.run(current_similarities(pairs))
+    missing = [p["pair_id"] for p in pairs if fresh[p["pair_id"]] is None]
+    # Fall back to the stored value only where a vector has gone, so the pair is
+    # still counted and the gap is visible in the report.
+    for pair in pairs:
+        measured = fresh[pair["pair_id"]]
+        if measured is not None:
+            pair["similarity"] = measured
 
     scores = [p["similarity"] for p in pairs]
     labels = [p["label"] for p in pairs]
@@ -82,6 +130,7 @@ def main() -> dict[str, Any]:
             and p["shared_opening"]
         ),
         "pool_floor": min(scores),
+        "pairs_without_current_vectors": len(missing),
         "targets": {"precision": TARGET_PRECISION, "recall": TARGET_RECALL},
         "sweep": [_row(t, confusion_at(scores, labels, t)) for t in SWEEP],
         "shipped": _row(SHIPPED, confusion_at(scores, labels, SHIPPED)),

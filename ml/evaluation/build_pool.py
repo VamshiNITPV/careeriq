@@ -303,6 +303,12 @@ async def main() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
                         # Recorded so a reader can tell whether a pair is here
                         # because a ranker liked it or because the dice did.
                         "pooled_by": sources,
+                        # Written here rather than by whatever script last
+                        # applied labels: rebuilding the pool used to drop this,
+                        # and REVIEW.md then stopped marking which jobs the
+                        # recall stage never returned — the one column that shows
+                        # a retrieval miss.
+                        "in_recall_set": sources != ["outside_recall"],
                         # Carried over from labels.json when a pair has already
                         # been judged, so refreshing the pool after a corpus
                         # change does not throw away the labelling effort. Keyed
