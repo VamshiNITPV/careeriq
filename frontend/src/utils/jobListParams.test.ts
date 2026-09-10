@@ -6,8 +6,10 @@ import {
   JOB_FILTER_KEYS,
   PAGE_SIZE,
   readJobListParams,
+  requestFilters,
   setJobListFilter,
   setJobListOffset,
+  setJobListSort,
 } from './jobListParams'
 
 const read = (search: string) => readJobListParams(new URLSearchParams(search))
@@ -20,6 +22,9 @@ describe('readJobListParams', () => {
       employmentType: 'FULL_TIME',
       yearsValue: '',
       postedWithin: '',
+      sort: 'recent',
+      minScore: '',
+      excludeApplied: true,
       offset: 20,
     })
   })
@@ -31,6 +36,11 @@ describe('readJobListParams', () => {
       employmentType: '',
       yearsValue: '',
       postedWithin: '',
+      // Date order and "hide applied" are the defaults, so a bare /jobs carries
+      // neither in its URL.
+      sort: 'recent',
+      minScore: '',
+      excludeApplied: true,
       offset: 0,
     })
   })
@@ -233,5 +243,116 @@ describe('setJobListOffset', () => {
 
   it('keeps the filters', () => {
     expect(setJobListOffset(new URLSearchParams('q=python'), 20).get('q')).toBe('python')
+  })
+})
+
+describe('sorting', () => {
+  it('reads the match sort and its two companions', () => {
+    const params = read('sort=match&min_score=60&exclude_applied=false')
+
+    expect(params.sort).toBe('match')
+    expect(params.minScore).toBe('60')
+    expect(params.excludeApplied).toBe(false)
+  })
+
+  it('falls back to date order when the URL invents a sort', () => {
+    // Not passed through: the API answers 422 for a value outside its enum, so
+    // an unvalidated read turns a typo in the address bar into a broken page.
+    expect(read('sort=banana').sort).toBe('recent')
+    expect(read('min_score=999').minScore).toBe('')
+  })
+
+  it('treats anything but the literal "false" as hiding applied jobs', () => {
+    // Absent means on. Only the exact string turns it off, so a mangled value
+    // leaves the safer default in place rather than silently widening the list.
+    expect(read('exclude_applied=no').excludeApplied).toBe(true)
+    expect(read('exclude_applied=0').excludeApplied).toBe(true)
+    expect(read('exclude_applied=false').excludeApplied).toBe(false)
+  })
+
+  it('drops the page when the ordering changes', () => {
+    // Page three of a date-ordered list has no counterpart in a ranked one.
+    const next = setJobListSort(new URLSearchParams('work_mode=REMOTE&offset=40'), 'match')
+
+    expect(next.get('sort')).toBe('match')
+    expect(next.get('offset')).toBeNull()
+    // The filters are untouched — only the ordering changed.
+    expect(next.get('work_mode')).toBe('REMOTE')
+  })
+
+  it('clears min_score when leaving match order', () => {
+    /*
+     * The API rejects min_score without sort=match rather than ignoring it, so
+     * leaving it behind would arm a 422 for whoever next reloads or shares that
+     * address.
+     */
+    const next = setJobListSort(new URLSearchParams('sort=match&min_score=70'), 'recent')
+
+    expect(next.get('sort')).toBeNull()
+    expect(next.get('min_score')).toBeNull()
+  })
+})
+
+describe('requestFilters', () => {
+  it('sends nothing about ranking when browsing by date', () => {
+    // A stale ?min_score= in the URL must not reach the API, which 422s it.
+    const sent = requestFilters(read('q=python&min_score=60'))
+
+    expect(sent).not.toHaveProperty('sort')
+    expect(sent).not.toHaveProperty('min_score')
+  })
+
+  it('omits exclude_applied when it holds its default', () => {
+    // True is the API default, so the common request stays short.
+    expect(requestFilters(read('sort=match'))).not.toHaveProperty('exclude_applied')
+    expect(requestFilters(read('sort=match&exclude_applied=false')).exclude_applied).toBe('false')
+  })
+})
+
+describe('what counts as a filter', () => {
+  it('counts a minimum score', () => {
+    // It narrows the list, so the empty state must say "no matches met that
+    // score" rather than offering to add a job.
+    expect(countActiveJobFilters(read('sort=match&min_score=70'))).toBe(1)
+    expect(countPanelFilters(read('sort=match&min_score=70'))).toBe(1)
+  })
+
+  it('does not count the sort', () => {
+    /*
+     * Sort narrows nothing. Counting it would open a freshly ranked list reading
+     * "Filters 1" over untouched dropdowns, and would make "Clear all filters"
+     * appear with nothing to clear.
+     */
+    expect(countActiveJobFilters(read('sort=match'))).toBe(0)
+    expect(countPanelFilters(read('sort=match'))).toBe(0)
+  })
+
+  it('does not count hiding applied jobs', () => {
+    /*
+     * It defaults to on, so counting it would make every fresh page read
+     * "Filters 1" — and its *off* state is the less filtered one, so counting
+     * only the non-default would be stranger still.
+     */
+    expect(countActiveJobFilters(read('sort=match'))).toBe(0)
+    expect(countActiveJobFilters(read('sort=match&exclude_applied=false'))).toBe(0)
+  })
+
+  it('clearing filters leaves the ordering alone', () => {
+    /*
+     * "Clear all filters" says filters. Dropping someone back to date order as a
+     * side effect of clearing a work-mode dropdown would undo a choice they made
+     * elsewhere and did not ask to undo.
+     */
+    const next = clearJobListFilters(new URLSearchParams('sort=match&min_score=70&work_mode=REMOTE'))
+
+    expect(next.get('sort')).toBe('match')
+    expect(next.get('min_score')).toBeNull()
+    expect(next.get('work_mode')).toBeNull()
+  })
+
+  it('clears every key JOB_FILTER_KEYS names', () => {
+    const all = new URLSearchParams(JOB_FILTER_KEYS.map((key) => [key, 'x']))
+
+    expect([...clearJobListFilters(all).keys()]).toEqual([])
   })
 })

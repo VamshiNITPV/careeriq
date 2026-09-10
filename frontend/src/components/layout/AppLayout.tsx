@@ -7,7 +7,6 @@ const NAV_ITEMS = [
   { to: '/dashboard', label: 'Dashboard' },
   { to: '/resume', label: 'Resume' },
   { to: '/jobs', label: 'Jobs' },
-  { to: '/recommendations', label: 'Matches' },
 ] as const
 
 function MenuIcon({ open }: { open: boolean }) {

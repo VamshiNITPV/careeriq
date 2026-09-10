@@ -26,6 +26,7 @@ function jobFixture(overrides: Partial<JobSummary> = {}): JobSummary {
     created_at: '2026-09-03T00:00:00Z',
     skill_count: 4,
     application: null,
+    match_score: null,
     ...overrides,
   }
 }
@@ -340,5 +341,24 @@ describe('RecommendedJobs paging, back and forth', () => {
     await screen.findByText('Job b')
     expect(fetch).toHaveBeenLastCalledWith({ limit: 5, cursor: 'C2' })
     expect(screen.getByText('Page 2')).toBeInTheDocument()
+  })
+})
+
+describe('the way to the full ranking', () => {
+  /*
+   * Since Phase 6.5 folded "Matches" into the Jobs page, this link is the only
+   * route from the dashboard to the rest of the ranking — the panel shows five
+   * and is a prompt. Losing it would strand the other 195 with no entry point.
+   */
+  it('links to the Jobs page in match order', async () => {
+    vi.spyOn(jobService, 'recommendations').mockResolvedValue(pageOf(['a'], null))
+
+    renderSection()
+    await screen.findByText('Job a')
+
+    expect(screen.getByRole('link', { name: 'See all matches' })).toHaveAttribute(
+      'href',
+      '/jobs?sort=match',
+    )
   })
 })

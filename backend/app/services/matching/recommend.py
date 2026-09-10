@@ -28,6 +28,14 @@ class RankedPage:
 
     items: list[MatchResult]
     next_cursor: str | None
+    #: Rows in the whole ranking, after `min_score` and before paging.
+    #:
+    #: Knowable here and nowhere else: the entire recall set is scored in memory
+    #: before a page is cut, so counting it is free. **It is not a corpus count** —
+    #: it is bounded by `RECALL_LIMIT`, so a reader shown "247 matches" when recall
+    #: caps at 200 would be reading an invented number. Offset paging needs it;
+    #: the cursor path does not and ignores it.
+    total: int = 0
 
 
 def _sort_key(result: MatchResult) -> tuple[Decimal, str]:
@@ -83,6 +91,7 @@ async def rank_jobs(
     cosines: Mapping[uuid.UUID, Decimal],
     limit: int,
     cursor: str | None = None,
+    offset: int = 0,
     min_score: Decimal | None = None,
 ) -> RankedPage:
     """Score every recalled job, then return one page of the ranking.
@@ -98,6 +107,21 @@ async def rank_jobs(
     bounded too, and a page can be cut from a ranking that is already total and
     stable. Paging over an unscored set would leave page two unable to know what
     page one contained.
+
+    **Two paging modes, and the caller picks one.** `cursor` is for
+    `/recommendations`, where a token can be opaque. `offset` is for match-sorted
+    browse, where the page lives in the URL as `?offset=` and a cursor could not
+    be written there at all — the browse list must be restorable from its address.
+
+    The usual argument for cursors over offsets does not apply here: it is that
+    an offset re-runs the query and can skip or duplicate rows when the data
+    shifts underneath. This function re-scores the entire set on every request
+    either way, so both modes pay that cost and neither avoids that risk. What
+    the cursor still buys is a page boundary anchored to a *row* rather than a
+    position, which is why it stays for the client that can use it.
+
+    Passing both is a caller error and the offset wins, because a request that
+    named a page cannot also mean "resume from a row".
     """
     scored = await service.match_many(
         user_id=user_id,
@@ -111,6 +135,17 @@ async def rank_jobs(
 
     scored.sort(key=_sort_key)
 
+    # Counted before either mode slices, so it is the size of the ranking rather
+    # than of the page — and before the cursor filters, so it does not shrink as
+    # a reader pages forward.
+    total = len(scored)
+
+    if offset:
+        page = scored[offset : offset + limit]
+        # No cursor in offset mode. Returning one would offer a client two ways
+        # to ask for page two that can disagree.
+        return RankedPage(items=page, next_cursor=None, total=total)
+
     if cursor is not None:
         after = decode_cursor(cursor)
         if after is not None:
@@ -121,4 +156,8 @@ async def rank_jobs(
     # A next cursor only when there is genuinely more. Returning one on the last
     # page makes a client fetch an empty response to discover it has finished.
     more = len(scored) > limit
-    return RankedPage(items=page, next_cursor=encode_cursor(page[-1]) if more and page else None)
+    return RankedPage(
+        items=page,
+        next_cursor=encode_cursor(page[-1]) if more and page else None,
+        total=total,
+    )

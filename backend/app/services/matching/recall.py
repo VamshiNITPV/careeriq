@@ -29,7 +29,8 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
+from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 #: How many postings the cheap pass hands to the expensive one (ADR-006).
@@ -77,6 +78,19 @@ class RecalledJob:
 #: Filtering on cosine as a proxy would drop jobs whose skill or location
 #: dimensions would have carried them, which is precisely the hybrid ranking
 #: ADR-005 exists to provide.
+#:
+#: `:allowed` is the browse filters, arriving as a pre-computed id array rather
+#: than as predicates. It sits **inside the `nearest` CTE**, before the LIMIT, so
+#: the vector scan itself is restricted — put it in the outer query and the
+#: overfetch budget would be spent on rows the filter then throws away. NULL
+#: means "no filter", which keeps one statement and one cached plan for both
+#: paths rather than branching into two SQL strings.
+#:
+#: The parameter is **typed via `bindparams` rather than cast inline**. An inline
+#: `:allowed::uuid[]` is what this wants to say, and `text()` cannot parse it —
+#: SQLAlchemy reads the `::` as part of the parameter name. Declaring the type
+#: once says the same thing and lets PostgreSQL resolve `ANY(NULL)`, which it
+#: cannot do for an untyped NULL.
 _RECALL = text("""
     WITH anchor AS (
         SELECT ce.embedding, ce.model_name, ce.model_version
@@ -92,6 +106,7 @@ _RECALL = text("""
         CROSS JOIN anchor a
         WHERE je.model_name = a.model_name
           AND je.model_version = a.model_version
+          AND (:allowed IS NULL OR je.job_id = ANY(:allowed))
         ORDER BY je.embedding <=> a.embedding
         LIMIT :overfetch
     )
@@ -112,7 +127,7 @@ _RECALL = text("""
       )
     ORDER BY n.distance
     LIMIT :limit
-""")
+""").bindparams(bindparam("allowed", type_=ARRAY(UUID(as_uuid=True))))
 
 #: Whether this resume has a vector at all — the difference between "nothing is
 #: close" and "we have not indexed you yet". `find_similar` draws the same
@@ -131,15 +146,36 @@ async def recall_jobs(
     model_name: str,
     limit: int = RECALL_LIMIT,
     exclude_applied: bool = True,
+    allowed_job_ids: list[uuid.UUID] | None = None,
 ) -> list[RecalledJob] | None:
     """The ~200 postings nearest this resume, nearest first.
 
     Returns `None` when the resume has no vector — reported by the caller as
     PENDING rather than as an empty list, because "not indexed yet" and "nothing
     matched" are different answers and only one of them is worth waiting on.
+
+    `allowed_job_ids` restricts recall to a pre-filtered set, which is how the
+    browse filters reach a match-sorted list. Pass `None` for no restriction;
+    an **empty list means no job qualifies** and short-circuits, because
+    `= ANY('{}')` is a round trip that can only return nothing.
+
+    **This restriction is applied after the index, not by it** — see `OVERFETCH`.
+    A narrow filter therefore competes with the overfetch budget: at this corpus
+    size the planner sequential-scans and the result is exact, but on a corpus
+    large enough for HNSW to be chosen, a filter matching few postings can return
+    fewer rows than `limit` with nothing reporting that it did. That is the
+    filtered-ANN problem and it is not solved here; it is bounded by measurement
+    when the corpus is big enough for the measurement to mean anything.
     """
     if await session.scalar(_HAS_VECTOR, {"resume_version_id": resume_version_id}) is None:
         return None
+
+    # Checked after the vector, not before: with no vector *and* an empty filter
+    # the honest answer is still "we have not indexed you", which is the one the
+    # caller can act on. Returning "nothing matched" would send someone off to
+    # widen a filter that was never the problem.
+    if allowed_job_ids is not None and not allowed_job_ids:
+        return []
 
     rows = (
         await session.execute(
@@ -151,6 +187,7 @@ async def recall_jobs(
                 "limit": limit,
                 "overfetch": limit * OVERFETCH,
                 "exclude_applied": exclude_applied,
+                "allowed": allowed_job_ids,
             },
         )
     ).all()

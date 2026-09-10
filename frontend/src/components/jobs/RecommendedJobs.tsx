@@ -226,9 +226,19 @@ function Section({ children }: { children: React.ReactNode }) {
       aria-labelledby="recommended-heading"
       className="rounded-xl border border-slate-200 bg-white p-6"
     >
-      <h2 id="recommended-heading" className="text-base font-semibold text-slate-900">
-        Recommended for you
-      </h2>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4">
+        <h2 id="recommended-heading" className="text-base font-semibold text-slate-900">
+          Recommended for you
+        </h2>
+        {/*
+          The way to the full ranking, and the only one since Phase 6.5 folded
+          "Matches" into the Jobs page — this panel shows five and is a prompt,
+          so without it the rest of the ranking has no entry point at all.
+        */}
+        <Link to="/jobs?sort=match" className="text-sm font-medium text-indigo-600 hover:underline">
+          See all matches
+        </Link>
+      </div>
       <p className="mt-1 mb-3 text-sm text-slate-600">
         Ranked against your resume, not by keyword.
       </p>

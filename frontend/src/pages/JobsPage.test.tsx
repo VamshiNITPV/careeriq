@@ -4,7 +4,7 @@ import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-rou
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/services/apiClient'
 import { jobService } from '@/services/jobService'
-import type { JobSummary } from '@/types/job'
+import type { JobListResponse, JobSummary } from '@/types/job'
 import { JobsPage } from './JobsPage'
 
 function jobFixture(overrides: Partial<JobSummary> = {}): JobSummary {
@@ -27,14 +27,27 @@ function jobFixture(overrides: Partial<JobSummary> = {}): JobSummary {
     created_at: '2026-09-03T00:00:00Z',
     skill_count: 7,
     application: null,
+    // Null, not 0: a browse-sorted row has no score, which is a different claim
+    // from scoring nothing.
+    match_score: null,
     ...overrides,
   }
 }
 
-function mockList(items: JobSummary[], total = items.length) {
-  return vi
-    .spyOn(jobService, 'list')
-    .mockResolvedValue({ items, total, limit: 20, offset: 0 })
+function mockList(
+  items: JobSummary[],
+  total = items.length,
+  extra: Partial<JobListResponse> = {},
+) {
+  return vi.spyOn(jobService, 'list').mockResolvedValue({
+    items,
+    total,
+    limit: 20,
+    offset: 0,
+    availability: 'READY',
+    ranking_version: null,
+    ...extra,
+  })
 }
 
 /**
@@ -511,7 +524,14 @@ describe('JobsPage', () => {
       renderPage()
       await screen.findByRole('listitem')
       await user.click(trigger())
-      list.mockResolvedValue({ items: [jobFixture()], total: 7, limit: 20, offset: 0 })
+      list.mockResolvedValue({
+        items: [jobFixture()],
+        total: 7,
+        limit: 20,
+        offset: 0,
+        availability: 'READY',
+        ranking_version: null,
+      })
 
       await user.selectOptions(screen.getByLabelText('Work mode'), 'REMOTE')
 
@@ -862,7 +882,14 @@ describe('JobsPage', () => {
     const list = vi
       .spyOn(jobService, 'list')
       .mockRejectedValueOnce(new ApiError(500, 'INTERNAL_ERROR', 'Something broke.'))
-      .mockResolvedValue({ items: [jobFixture()], total: 1, limit: 20, offset: 0 })
+      .mockResolvedValue({
+        items: [jobFixture()],
+        total: 1,
+        limit: 20,
+        offset: 0,
+        availability: 'READY',
+        ranking_version: null,
+      })
     renderPage()
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Something broke.')
@@ -873,5 +900,167 @@ describe('JobsPage', () => {
 
     expect(await screen.findByRole('listitem')).toBeInTheDocument()
     expect(list).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('sorting by match', () => {
+  /*
+   * Ported from RecommendationsPage.test.tsx, which this replaced. The page is
+   * gone; the behaviour it proved is not, and re-deriving these cases later
+   * would be re-learning them.
+   */
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  const scored = (id: string, score: string) =>
+    jobFixture({ id, title: `Job ${id}`, match_score: score })
+
+  it('asks the API to rank, and renders each score', async () => {
+    mockList([scored('a', '81.2'), scored('b', '68.4')], 2, { ranking_version: 'v1-hand-tuned' })
+
+    renderPage('/jobs?sort=match')
+
+    expect(await screen.findByText(/81\.2 \/ 100/)).toBeInTheDocument()
+    expect(screen.getByText(/68\.4 \/ 100/)).toBeInTheDocument()
+    expect(jobService.list).toHaveBeenCalledWith(
+      expect.objectContaining({ sort: 'match' }),
+    )
+  })
+
+  it('shows no score when browsing by date', async () => {
+    mockList([jobFixture()])
+
+    renderPage()
+
+    await screen.findByText('Senior Data Engineer')
+    expect(screen.queryByText(/\/ 100/)).not.toBeInTheDocument()
+    expect(jobService.list).toHaveBeenCalledWith(expect.not.objectContaining({ sort: 'match' }))
+  })
+
+  it('links each score to the breakdown behind it', async () => {
+    // A score with no way to see why is a number to be taken on trust.
+    mockList([scored('a', '81.2')])
+
+    renderPage('/jobs?sort=match')
+
+    expect(await screen.findByRole('link', { name: 'see why' })).toHaveAttribute(
+      'href',
+      '/jobs/a',
+    )
+  })
+
+  it('keeps the ordering in the URL so the list survives leaving it', async () => {
+    mockList([scored('a', '81.2')])
+
+    renderPage()
+    await screen.findByText('Job a')
+
+    await userEvent.selectOptions(
+      screen.getByRole('combobox', { name: /sort by/i }),
+      'match',
+    )
+
+    await waitFor(() => expect(currentUrl()).toBe('/jobs?sort=match'))
+  })
+
+  it('drops the page when the ordering changes', async () => {
+    // Page three of a date-ordered list has no counterpart in a ranked one.
+    mockList([scored('a', '81.2')], 60)
+
+    renderPage('/jobs?offset=40')
+    await screen.findByText('Job a')
+
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: /sort by/i }), 'match')
+
+    await waitFor(() => expect(currentUrl()).toBe('/jobs?sort=match'))
+  })
+
+  it('offers a minimum score only once the list is ranked', async () => {
+    // Meaningless over a date-ordered list, so it is absent rather than
+    // disabled: one less control to read past for someone not ranking.
+    mockList([jobFixture()])
+    const { unmount } = renderPage()
+    await screen.findByText('Senior Data Engineer')
+
+    expect(screen.queryByRole('combobox', { name: /minimum score/i })).not.toBeInTheDocument()
+    unmount()
+
+    mockList([scored('a', '81.2')])
+    renderPage('/jobs?sort=match')
+    await screen.findByText('Job a')
+
+    expect(screen.getByRole('combobox', { name: /minimum score/i })).toBeInTheDocument()
+  })
+
+  it('passes the minimum score and the applied toggle through', async () => {
+    const list = mockList([scored('a', '81.2')])
+
+    renderPage('/jobs?sort=match')
+    await screen.findByText('Job a')
+
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: /minimum score/i }), '60')
+    await waitFor(() =>
+      expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ min_score: 60 })),
+    )
+
+    await userEvent.click(screen.getByRole('checkbox', { name: /applied/i }))
+    await waitFor(() =>
+      expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ exclude_applied: false })),
+    )
+  })
+
+  it('asks for a resume instead of showing an empty ranking', async () => {
+    /*
+     * An empty list with no explanation reads as "no job matches you" — untrue,
+     * far more discouraging than the real problem, and impossible to act on.
+     */
+    mockList([], 0, { availability: 'NO_RESUME' })
+
+    renderPage('/jobs?sort=match')
+
+    expect(await screen.findByRole('link', { name: 'Upload a resume' })).toHaveAttribute(
+      'href',
+      '/resume',
+    )
+  })
+
+  it('says the resume is still being read rather than showing nothing', async () => {
+    mockList([], 0, { availability: 'PENDING' })
+
+    renderPage('/jobs?sort=match')
+
+    expect(await screen.findByText(/finished reading your resume/i)).toBeInTheDocument()
+  })
+
+  it('never offers to add a job when the ranking is empty', async () => {
+    /*
+     * "No jobs yet" is false in match mode — the corpus is not empty, nothing in
+     * it scored well enough. Offering "Add a job" would answer a question the
+     * reader did not ask.
+     */
+    mockList([], 0)
+
+    renderPage('/jobs?sort=match')
+
+    const empty = (await screen.findByText(/matches closely enough/i)).closest('div')!
+    // Scoped to the empty state. The page header keeps its own "Add a job"
+    // button in every mode — adding a posting is a thing you can always do, and
+    // is not an answer to "nothing scored well enough".
+    expect(within(empty).queryByRole('link', { name: 'Add a job' })).not.toBeInTheDocument()
+  })
+
+  it('counts matches rather than jobs', async () => {
+    // A ranked total is capped by the recall limit, so it counts what was
+    // ranked, not what exists. "50 jobs" would be a number nothing measured.
+    mockList([scored('a', '81.2')], 50)
+
+    renderPage('/jobs?sort=match')
+    await screen.findByText('Job a')
+
+    await userEvent.click(screen.getByRole('button', { name: /filters/i }))
+
+    expect(screen.getByRole('button', { name: 'Show 50 matches' })).toBeInTheDocument()
   })
 })

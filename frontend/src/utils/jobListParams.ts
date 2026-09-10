@@ -46,9 +46,31 @@ export const JOB_FILTER_KEYS = [
   'employment_type',
   'years_experience',
   'posted_within_days',
+  'min_score',
+  'exclude_applied',
 ] as const
 
 export type JobFilterKey = (typeof JOB_FILTER_KEYS)[number]
+
+/**
+ * How the list is ordered. `sort` is **not** in `JOB_FILTER_KEYS`.
+ *
+ * It is not a filter: it narrows nothing, and "Clear all filters" must not throw
+ * someone out of match mode as a side effect of clearing a work-mode dropdown.
+ */
+export const SORT_OPTIONS = [
+  { value: 'recent', label: 'Newest first' },
+  { value: 'match', label: 'Best match for me' },
+] as const
+
+export type JobSort = (typeof SORT_OPTIONS)[number]['value']
+
+/** The `min_score` choices, as scores a reader can reason about. */
+export const MIN_SCORE_OPTIONS = [
+  { value: '50', label: '50 and above' },
+  { value: '60', label: '60 and above' },
+  { value: '70', label: '70 and above' },
+] as const
 
 export interface JobListParams {
   q: string
@@ -62,6 +84,22 @@ export interface JobListParams {
   yearsValue: string
   /** '' is "Any time"; otherwise '7' | '14' | '30'. */
   postedWithin: string
+  /** 'recent' unless the URL says otherwise. */
+  sort: JobSort
+  /**
+   * '' is "Any score"; otherwise '50' | '60' | '70'. A string for the same
+   * reason `yearsValue` is one.
+   *
+   * Only meaningful under `sort=match` — the API answers 422 if it arrives
+   * without it, so `requestFilters` drops it in browse mode rather than letting
+   * a stale URL break the page.
+   */
+  minScore: string
+  /**
+   * Whether to leave out jobs already applied to. Defaults to **true**, matching
+   * the API, so the common request omits it entirely.
+   */
+  excludeApplied: boolean
   /** At least 0, and always a multiple of `PAGE_SIZE`. */
   offset: number
 }
@@ -102,7 +140,50 @@ export function readJobListParams(params: URLSearchParams): JobListParams {
     employmentType: readOption(params.get('employment_type'), EMPLOYMENT_TYPES),
     yearsValue: readOption(params.get('years_experience'), EXPERIENCE_YEAR_OPTIONS),
     postedWithin: readOption(params.get('posted_within_days'), POSTED_WITHIN_OPTIONS),
+    // `|| 'recent'` rather than a bare read: `?sort=banana` must fall back to the
+    // default ordering, not send an invented value the API answers 422 to.
+    sort: readOption(params.get('sort'), SORT_OPTIONS) || 'recent',
+    minScore: readOption(params.get('min_score'), MIN_SCORE_OPTIONS),
+    // Absent means on, so only the literal string 'false' turns it off. Anything
+    // else in the URL leaves the safer default in place.
+    excludeApplied: params.get('exclude_applied') !== 'false',
     offset,
+  }
+}
+
+/**
+ * The parameters to actually send, given the mode.
+ *
+ * `min_score` and `exclude_applied` mean nothing to a date-sorted list, and the
+ * API rejects `min_score` without `sort=match` rather than ignoring it — so a
+ * URL carrying a stale `?min_score=60` after switching back to Newest first
+ * would 422 the page. Dropped here rather than guarded at each call site.
+ */
+export function requestFilters(params: JobListParams): {
+  q: string
+  work_mode: string
+  employment_type: string
+  years_experience: string
+  posted_within_days: string
+  sort?: JobSort
+  min_score?: string
+  exclude_applied?: string
+} {
+  const base = {
+    q: params.q,
+    work_mode: params.workMode,
+    employment_type: params.employmentType,
+    years_experience: params.yearsValue,
+    posted_within_days: params.postedWithin,
+  }
+  if (params.sort !== 'match') return base
+  return {
+    ...base,
+    sort: 'match',
+    ...(params.minScore !== '' ? { min_score: params.minScore } : {}),
+    // Sent only when false: true is the API's default, and omitting it keeps the
+    // common request short and its URL readable in a log.
+    ...(params.excludeApplied ? {} : { exclude_applied: 'false' }),
   }
 }
 
@@ -123,11 +204,18 @@ function countSet(values: readonly string[]): number {
 }
 
 /**
- * How many of the five filters are set, the search term included.
+ * How many filters are set, the search term included.
  *
  * This is "is the list narrowed at all?" — it decides whether the empty state
  * offers to add a job or to widen the search, and whether there is anything for
  * "Clear all filters" to do.
+ *
+ * **Two deliberate exclusions.** `sort` is not counted because it narrows
+ * nothing; a reader who switched to match order has not filtered anything and
+ * would be puzzled by "1 filter" over untouched dropdowns. `excludeApplied` is
+ * not counted because it *defaults to on* — counting it would open every fresh
+ * page reading "Filters 1", and its off state is the less-filtered one, so
+ * counting only the non-default would be stranger still.
  */
 export function countActiveJobFilters({
   q,
@@ -135,8 +223,9 @@ export function countActiveJobFilters({
   employmentType,
   yearsValue,
   postedWithin,
+  minScore,
 }: JobListParams): number {
-  return countSet([q, workMode, employmentType, yearsValue, postedWithin])
+  return countSet([q, workMode, employmentType, yearsValue, postedWithin, minScore])
 }
 
 /**
@@ -152,8 +241,9 @@ export function countPanelFilters({
   employmentType,
   yearsValue,
   postedWithin,
+  minScore,
 }: JobListParams): number {
-  return countSet([workMode, employmentType, yearsValue, postedWithin])
+  return countSet([workMode, employmentType, yearsValue, postedWithin, minScore])
 }
 
 /**
@@ -198,6 +288,34 @@ export function setJobListFilter(
 export function clearJobListFilters(previous: URLSearchParams): URLSearchParams {
   const next = new URLSearchParams(previous)
   for (const key of JOB_FILTER_KEYS) next.delete(key)
+  next.delete('offset')
+  return next
+}
+
+/**
+ * Change the ordering, and drop the page with it.
+ *
+ * Separate from `setJobListFilter` because `sort` is not a filter key — putting
+ * it in `JOB_FILTER_KEYS` to reuse this function would make "Clear all filters"
+ * silently return the reader to date order, which is not what that button says.
+ *
+ * The page resets for the same reason a filter change resets it: page three of a
+ * date-ordered list has no counterpart in a match-ordered one, so keeping the
+ * offset would land on an unrelated screenful.
+ *
+ * Switching **away** from match also drops `min_score`. The API answers 422 to
+ * `min_score` without `sort=match`, and leaving it in the URL would arm a broken
+ * request for anyone who later shares or reloads that address.
+ */
+export function setJobListSort(previous: URLSearchParams, sort: JobSort): URLSearchParams {
+  const next = new URLSearchParams(previous)
+  if (sort === 'recent') {
+    next.delete('sort')
+    next.delete('min_score')
+    next.delete('exclude_applied')
+  } else {
+    next.set('sort', sort)
+  }
   next.delete('offset')
   return next
 }

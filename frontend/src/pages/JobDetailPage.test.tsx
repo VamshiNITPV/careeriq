@@ -28,6 +28,7 @@ function detailFixture(overrides: Partial<JobDetail> = {}): JobDetail {
     created_at: '2026-09-03T00:00:00Z',
     skill_count: 3,
     application: null,
+    match_score: null,
     source: 'USER_SUBMITTED',
     source_url: 'https://example.com/jobs/1',
     status: 'ACTIVE',

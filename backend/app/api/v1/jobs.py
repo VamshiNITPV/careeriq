@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Query, status
 
@@ -52,6 +52,9 @@ from app.services.job.fetch import fetch_and_import
 from app.services.job.pipeline import UnparseableJobError
 from app.services.job.similar import find_similar
 from app.services.matching.dimensions import SkillRequirementInput
+from app.services.matching.recall import recall_jobs
+from app.services.matching.recommend import rank_jobs
+from app.services.matching.weights import RANKING_VERSION
 
 log = get_logger(__name__)
 
@@ -64,15 +67,25 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 admin_router = APIRouter(prefix="/admin/jobs", tags=["admin"])
 
 
-def summary_of(job: Job, *, application: ApplicationRead | None) -> JobSummary:
+def summary_of(
+    job: Job,
+    *,
+    application: ApplicationRead | None,
+    match_score: Decimal | None = None,
+) -> JobSummary:
     """A list row, plus what this caller has done about it.
 
     `application` is passed rather than read off the job: it is per-caller, and
     a relationship on the model would either need a user filter the ORM cannot
     express on a plain attribute or would load every user's rows.
+
+    `match_score` is per-caller for the same reason, and defaults to None because
+    most callers have not computed one. None means "not scored here", never
+    "scores zero".
     """
     return JobSummary(
         application=application,
+        match_score=match_score,
         id=job.id,
         title=job.title,
         company=CompanyRead.model_validate(job.company) if job.company is not None else None,
@@ -165,10 +178,129 @@ async def submit_job(
     return JobSubmitResponse(job=_detail(result.job), is_duplicate=result.is_duplicate)
 
 
+async def _match_sorted(
+    *,
+    user: CurrentUser,
+    session: DbSession,
+    service: JobServiceDep,
+    matching: MatchingServiceDep,
+    applications: ApplicationRepositoryDep,
+    provider: EmbeddingProviderDep,
+    query: str | None,
+    work_mode: str | None,
+    employment_type: str | None,
+    experience_level: str | None,
+    years_experience: Decimal | None,
+    country_code: str | None,
+    posted_within_days: int | None,
+    limit: int,
+    offset: int,
+    min_score: Decimal | None,
+    exclude_applied: bool,
+) -> JobListResponse:
+    """The browse list, ordered by match score instead of by date.
+
+    Two-stage retrieval (ADR-006) with the browse filters pushed into stage one,
+    so the ranking is computed over the filtered subset rather than computed over
+    everything and filtered afterwards. The difference matters: recall is capped
+    at 200, so filtering after ranking would show the remote jobs among the 200
+    nearest — not the 200 nearest remote jobs.
+    """
+    chosen = await matching.default_resume_version_id(user.id)
+    if chosen is None:
+        return JobListResponse(
+            items=[], total=0, limit=limit, offset=offset, availability="NO_RESUME"
+        )
+    if provider is None:
+        return JobListResponse(
+            items=[], total=0, limit=limit, offset=offset, availability="PENDING"
+        )
+
+    filters = {
+        "query": query,
+        "work_mode": work_mode,
+        "employment_type": employment_type,
+        "experience_level": experience_level,
+        "years_experience": years_experience,
+        "country_code": country_code,
+        "posted_within_days": posted_within_days,
+    }
+    # Only when something is actually set. Unfiltered, this would bind every id
+    # in the corpus as a parameter to express no restriction at all.
+    allowed = (
+        await service.jobs.ids_matching(**filters)  # type: ignore[arg-type]
+        if any(value is not None and value != "" for value in filters.values())
+        else None
+    )
+
+    recalled = await recall_jobs(
+        session=session,
+        user_id=user.id,
+        resume_version_id=chosen,
+        model_name=provider.model_name,
+        exclude_applied=exclude_applied,
+        allowed_job_ids=allowed,
+    )
+    if recalled is None:
+        return JobListResponse(
+            items=[], total=0, limit=limit, offset=offset, availability="PENDING"
+        )
+
+    ids = [row.job_id for row in recalled]
+    # Carried forward from stage one rather than re-queried — the difference
+    # between one round trip and 200 (see rank_jobs).
+    cosines = {row.job_id: Decimal(str(row.similarity)) for row in recalled}
+    by_id = {job.id: job for job in await service.get_many(ids)}
+    ordered = [by_id[job_id] for job_id in ids if job_id in by_id]
+
+    page = await rank_jobs(
+        service=matching,
+        user_id=user.id,
+        resume_version_id=chosen,
+        jobs=ordered,
+        cosines=cosines,
+        limit=limit,
+        offset=offset,
+        min_score=min_score,
+    )
+
+    live = await applications.for_jobs(
+        user_id=user.id, job_ids=[result.job_id for result in page.items]
+    )
+    return JobListResponse(
+        items=[
+            summary_of(
+                by_id[result.job_id],
+                application=(
+                    ApplicationRead.model_validate(live[result.job_id])
+                    if result.job_id in live
+                    else None
+                ),
+                match_score=result.overall_score,
+            )
+            for result in page.items
+        ],
+        # Bounded by RECALL_LIMIT, not a corpus count — the client's wording has
+        # to say "matches", never "jobs".
+        total=page.total,
+        limit=limit,
+        offset=offset,
+        ranking_version=RANKING_VERSION,
+    )
+
+
 @router.get("", response_model=JobListResponse, summary="Browse jobs")
 async def list_jobs(
     user: CurrentUser,
     service: JobServiceDep,
+    # Needed only by `sort=match`, and injected unconditionally because FastAPI
+    # resolves dependencies before the handler can know which branch it will
+    # take. A session and three repositories are cheap; a session is opened for
+    # every request on this router anyway.
+    session: DbSession,
+    matching: MatchingServiceDep,
+    applications: ApplicationRepositoryDep,
+    provider: EmbeddingProviderDep,
     q: Annotated[str | None, Query(max_length=200, description="Title or description text")] = None,
     work_mode: WorkMode | None = None,
     employment_type: EmploymentType | None = None,
@@ -197,15 +329,65 @@ async def list_jobs(
     ] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
+    sort: Annotated[
+        Literal["recent", "match"],
+        Query(description="`recent` is newest first; `match` ranks against your resume."),
+    ] = "recent",
+    min_score: Annotated[
+        Decimal | None,
+        Query(ge=0, le=100, description="Only with `sort=match`: hide jobs scoring below this."),
+    ] = None,
+    exclude_applied: Annotated[
+        bool, Query(description="Only with `sort=match`: leave out jobs you have applied to.")
+    ] = True,
 ) -> JobListResponse:
-    """Live postings, newest first.
+    """Live postings, newest first — or ranked against the caller's resume.
 
     Offset pagination rather than the cursor api.md specifies. The corpus is
     small and this list is ordered by a non-unique timestamp, so a cursor would
     have to encode a composite key to be stable — work worth doing when
     `/recommendations` needs it in Phase 6, over a ranking whose order is
     genuinely expensive to recompute per page.
+
+    **`sort=match` is the same ranking `/recommendations` serves, reached through
+    the browse filters.** It lives here rather than as filters bolted onto
+    `/recommendations` because the browse list's page and filters live in its URL
+    — `/jobs?work_mode=REMOTE&offset=20` restores the list exactly — and a cursor
+    cannot be written into that URL. Folding the ranking into the endpoint that
+    already has filters was the smaller change than giving the ranking endpoint
+    filters, a total, and a second paging mode.
+
+    Until this existed, "remote Python jobs, best match first" was not expressible
+    anywhere: browse had every filter and no ranking, and `/recommendations` had
+    the ranking and no filters.
     """
+    if sort == "recent" and min_score is not None:
+        # Rejected rather than ignored. Silently dropping it would return a
+        # date-sorted list that looks like it honoured a score threshold, and the
+        # caller has no way to see that it did not.
+        raise ValidationError("min_score applies only when sort=match.")
+
+    if sort == "match":
+        return await _match_sorted(
+            user=user,
+            session=session,
+            service=service,
+            matching=matching,
+            applications=applications,
+            provider=provider,
+            query=q,
+            work_mode=work_mode.value if work_mode else None,
+            employment_type=employment_type.value if employment_type else None,
+            experience_level=experience_level.value if experience_level else None,
+            years_experience=years_experience,
+            country_code=country_code.upper() if country_code else None,
+            posted_within_days=posted_within_days,
+            limit=limit,
+            offset=offset,
+            min_score=min_score,
+            exclude_applied=exclude_applied,
+        )
+
     rows, total = await service.list_jobs(
         for_user_id=user.id,
         query=q,

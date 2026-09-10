@@ -7,13 +7,98 @@ from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import func, select, update
+from sqlalchemy import ColumnElement, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.models.application import Application
 from app.models.enums import JobStatus, SkillRequirement
 from app.models.job import Company, Job, JobSkill
 from app.repositories.base import BaseRepository
+
+
+def active_job_conditions(
+    *,
+    query: str | None = None,
+    work_mode: str | None = None,
+    employment_type: str | None = None,
+    experience_level: str | None = None,
+    years_experience: Decimal | None = None,
+    country_code: str | None = None,
+    posted_within_days: int | None = None,
+    company_id: uuid.UUID | None = None,
+) -> list[ColumnElement[bool]]:
+    """What "a live posting matching these filters" means, in one place.
+
+    Extracted from `list_active` so the **match-sorted** browse path can restrict
+    its vector recall to exactly the same postings. Browse and match ranking are
+    two orderings of one list, and a filter that meant something different in each
+    would not fail — it would quietly return a different set, which is the kind of
+    disagreement nobody notices until a user reports that a job "disappears when I
+    sort by match".
+
+    `app/services/matching/recall.py` restates `status` and `expires_at` in raw
+    SQL because it is a hand-written vector query. That is two definitions
+    already; these predicates exist so there is never a third.
+
+    Returned as a list rather than a single `and_()`, because `where(*conditions)`
+    already ANDs them and a flat list is what both callers want to extend.
+    """
+    now = datetime.now(UTC)
+    conditions: list[ColumnElement[bool]] = [
+        Job.status == JobStatus.ACTIVE,
+        (Job.expires_at.is_(None)) | (Job.expires_at > now),
+    ]
+
+    if query:
+        # Title or description. ILIKE rather than full-text search: the
+        # corpus is small until Phase 6 brings embeddings, and a tsvector
+        # column plus its index is work that semantic search then replaces.
+        pattern = f"%{query}%"
+        conditions.append(Job.title.ilike(pattern) | Job.description_raw.ilike(pattern))
+    if work_mode:
+        conditions.append(Job.work_mode == work_mode)
+    if employment_type:
+        conditions.append(Job.employment_type == employment_type)
+    if experience_level:
+        conditions.append(Job.experience_level == experience_level)
+    if years_experience is not None:
+        # "Does this posting's stated range cover me?"
+        #
+        # A null bound is no bound: a posting that never named a number has
+        # not ruled this candidate out, which is the same reading the
+        # ranking formula gives a missing salary. Two conditions rather than
+        # one nested boolean — where(*conditions) already ANDs them, and a
+        # pair of independent bound checks is what this actually is.
+        #
+        # The parentheses around each comparison are load-bearing: Python's
+        # `|` binds tighter than `<=`, so without them this parses as
+        # `(is_(None) | column) <= years` and silently means nothing.
+        conditions.append(
+            (Job.min_years_experience.is_(None)) | (Job.min_years_experience <= years_experience)
+        )
+        conditions.append(
+            (Job.max_years_experience.is_(None)) | (Job.max_years_experience >= years_experience)
+        )
+    if country_code:
+        conditions.append(Job.country_code == country_code)
+    if posted_within_days is not None:
+        # Undated postings are kept, the same reading `years_experience`
+        # gives a missing bound: nothing here says the posting is old, only
+        # that the provider did not say when it was published.
+        #
+        # This is load-bearing, not a nicety. Measured on 2026-09-07: 97 of
+        # 183 active postings carry no date at all, and 90 of those came
+        # from the provider rather than from hand entry — so excluding them
+        # would hide over half the corpus, most of it fetched and possibly
+        # recent, to make the filter read more strictly than the data
+        # supports. The cards say "date not given" so the gap is visible
+        # rather than silently folded into "recent".
+        cutoff = now - timedelta(days=posted_within_days)
+        conditions.append((Job.posted_at.is_(None)) | (Job.posted_at >= cutoff))
+    if company_id is not None:
+        conditions.append(Job.company_id == company_id)
+
+    return conditions
 
 
 class CompanyRepository(BaseRepository[Company]):
@@ -76,6 +161,39 @@ class JobRepository(BaseRepository[Job]):
             select(Job).where(Job.source == source, Job.external_id == external_id).limit(1)
         )
 
+    async def ids_matching(
+        self,
+        *,
+        query: str | None = None,
+        work_mode: str | None = None,
+        employment_type: str | None = None,
+        experience_level: str | None = None,
+        years_experience: Decimal | None = None,
+        country_code: str | None = None,
+        posted_within_days: int | None = None,
+    ) -> list[uuid.UUID]:
+        """Ids of the live postings these filters allow — nothing else.
+
+        Feeds the match-sorted browse path, which needs to restrict a vector
+        recall to a filtered subset. Ids only, because the rows themselves are
+        loaded later by the ranking pipeline and fetching them twice would double
+        the cost of the one request this is meant to make cheaper.
+
+        **Call this only when a filter is actually set.** Unfiltered, it returns
+        the whole active corpus and the caller would bind every id in the table
+        as a parameter to do no filtering at all.
+        """
+        conditions = active_job_conditions(
+            query=query,
+            work_mode=work_mode,
+            employment_type=employment_type,
+            experience_level=experience_level,
+            years_experience=years_experience,
+            country_code=country_code,
+            posted_within_days=posted_within_days,
+        )
+        return list((await self.session.scalars(select(Job.id).where(*conditions))).all())
+
     async def list_active(
         self,
         *,
@@ -103,62 +221,16 @@ class JobRepository(BaseRepository[Job]):
         anonymous browse today; if one ever arrives, that needs a deliberate
         nullable path rather than a default nobody noticed.
         """
-        now = datetime.now(UTC)
-        conditions = [
-            Job.status == JobStatus.ACTIVE,
-            (Job.expires_at.is_(None)) | (Job.expires_at > now),
-        ]
-
-        if query:
-            # Title or description. ILIKE rather than full-text search: the
-            # corpus is small until Phase 6 brings embeddings, and a tsvector
-            # column plus its index is work that semantic search then replaces.
-            pattern = f"%{query}%"
-            conditions.append(Job.title.ilike(pattern) | Job.description_raw.ilike(pattern))
-        if work_mode:
-            conditions.append(Job.work_mode == work_mode)
-        if employment_type:
-            conditions.append(Job.employment_type == employment_type)
-        if experience_level:
-            conditions.append(Job.experience_level == experience_level)
-        if years_experience is not None:
-            # "Does this posting's stated range cover me?"
-            #
-            # A null bound is no bound: a posting that never named a number has
-            # not ruled this candidate out, which is the same reading the
-            # ranking formula gives a missing salary. Two conditions rather than
-            # one nested boolean — where(*conditions) already ANDs them, and a
-            # pair of independent bound checks is what this actually is.
-            #
-            # The parentheses around each comparison are load-bearing: Python's
-            # `|` binds tighter than `<=`, so without them this parses as
-            # `(is_(None) | column) <= years` and silently means nothing.
-            conditions.append(
-                (Job.min_years_experience.is_(None))
-                | (Job.min_years_experience <= years_experience)
-            )
-            conditions.append(
-                (Job.max_years_experience.is_(None))
-                | (Job.max_years_experience >= years_experience)
-            )
-        if country_code:
-            conditions.append(Job.country_code == country_code)
-        if posted_within_days is not None:
-            # Undated postings are kept, the same reading `years_experience`
-            # gives a missing bound: nothing here says the posting is old, only
-            # that the provider did not say when it was published.
-            #
-            # This is load-bearing, not a nicety. Measured on 2026-09-07: 97 of
-            # 183 active postings carry no date at all, and 90 of those came
-            # from the provider rather than from hand entry — so excluding them
-            # would hide over half the corpus, most of it fetched and possibly
-            # recent, to make the filter read more strictly than the data
-            # supports. The cards say "date not given" so the gap is visible
-            # rather than silently folded into "recent".
-            cutoff = now - timedelta(days=posted_within_days)
-            conditions.append((Job.posted_at.is_(None)) | (Job.posted_at >= cutoff))
-        if company_id is not None:
-            conditions.append(Job.company_id == company_id)
+        conditions = active_job_conditions(
+            query=query,
+            work_mode=work_mode,
+            employment_type=employment_type,
+            experience_level=experience_level,
+            years_experience=years_experience,
+            country_code=country_code,
+            posted_within_days=posted_within_days,
+            company_id=company_id,
+        )
 
         total = (
             await self.session.scalar(select(func.count()).select_from(Job).where(*conditions))

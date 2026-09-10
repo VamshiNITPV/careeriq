@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 import pytest
 from httpx import AsyncClient
@@ -11,12 +12,98 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_jobs_provider
+from app.integrations.embeddings import FakeEmbeddingProvider
 from app.integrations.jobs.fake import FakeJobProvider
 from app.models.enums import UserRole
 from app.models.job import Company, Job
 from app.models.user import User
+from app.services.embedding.indexer import index_candidates, index_jobs
+from tests.fixtures.documents import build_pdf
 
 API = "/api/v1"
+
+# Bodies for the match-sorted browse tests. Two backend postings and one that is
+# unmistakably not, so "did the ranking work?" has an answer that does not depend
+# on the scoring formula's details — which are tested in test_recommendations.py.
+BACKEND_BODY = """Senior Backend Engineer
+
+About us
+Zeta Labs builds payments infrastructure for teams across India.
+
+Responsibilities
+- Design and build backend services in Python
+- Own services end to end, from schema to deploy
+
+Requirements
+- 5+ years of professional backend experience
+- Strong Python, FastAPI and PostgreSQL
+"""
+
+SECOND_BACKEND_BODY = """Backend Python Developer
+
+About us
+Acme Technologies builds payments infrastructure for teams in India.
+
+Responsibilities
+- Build and maintain backend services in Python
+- Own PostgreSQL schemas end to end
+
+Requirements
+- 4+ years of professional backend experience
+- Strong Python, FastAPI and PostgreSQL
+"""
+
+NURSE_BODY = """Registered Paediatric Nurse
+
+About us
+A childrens hospital ward in Chennai.
+
+Responsibilities
+- Provide bedside nursing care on the paediatric ward
+- Administer medication and record patient observations
+
+Requirements
+- Registered nursing qualification
+- Two years of ward experience
+"""
+
+
+async def submit_job(
+    client: AsyncClient, headers: dict[str, str], title: str, body: str
+) -> str:
+    response = await client.post(
+        f"{API}/jobs",
+        headers=headers,
+        json={
+            "description": body,
+            "title": title,
+            "source_url": f"https://jobs.example.com/{title.lower().replace(' ', '-')}",
+        },
+    )
+    assert response.status_code == 201, response.text
+    return str(response.json()["job"]["id"])
+
+
+async def upload_and_parse(client: AsyncClient, headers: dict[str, str], run_pipeline) -> None:
+    """Upload and parse a resume.
+
+    The *pipeline* sets `current_version_id`, not the upload — and
+    `default_resume_version_id` reads that, so an unparsed upload still answers
+    NO_RESUME.
+    """
+    response = await client.post(
+        f"{API}/resumes",
+        headers=headers,
+        files={"file": ("resume.pdf", build_pdf(), "application/pdf")},
+    )
+    assert response.status_code == 202, response.text
+    await run_pipeline(uuid.UUID(response.json()["version_id"]))
+
+
+async def index_both_sides(session: AsyncSession, provider: FakeEmbeddingProvider) -> None:
+    """Embed jobs and resumes. Without both, recall answers PENDING."""
+    await index_jobs(session=session, provider=provider, batch_size=500)
+    await index_candidates(session=session, provider=provider, batch_size=50)
 
 
 def posting(
@@ -669,6 +756,231 @@ class TestBrowse:
 
         response = await client.get(f"{API}/jobs/{created['id']}", headers=other_headers)
         assert response.status_code == 200
+
+
+class TestMatchSortedBrowse:
+    """`GET /jobs?sort=match` — the ranking reached through the browse filters.
+
+    Until this existed the two were disjoint: browse had every filter and no
+    ranking, `/recommendations` had the ranking and no filters, so "remote Python
+    jobs, best match first" could not be asked for anywhere. These tests are
+    mostly about the seam between them rather than about the ranking itself,
+    which `test_recommendations.py` already covers.
+    """
+
+    async def test_no_resume_is_a_stated_answer_not_an_empty_list(
+        self, client: AsyncClient, auth_headers: dict[str, str], seeded_skills: int
+    ) -> None:
+        """An empty list with no explanation reads as "no job suits you".
+
+        That is a far more discouraging claim than the true one, and the reader
+        cannot act on it. Same contract as `/recommendations`, deliberately.
+        """
+        response = await client.get(f"{API}/jobs?sort=match", headers=auth_headers)
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["availability"] == "NO_RESUME"
+        assert body["items"] == []
+        assert body["total"] == 0
+
+    async def test_pending_when_the_resume_is_not_indexed_yet(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        run_pipeline,
+    ) -> None:
+        await submit_job(client, auth_headers, "Senior Backend Engineer", BACKEND_BODY)
+        await upload_and_parse(client, auth_headers, run_pipeline)
+
+        body = (await client.get(f"{API}/jobs?sort=match", headers=auth_headers)).json()
+
+        assert body["availability"] == "PENDING"
+        assert body["items"] == []
+
+    async def test_browsing_by_date_never_reports_availability(
+        self, client: AsyncClient, auth_headers: dict[str, str], seeded_skills: int
+    ) -> None:
+        """The default sort cannot fail these ways, so it always says READY.
+
+        Worth pinning: a client that learned to render the NO_RESUME state must
+        not start showing "upload a resume" to someone merely browsing.
+        """
+        body = (await client.get(f"{API}/jobs", headers=auth_headers)).json()
+
+        assert body["availability"] == "READY"
+        assert body["ranking_version"] is None
+
+    async def test_ranks_by_score_and_scores_every_row(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        embedding_provider,
+        run_pipeline,
+    ) -> None:
+        await submit_job(client, auth_headers, "Senior Backend Engineer", BACKEND_BODY)
+        await submit_job(client, auth_headers, "Registered Paediatric Nurse", NURSE_BODY)
+        await upload_and_parse(client, auth_headers, run_pipeline)
+        await index_both_sides(db_session, embedding_provider)
+
+        body = (await client.get(f"{API}/jobs?sort=match", headers=auth_headers)).json()
+
+        assert body["availability"] == "READY"
+        assert body["ranking_version"] == "v1-hand-tuned"
+        scores = [Decimal(item["match_score"]) for item in body["items"]]
+        assert len(scores) == 2
+        assert scores == sorted(scores, reverse=True)
+        # The resume is a backend one; the nursing post must not outrank it.
+        assert body["items"][0]["title"] == "Senior Backend Engineer"
+
+    async def test_a_browse_sorted_row_carries_no_score(
+        self, client: AsyncClient, auth_headers: dict[str, str], seeded_skills: int
+    ) -> None:
+        """Null, not zero.
+
+        Zero would assert that the job scores nothing for this caller, which is a
+        claim nothing computed (ADR-012). Null says only that no score was asked
+        for here.
+        """
+        await submit_job(client, auth_headers, "Senior Backend Engineer", BACKEND_BODY)
+
+        body = (await client.get(f"{API}/jobs", headers=auth_headers)).json()
+
+        assert body["items"][0]["match_score"] is None
+
+    async def test_a_filter_narrows_the_ranked_set(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        embedding_provider,
+        run_pipeline,
+    ) -> None:
+        """The combination that did not exist before this change.
+
+        Filters are pushed into stage one rather than applied to its output. The
+        distinction is invisible at three jobs but not at scale: recall caps at
+        200, so filtering afterwards would return the remote jobs *among the 200
+        nearest*, rather than the 200 nearest remote jobs.
+        """
+        await submit_job(client, auth_headers, "Senior Backend Engineer", BACKEND_BODY)
+        await submit_job(client, auth_headers, "Backend Python Developer", SECOND_BACKEND_BODY)
+        await submit_job(client, auth_headers, "Registered Paediatric Nurse", NURSE_BODY)
+        await upload_and_parse(client, auth_headers, run_pipeline)
+        await index_both_sides(db_session, embedding_provider)
+
+        body = (
+            await client.get(f"{API}/jobs?sort=match&q=Paediatric", headers=auth_headers)
+        ).json()
+
+        assert [item["title"] for item in body["items"]] == ["Registered Paediatric Nurse"]
+        assert body["total"] == 1
+        # Still ranked, still scored — a filter changes the set, not the mode.
+        assert body["items"][0]["match_score"] is not None
+
+    async def test_both_sorts_agree_on_what_a_filter_means(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        embedding_provider,
+        run_pipeline,
+    ) -> None:
+        """The regression guard for the duplicated-predicate risk.
+
+        Browse filters are SQLAlchemy conditions; recall is hand-written SQL.
+        They share one definition (`active_job_conditions`) precisely so the two
+        modes cannot drift — and drift would be silent, showing a job in one
+        ordering and not in the other. This fails if anyone restates a predicate
+        instead of reusing it.
+        """
+        await submit_job(client, auth_headers, "Senior Backend Engineer", BACKEND_BODY)
+        await submit_job(client, auth_headers, "Backend Python Developer", SECOND_BACKEND_BODY)
+        await submit_job(client, auth_headers, "Registered Paediatric Nurse", NURSE_BODY)
+        await upload_and_parse(client, auth_headers, run_pipeline)
+        await index_both_sides(db_session, embedding_provider)
+
+        for filters in ("q=Backend", "q=nurse", "posted_within_days=7", ""):
+            recent = await client.get(f"{API}/jobs?{filters}", headers=auth_headers)
+            matched = await client.get(f"{API}/jobs?sort=match&{filters}", headers=auth_headers)
+
+            by_date = {item["id"] for item in recent.json()["items"]}
+            by_match = {item["id"] for item in matched.json()["items"]}
+            assert by_date == by_match, f"the two sorts disagree about ?{filters}"
+
+    async def test_min_score_without_match_sort_is_rejected(
+        self, client: AsyncClient, auth_headers: dict[str, str], seeded_skills: int
+    ) -> None:
+        """Rejected rather than ignored.
+
+        Ignoring it would return a date-sorted list that looks like it honoured a
+        threshold, and the caller cannot tell that it did not.
+        """
+        response = await client.get(f"{API}/jobs?min_score=60", headers=auth_headers)
+
+        assert response.status_code == 422, response.text
+
+    async def test_min_score_filters_the_ranked_list(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        embedding_provider,
+        run_pipeline,
+    ) -> None:
+        await submit_job(client, auth_headers, "Senior Backend Engineer", BACKEND_BODY)
+        await submit_job(client, auth_headers, "Registered Paediatric Nurse", NURSE_BODY)
+        await upload_and_parse(client, auth_headers, run_pipeline)
+        await index_both_sides(db_session, embedding_provider)
+
+        everything = (await client.get(f"{API}/jobs?sort=match", headers=auth_headers)).json()
+        floor = max(Decimal(item["match_score"]) for item in everything["items"])
+
+        body = (
+            await client.get(f"{API}/jobs?sort=match&min_score={floor}", headers=auth_headers)
+        ).json()
+
+        assert [item["title"] for item in body["items"]] == ["Senior Backend Engineer"]
+        assert body["total"] == 1
+
+    async def test_paging_covers_the_ranking_exactly_once(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        embedding_provider,
+        run_pipeline,
+    ) -> None:
+        """Offset paging, because the browse list's page lives in its URL.
+
+        A cursor cannot be written as `?offset=`, and `/jobs?...&offset=20` has to
+        restore the list exactly — which is the whole reason browse state moved
+        into the URL in the first place.
+        """
+        await submit_job(client, auth_headers, "Senior Backend Engineer", BACKEND_BODY)
+        await submit_job(client, auth_headers, "Backend Python Developer", SECOND_BACKEND_BODY)
+        await submit_job(client, auth_headers, "Registered Paediatric Nurse", NURSE_BODY)
+        await upload_and_parse(client, auth_headers, run_pipeline)
+        await index_both_sides(db_session, embedding_provider)
+
+        seen: list[str] = []
+        for offset in (0, 1, 2):
+            body = (
+                await client.get(
+                    f"{API}/jobs?sort=match&limit=1&offset={offset}", headers=auth_headers
+                )
+            ).json()
+            assert body["total"] == 3
+            seen += [item["id"] for item in body["items"]]
+
+        assert len(seen) == len(set(seen)) == 3
 
 
 class TestImport:

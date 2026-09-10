@@ -123,6 +123,17 @@ class JobSummary(BaseModel):
     #: booleans have nowhere to put; and it is the same shape PUT returns, so the
     #: client swaps one field with no translation either way.
     application: ApplicationRead | None = None
+    #: This caller's match score, 0-100, when the list was sorted by match.
+    #:
+    #: Null in every other case, and null is not zero: a browse-sorted list has
+    #: not computed a score, which is a different statement from "this job scores
+    #: nothing for you" (ADR-012 — never assert something about a candidate that
+    #: was not established). The client renders the row without a score rather
+    #: than rendering a 0.
+    #:
+    #: Decimal, serialised as a string, for the reason every score in this API is:
+    #: a float would render 68.4 as 68.40000000000001 in some clients.
+    match_score: Decimal | None = None
 
 
 class JobDetail(JobSummary):
@@ -173,6 +184,21 @@ class JobListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+    #: Why `items` may be empty when sorting by match.
+    #:
+    #: Always READY for a date-sorted browse, which cannot fail this way. Under
+    #: `sort=match` it carries the two states that are not "nothing matched":
+    #: NO_RESUME (there is nothing to match against) and PENDING (the resume is
+    #: not embedded yet). Both are 200s with data, not error statuses — the same
+    #: contract `/recommendations` uses, and for the same reason: an empty list
+    #: with no explanation reads as "no job in the world suits you", which is a
+    #: far more discouraging claim than either true one.
+    availability: Literal["READY", "PENDING", "NO_RESUME"] = "READY"
+    #: The ranking this list was produced by, when sorted by match.
+    #:
+    #: Null in browse mode. Present so a score can be interpreted later: "68.4"
+    #: means nothing without knowing which formula produced it.
+    ranking_version: str | None = None
 
 
 class JobSubmitRequest(BaseModel):

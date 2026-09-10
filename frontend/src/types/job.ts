@@ -70,6 +70,17 @@ export interface JobSummary {
    * returns, so updating a row is a field swap with no translation.
    */
   application: ApplicationRead | null
+  /**
+   * Your match score out of 100, when the list was sorted by match.
+   *
+   * Null everywhere else — and null is not zero. A browse-sorted list has not
+   * computed a score, which is a different statement from "this job scores
+   * nothing for you". Render the row without a score rather than a 0.
+   *
+   * A string, like every score in this API, so 68.4 cannot arrive as
+   * 68.40000000000001.
+   */
+  match_score: string | null
 }
 
 export interface JobDetail extends JobSummary {
@@ -87,9 +98,28 @@ export interface JobDetail extends JobSummary {
 
 export interface JobListResponse {
   items: JobSummary[]
+  /**
+   * Rows in the whole list.
+   *
+   * Under `sort=match` this is **capped by the recall limit (200)**, so it is the
+   * number of ranked matches rather than a corpus count. The page's wording has
+   * to reflect that: "247 matches" would be an invented number.
+   */
   total: number
   limit: number
   offset: number
+  /**
+   * Why `items` may be empty under `sort=match`.
+   *
+   * Always READY for a date-sorted browse, which cannot fail these ways. The two
+   * other values are not errors: NO_RESUME means there is nothing to match
+   * against, PENDING means the resume is not embedded yet. Both arrive as 200s
+   * with data, because an empty list with no explanation reads as "no job in the
+   * world suits you" — a much more discouraging claim than either true one.
+   */
+  availability: 'READY' | 'PENDING' | 'NO_RESUME'
+  /** Which ranking produced the scores, or null in browse mode. */
+  ranking_version: string | null
 }
 
 export interface JobSubmitResponse {

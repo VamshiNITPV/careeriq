@@ -18,6 +18,7 @@ function item(overrides: Partial<ApplicationListItem> = {}): ApplicationListItem
       id: 'j1',
       title: 'Senior Data Engineer',
       company: { id: 'c1', name: 'Zeta Payments', website: null, industry: null },
+      match_score: null,
       location: 'Bengaluru, India',
       country_code: 'IN',
       work_mode: 'HYBRID',

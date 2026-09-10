@@ -309,6 +309,25 @@ code `UNEXTRACTABLE_DOCUMENT` (requirements.md §6).
 > composite key — worth doing for `/recommendations` in Phase 6, where the
 > ordering is expensive to recompute per page, and not before.
 >
+> **`GET /jobs?sort=match` shipped in Phase 6.5** — the same ranking
+> `/recommendations` serves, reached through the browse filters. It adds
+> `sort` (`recent` | `match`), `min_score` and `exclude_applied`, and answers with
+> an `availability` of `READY` | `PENDING` | `NO_RESUME` plus a `match_score` per
+> row (null when sorting by date — null, never zero, because an unscored row has
+> made no claim about the caller).
+>
+> It lives on `/jobs` rather than as filters added to `/recommendations` because
+> the browse list's filters *and page* live in its URL, and a cursor cannot be
+> written as `?offset=`. Ranked mode therefore pages by offset too — which costs
+> nothing, since the endpoint re-scores the whole recall set on every request in
+> either mode. **`total` under `sort=match` is capped by the recall limit (200)**,
+> so it counts ranked matches rather than corpus rows, and the interface says
+> "matches" there for that reason.
+>
+> Until this shipped the two were disjoint — browse had every filter and no
+> ranking, `/recommendations` had the ranking and no filters — so "remote Python
+> jobs, best match first" could not be expressed anywhere in the product.
+>
 > `/jobs/{id}/match` **shipped in Phase 6.2.** As built it differs from the sketch below in
 > four ways, each of which exists to stop the payload claiming more than it knows.
 >
@@ -485,6 +504,15 @@ its complexity at `/recommendations` in 6.3, where one request scores two hundre
 
 Query params: `limit`, `cursor`, `min_score`, `exclude_applied` (default `true`),
 `resume_version_id` (default: primary resume's current version).
+
+> **This endpoint has no browse filters, and is not gaining any.** Since Phase 6.5
+> the filtered ranking lives at `GET /jobs?sort=match` (section 2.4). What remains
+> here is the cursor-paged feed behind the dashboard's "Recommended for you"
+> panel, and `POST /recommendations/{job_id}/feedback`.
+>
+> There is no `/recommendations` page in the interface any more — match ranking is
+> a sort mode on the Jobs page, and the old route redirects to
+> `/jobs?sort=match`.
 
 ---
 

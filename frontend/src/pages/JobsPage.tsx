@@ -10,26 +10,42 @@ import { Select } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
 import { ApiError } from '@/services/apiClient'
 import { jobService } from '@/services/jobService'
-import { EXPERIENCE_YEAR_OPTIONS, POSTED_WITHIN_OPTIONS, type JobSummary } from '@/types/job'
+import {
+  EXPERIENCE_YEAR_OPTIONS,
+  POSTED_WITHIN_OPTIONS,
+  type JobListResponse,
+  type JobSummary,
+} from '@/types/job'
 import { EMPLOYMENT_TYPES, WORK_MODES } from '@/types/profile'
 import { cn } from '@/utils/cn'
 import {
   clearJobListFilters,
   countActiveJobFilters,
   countPanelFilters,
+  MIN_SCORE_OPTIONS,
   PAGE_SIZE,
   readJobListParams,
   setJobListFilter,
   setJobListOffset,
+  setJobListSort,
+  SORT_OPTIONS,
   type JobFilterKey,
+  type JobSort,
 } from '@/utils/jobListParams'
 
 /**
- * Browse the job corpus.
+ * Browse the job corpus, by date or by how well each posting matches you.
  *
- * Ranking is Phase 6 — this lists newest-first with filters. Deliberately not
- * dressed up as recommendations: showing an unranked list under a heading that
- * implies personalisation would be a claim the system cannot yet support.
+ * **Both orderings live here rather than on two pages.** They were split until
+ * Phase 6.5: browse had every filter and no ranking, a separate `/recommendations`
+ * page had the ranking and no filters, so "remote Python jobs, best match first"
+ * could not be asked for anywhere. Sorting is a property of this list, not a
+ * different feature.
+ *
+ * Match mode makes a claim about the reader, so it says so plainly — scores are
+ * shown per row and each links to the breakdown that produced it. It is never
+ * the default: an unranked list under a heading implying personalisation would
+ * be a claim the system had not made.
  */
 
 const SEARCH_DEBOUNCE_MS = 300
@@ -63,6 +79,10 @@ export function JobsPage() {
   const [total, setTotal] = useState(0)
   const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [error, setError] = useState<string | null>(null)
+  // Why a match-sorted list came back empty. Always READY when browsing by date,
+  // which cannot fail this way.
+  const [availability, setAvailability] =
+    useState<JobListResponse['availability']>('READY')
 
   const [searchParams, setSearchParams] = useSearchParams()
 
@@ -74,6 +94,8 @@ export function JobsPage() {
   // primitives and nothing else; `params` exists only to be counted.
   const params = readJobListParams(searchParams)
   const { q, workMode, employmentType, yearsValue, postedWithin, offset } = params
+  const { sort, minScore, excludeApplied } = params
+  const ranked = sort === 'match'
 
   // What the input shows, versus what the URL holds. Separated so typing stays
   // responsive while requests lag behind it. Seeded from the URL, so arriving
@@ -150,6 +172,19 @@ export function JobsPage() {
     [setSearchParams],
   )
 
+  /**
+   * Change the ordering. Not `setFilter`, because sort is not a filter.
+   *
+   * `replace` like the filters: switching order is a change to the current view,
+   * not a new place, and pushing would make Back walk through orderings before
+   * leaving the page.
+   */
+  const setSort = useCallback(
+    (next: JobSort) =>
+      setSearchParams((previous) => setJobListSort(previous, next), { replace: true }),
+    [setSearchParams],
+  )
+
   const clearFilters = useCallback(() => {
     // Emptying the box is not redundant, though it looks it: usually the
     // render-phase sync above does it, because `q` changes and the box follows.
@@ -186,6 +221,16 @@ export function JobsPage() {
         // a real filter, and Number('0') is falsy.
         ...(yearsValue !== '' ? { years_experience: Number(yearsValue) } : {}),
         ...(postedWithin !== '' ? { posted_within_days: Number(postedWithin) } : {}),
+        // Sort and its two companions, dropped entirely in browse mode — the
+        // API answers 422 to min_score without sort=match, so a stale
+        // `?min_score=60` left in the URL would otherwise break the page.
+        ...(sort === 'match'
+          ? {
+              sort: 'match' as const,
+              ...(minScore !== '' ? { min_score: Number(minScore) } : {}),
+              ...(excludeApplied ? {} : { exclude_applied: false }),
+            }
+          : {}),
         limit: PAGE_SIZE,
         offset,
       })
@@ -195,6 +240,7 @@ export function JobsPage() {
           if (id !== requestId.current) return
           setJobs(response.items)
           setTotal(response.total)
+          setAvailability(response.availability)
           setLoadState('ready')
         },
         (caught: unknown) => {
@@ -205,7 +251,7 @@ export function JobsPage() {
           setLoadState('error')
         },
       )
-  }, [q, workMode, employmentType, yearsValue, postedWithin, offset])
+  }, [q, workMode, employmentType, yearsValue, postedWithin, offset, sort, minScore, excludeApplied])
 
   useEffect(load, [load])
 
@@ -232,16 +278,27 @@ export function JobsPage() {
     On error there is no count to promise, and the button must stay enabled: it
     is the only way back to the "Try again" control.
   */
+  /*
+    "matches" rather than "jobs" in match mode, and the distinction is factual
+    rather than stylistic: a ranked total is capped at the recall limit, so it
+    counts the postings that were ranked, not the postings that exist. Calling
+    that "200 jobs" on a corpus of 300 would be a number nothing measured.
+  */
+  const [one, many] = ranked ? ['match', 'matches'] : ['job', 'jobs']
   const showResultsLabel =
     loadState === 'error' || total === 0
       ? 'Show results'
       : total === 1
-        ? 'Show 1 job'
-        : `Show ${total} jobs`
+        ? `Show 1 ${one}`
+        : `Show ${total} ${many}`
 
   /** The prose form, for the live region. Mirrors the "past the end" wording. */
   const totalSentence =
-    total === 0 ? 'No jobs to show.' : total === 1 ? '1 job to show.' : `${total} jobs to show.`
+    total === 0
+      ? `No ${many} to show.`
+      : total === 1
+        ? `1 ${one} to show.`
+        : `${total} ${many} to show.`
 
   return (
     <div className="space-y-6">
@@ -358,7 +415,10 @@ export function JobsPage() {
         <div
           id="job-filters"
           className={cn(
-            'mt-4 gap-4 sm:grid-cols-2 lg:grid-cols-4',
+            // Three columns, not four: browse shows five controls and match
+            // shows seven, and both divide more evenly by three than the four
+            // this had when there were exactly four dropdowns.
+            'mt-4 gap-4 sm:grid-cols-2 lg:grid-cols-3',
             filtersOpen ? 'grid' : 'hidden',
           )}
         >
@@ -405,6 +465,47 @@ export function JobsPage() {
             onChange={(e) => setFilter('posted_within_days', e.target.value)}
             hint="Postings with no stated date are still shown."
           />
+          {/*
+            Sort sits with the filters because this is where someone comes to
+            change what the list shows, but it is not one of them — no
+            placeholder, since "no ordering" is not a state a list can be in, and
+            it is excluded from both filter counts and from Clear all.
+          */}
+          <Select
+            label="Sort by"
+            options={SORT_OPTIONS}
+            value={sort}
+            onChange={(e) => setSort(e.target.value as JobSort)}
+            hint="Best match ranks every job against your resume."
+          />
+          {/*
+            Only in match mode. Both controls are meaningless over a date-ordered
+            list, and rendering them disabled would be four more things to read
+            past for a reader who has not asked for ranking at all.
+          */}
+          {ranked && (
+            <Select
+              label="Minimum score"
+              placeholder="Any score"
+              options={MIN_SCORE_OPTIONS}
+              value={minScore}
+              onChange={(e) => setFilter('min_score', e.target.value)}
+            />
+          )}
+          {ranked && (
+            <label className="flex items-center gap-2 self-end pb-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={excludeApplied}
+                // Written as the string 'false' and deleted when true, so the
+                // default state leaves no trace in the URL — one canonical
+                // address per view, the same rule every other filter follows.
+                onChange={(e) => setFilter('exclude_applied', e.target.checked ? '' : 'false')}
+                className="size-4 rounded border-slate-300"
+              />
+              Hide jobs I&apos;ve applied to
+            </label>
+          )}
         </div>
 
         {/*
@@ -505,17 +606,52 @@ export function JobsPage() {
                 Back to the first page
               </Button>
             </div>
+          ) : availability === 'NO_RESUME' ? (
+            /*
+              Ranking needs something to rank against. Said plainly, because the
+              alternative — an empty list — reads as "no job matches you", which
+              is both untrue and far more discouraging than the real problem,
+              and gives the reader nothing to act on.
+            */
+            <div className="rounded-lg border border-dashed border-slate-300 bg-white p-10 text-center">
+              <p className="text-sm font-medium text-slate-900">
+                Upload a resume and we&apos;ll rank every job against it.
+              </p>
+              <p className="mt-1 text-sm text-slate-600">
+                Or switch back to Newest first to browse without one.
+              </p>
+              <Link to="/resume" className={buttonClass({ className: 'mt-4' })}>
+                Upload a resume
+              </Link>
+            </div>
+          ) : availability === 'PENDING' ? (
+            <div className="rounded-lg border border-dashed border-slate-300 bg-white p-10 text-center">
+              <p className="text-sm font-medium text-slate-900">
+                We haven&apos;t finished reading your resume yet.
+              </p>
+              <p className="mt-1 text-sm text-slate-600">
+                Check back shortly and your matches will be here.
+              </p>
+            </div>
           ) : jobs.length === 0 ? (
             <div className="rounded-lg border border-dashed border-slate-300 bg-white p-10 text-center">
               <p className="text-sm font-medium text-slate-900">
-                {hasFilters ? 'No jobs match those filters.' : 'No jobs yet.'}
+                {hasFilters
+                  ? `No ${many} match those filters.`
+                  : ranked
+                    ? // Never "no jobs yet" in match mode: the corpus is not
+                      // empty, nothing in it scored well enough.
+                      'Nothing matches closely enough to recommend yet.'
+                    : 'No jobs yet.'}
               </p>
               <p className="mt-1 text-sm text-slate-600">
                 {hasFilters
                   ? 'Try widening the search.'
-                  : 'Paste a posting you are interested in to get started.'}
+                  : ranked
+                    ? 'More postings arrive daily.'
+                    : 'Paste a posting you are interested in to get started.'}
               </p>
-              {!hasFilters && (
+              {!hasFilters && !ranked && (
                 <Link to="/jobs/new" className={buttonClass({ className: 'mt-4' })}>
                   Add a job
                 </Link>
@@ -539,6 +675,21 @@ export function JobsPage() {
                         previous.map((row) => (row.id === job.id ? { ...row, application } : row)),
                       )
                     }
+                    // A score with no way to see why is a number to be taken on
+                    // trust. `footer` rather than a wrapper because JobCard is
+                    // the <li>, and wrapping it would nest one inside another.
+                    {...(job.match_score !== null
+                      ? {
+                          footer: (
+                            <p className="mt-2 border-t border-slate-100 pt-2 text-xs text-slate-500">
+                              Match score {job.match_score} / 100 &middot;{' '}
+                              <Link to={`/jobs/${job.id}`} className="relative z-10 underline">
+                                see why
+                              </Link>
+                            </p>
+                          ),
+                        }
+                      : {})}
                   />
                 ))}
               </ul>
