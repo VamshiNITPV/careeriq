@@ -5,8 +5,9 @@ parses job descriptions, ranks jobs by personalized fit using hybrid semantic + 
 identifies skill gaps, suggests grounded resume improvements, tracks application outcomes, and
 conducts adaptive AI mock interviews.
 
-> **Status:** Phases 1–5.8 complete, and Phase 6 is under way — 6.1 (embeddings), 6.2 (the
-> explainable match score) and 6.3 (recommendations) are done.
+> **Status:** Phases 1–5.8 complete, and Phase 6 is nearly done — 6.1 (embeddings), 6.2 (the
+> explainable match score) and 6.3 (recommendations) are finished, and 6.4's matching
+> evaluation is built and reported. Near-duplicate detection is the remaining piece.
 
 ---
 
@@ -111,7 +112,7 @@ Read these in order:
 | 6.1 | Embeddings — `pgvector`, local model, "Similar jobs" | ✅ Done⁵ |
 | 6.2 | Hybrid explainable score — six dimensions, `/jobs/{id}/match` | ✅ Done⁶ |
 | 6.3 | Recommendations — two-stage retrieval, ranked list, dashboard tile | ✅ Done⁷ |
-| 6.4 | Evaluation — labelled dataset, metrics, weight tuning, near-duplicates | ⬜ |
+| 6.4 | Evaluation — labelled dataset, metrics, weight tuning, near-duplicates | ◐ Part done⁸ |
 | 7 | Career intelligence — skill gaps, learning paths, resume optimization | ⬜ |
 | 8 | Application system — tracking, analytics, outcome analysis | ⬜ |
 | 9 | AI interview — question generation, adaptive engine, evaluation | ⬜ |
@@ -206,6 +207,43 @@ cache was built and the docs that had promised one were corrected.
 A feedback endpoint ships alongside it, and nothing reads it yet. That is the point: a learned
 ranker needs labelled examples, and those can only be collected going forward — adding the endpoint
 later would mean starting from an empty table.
+
+⁸ **The step that checks whether any of the ranking actually works — and the honest answer is
+"mostly, with one clear miss and one clear warning".**
+
+There is now a labelled dataset (122 resume/job pairs), four baselines to beat, and a committed
+results file under `ml/evaluation/results/`. The headline number is the one the whole design was
+staked on: **the six-dimension hybrid scores NDCG@10 of 0.611 against 0.400 for raw embedding
+similarity alone.** ADR-005 said that if the hybrid could not beat plain cosine, the complexity
+should be removed. It beats it comfortably, and it also beats keyword matching (0.408) and
+skill-rules-only (0.513).
+
+**It misses one target.** NDCG@10 should be 0.75 and is 0.611 — the ranking puts relevant jobs in
+the top five reliably (precision@5 of 0.800, against a 0.70 target) but does not sort the very best
+above the merely good well enough.
+
+**And the sample size is the real finding.** The dataset requirement was "at least 100 pairs", which
+is met — but those pairs cover only **two distinct people**, because the corpus holds one real
+resume and one test fixture that several test accounts uploaded. Averaging a per-query metric over
+two queries is an anecdote however carefully it is computed, so a pair-level correlation is reported
+alongside (0.392 over 122 pairs) and **weight tuning was refused**: six numbers cannot be fitted to
+two people without simply memorising them.
+
+An ablation stands in for tuning, and it threw up something worth chasing: removing the *skill*
+dimension entirely would **raise** NDCG@10 to 0.739 and all but meet the target. That is a lead, not a
+licence — the labels were proposed by me and my rubric leaned on seniority, so the result is partly
+circular until a human corrects them. `ml/datasets/matching/REVIEW.md` exists to make that
+correction take half an hour.
+
+Two smaller things the run caught. **Random scores a perfect 1.000 on MRR**, because half the pool
+is relevant and landing one first is near a coin toss — that metric discriminates nothing here and
+should not be read as a pass. And **Recall@200 (0.954) only means anything because the dataset
+deliberately includes jobs the retrieval stage never returned**; without them it would have reported
+1.0 by construction. Three of those sampled jobs turned out to be relevant, including a
+`Python- React, Next JS Fullstack Engineer` posting that matches the real resume closely and which
+stage one simply lost.
+
+Still to do in this step: near-duplicate detection and its own labelled dataset.
 
 ⁴ **Variety, not recency.** Measurement settled this: filtering the provider to the last three days
 returned nothing, the last week returned nothing, and an unasked role-and-city combination returned

@@ -647,6 +647,33 @@ plausible." That is unmeasurable and unfalsifiable.
 | Skill extraction | Hand-annotated resumes with gold skill sets | Precision, Recall, F1 |
 | Duplicate detection | Labelled duplicate/non-duplicate job pairs | Precision, Recall, confusion matrix |
 | Interview scoring | Human-scored answers | Correlation and mean absolute error vs human scores |
+
+**Amendment, 2026-09-10 — the matching harness is built, and the sample size is the finding.**
+
+Phase 6.4 delivered `ml/evaluation/` (metrics, four baselines, pooled dataset builder, runner) with
+41 unit tests over the metrics and baselines, and committed results under
+`ml/evaluation/results/`. The hybrid beats every baseline on NDCG@10 — 0.611 against embedding-only's
+0.400 — which is the comparison ADR-005 staked itself on, and it passes. NDCG@10 misses its 0.75
+target, which is reported rather than explained away.
+
+What this ADR did not anticipate is that **the dataset requirement is satisfiable while the metrics
+it feeds are not meaningful.** "≥100 labelled pairs" is met (122), but those pairs cover **two
+distinct people**, because the corpus contains one real resume and one test fixture uploaded by
+several accounts. Per-query metrics averaged over two queries are an anecdote. Three consequences,
+all now built in rather than noted:
+
+- **The pool is the union of the top 15 from every ranker, plus random draws.** Labelling the
+  hybrid's own top results would let the system under evaluation choose its own exam paper.
+- **A pair-level Spearman correlation is reported** alongside the per-query table, because it runs
+  over 122 observations rather than 2 and is the only figure here with statistical weight.
+- **Weight tuning is refused.** Six parameters cannot be fitted to two queries; an ablation is
+  reported instead. It says removing the skill dimension *improves* NDCG@10, which is a lead to
+  follow and not yet a change to make — the labels were proposed by the same process that designed
+  the formula, so that result is partly circular until a human corrects them.
+
+The deeper lesson for the table above: a row is only discharged when the dataset has enough
+*queries*, not enough *rows*. For matching that means more real users, and no amount of labelling
+substitutes for it.
 | Resume optimization | Suggestions with known fabrications injected | Fabrication-detection recall (must be 100%) |
 
 Datasets live in `ml/datasets/`, evaluation code in `ml/evaluation/`, and results are committed so
@@ -1089,6 +1116,7 @@ production value. Missing required config fails loudly at startup, not at first 
 | 2026-09-02 | ADR-017 added. Transactional email, password reset and email verification, after review found that a forgotten password left a user permanently locked out. |
 | 2026-09-02 | ADR-018 added. Resume ingestion, object storage, and the interim background task runner. |
 | 2026-09-04 | ADR-019 added. Job data sourcing from permitted APIs, after the corpus reached Phase 6 with seven hand-entered postings and no way to grow. |
+| 2026-09-10 | ADR-015 amended. Phase 6.4: the matching harness is built and the hybrid beats every baseline on NDCG@10 (0.611 vs 0.400 for raw cosine), vindicating ADR-005; NDCG@10 misses its 0.75 target. The dataset requirement is met at 122 pairs but covers only **2 distinct people**, so per-query metrics are anecdote-grade and weight tuning is refused in favour of an ablation. |
 | 2026-09-09 | ADR-006 amended. Phase 6.3: two-stage retrieval built and measured. The Redis cache this ADR permits was **not** needed — the first cut's 535 ms p95 was 400 database round trips, not the scoring, and batching removed it (47.8 ms p95). Also records two things pgvector and cursor paging make you learn the hard way. |
 | 2026-09-09 | ADR-005 amended. Phase 6.2: a dimension whose inputs are missing scores a neutral 0.5 and keeps its documented weight — renormalising would break AC2 and let a job rank higher for an employer's blank field. Scorers live in `app/services/matching/`; no `job_matches` row is written yet. |
 | 2026-09-09 | ADR-007 amended. Phase 6.1: the embedding provider runs in its own container with the model baked in, because a lazy import does not keep torch out of the API *image*. The separation is asserted by a test. |

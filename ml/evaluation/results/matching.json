@@ -1,0 +1,177 @@
+{
+  "generated_at": "2026-09-10T07:00:42.023297+00:00",
+  "ranking_version": "v1-hand-tuned",
+  "weights": {
+    "semantic": "0.35",
+    "skill": "0.25",
+    "experience": "0.15",
+    "education": "0.10",
+    "location": "0.10",
+    "salary": "0.05"
+  },
+  "relevant_threshold": 2,
+  "queries": 2,
+  "pairs": 102,
+  "label_distribution": {
+    "0": 11,
+    "1": 30,
+    "2": 39,
+    "3": 22
+  },
+  "per_query": [
+    {
+      "query_id": "q1",
+      "kind": "real-resume",
+      "resume_chars": 3701,
+      "labelled": 63,
+      "ranked": 53,
+      "relevant": 27,
+      "recall@200": 0.9629629629629629,
+      "recall_missed": [
+        "Python- React, Next JS Fullstack Engineer"
+      ],
+      "rankers": {
+        "hybrid": {
+          "precision@5": 0.8,
+          "precision@10": 0.8,
+          "ndcg@10": 0.5898514941114159,
+          "mrr": 1.0
+        },
+        "embedding_only": {
+          "precision@5": 0.2,
+          "precision@10": 0.4,
+          "ndcg@10": 0.2861904295860419,
+          "mrr": 0.25
+        },
+        "skill_only": {
+          "precision@5": 0.8,
+          "precision@10": 0.8,
+          "ndcg@10": 0.59732551084333,
+          "mrr": 1.0
+        },
+        "tfidf": {
+          "precision@5": 0.4,
+          "precision@10": 0.6,
+          "ndcg@10": 0.3851888363027646,
+          "mrr": 0.5
+        },
+        "random": {
+          "precision@5": 0.8,
+          "precision@10": 0.6,
+          "ndcg@10": 0.5609763816000234,
+          "mrr": 1.0
+        }
+      },
+      "ablation": {
+        "semantic": 0.5296848506614973,
+        "skill": 0.5996981506964159,
+        "experience": 0.3063495001443122,
+        "education": 0.6087146263635635,
+        "location": 0.7301785569464296,
+        "salary": 0.5505636382182982
+      }
+    },
+    {
+      "query_id": "q2",
+      "kind": "test-fixture",
+      "resume_chars": 1402,
+      "labelled": 59,
+      "ranked": 49,
+      "relevant": 37,
+      "recall@200": 0.9459459459459459,
+      "recall_missed": [
+        "AI/ML Engineer (Open-Source LLM \u2013 BFSI Domain)",
+        "python developer 5 ,pyspark ,django flask (Bengaluru)"
+      ],
+      "rankers": {
+        "hybrid": {
+          "precision@5": 0.8,
+          "precision@10": 0.9,
+          "ndcg@10": 0.632761848760762,
+          "mrr": 0.5
+        },
+        "embedding_only": {
+          "precision@5": 0.8,
+          "precision@10": 0.8,
+          "ndcg@10": 0.5137991835459235,
+          "mrr": 1.0
+        },
+        "skill_only": {
+          "precision@5": 0.8,
+          "precision@10": 0.8,
+          "ndcg@10": 0.4281758294776367,
+          "mrr": 0.5
+        },
+        "tfidf": {
+          "precision@5": 0.8,
+          "precision@10": 0.7,
+          "ndcg@10": 0.43016929001844684,
+          "mrr": 1.0
+        },
+        "random": {
+          "precision@5": 0.4,
+          "precision@10": 0.5,
+          "ndcg@10": 0.45436607308023724,
+          "mrr": 1.0
+        }
+      },
+      "ablation": {
+        "semantic": 0.48500967674812706,
+        "skill": 0.8791712690774833,
+        "experience": 0.5343245806000888,
+        "education": 0.5665137284741505,
+        "location": 0.632761848760762,
+        "salary": 0.632761848760762
+      }
+    }
+  ],
+  "rankers": {
+    "hybrid": {
+      "precision@5": 0.8,
+      "precision@10": 0.8500000000000001,
+      "ndcg@10": 0.611306671436089,
+      "mrr": 0.75
+    },
+    "embedding_only": {
+      "precision@5": 0.5,
+      "precision@10": 0.6000000000000001,
+      "ndcg@10": 0.3999948065659827,
+      "mrr": 0.625
+    },
+    "skill_only": {
+      "precision@5": 0.8,
+      "precision@10": 0.8,
+      "ndcg@10": 0.5127506701604834,
+      "mrr": 0.75
+    },
+    "tfidf": {
+      "precision@5": 0.6000000000000001,
+      "precision@10": 0.6499999999999999,
+      "ndcg@10": 0.40767906316060576,
+      "mrr": 0.75
+    },
+    "random": {
+      "precision@5": 0.6000000000000001,
+      "precision@10": 0.55,
+      "ndcg@10": 0.5076712273401303,
+      "mrr": 1.0
+    }
+  },
+  "recall@200": 0.9544544544544544,
+  "score_label_spearman": 0.3917075653705541,
+  "ablation_ndcg@10": {
+    "semantic": 0.5073472637048122,
+    "skill": 0.7394347098869496,
+    "experience": 0.42033704037220054,
+    "education": 0.587614177418857,
+    "location": 0.6814702028535958,
+    "salary": 0.5916627434895301
+  },
+  "targets": {
+    "precision@5": 0.7,
+    "precision@10": 0.6,
+    "ndcg@10": 0.75,
+    "mrr": 0.65,
+    "recall@200": 0.95
+  }
+}

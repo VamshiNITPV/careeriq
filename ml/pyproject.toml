@@ -1,0 +1,51 @@
+# Lint and test configuration for the offline ML tooling.
+#
+# A separate file from `backend/pyproject.toml` because this tree is not the
+# application: it is never imported by the API, it is not in the runtime image,
+# and `ml/` is not on the backend's import path (architecture.md's amendment for
+# Phase 6.2 records why the *scorers* live under `app/` while evaluation stays
+# here). The rule set is deliberately the same as the backend's so that code
+# moving in either direction does not change style; only the exemptions differ.
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["evaluation"]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "W",
+    "F",
+    "I",
+    "B",
+    "C4",
+    "UP",
+    "ASYNC",
+    "S",
+    "T20",
+    "SIM",
+    "RUF",
+]
+ignore = [
+    # assert is how pytest works, and the evaluation scripts use it for
+    # invariants whose violation should stop a run rather than be caught.
+    "S101",
+    # Every module here is a command-line script whose printed report *is* the
+    # deliverable. structlog would put these numbers somewhere nobody reads
+    # them, which is the opposite of ml.md's point about results being visible.
+    "T201",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["evaluation"]
+
+[tool.ruff.lint.per-file-ignores]
+# SIM905 rewrites the readable multi-line `"""...""".split()` stopword list into a
+# single 440-character list literal, which is strictly worse to read and to
+# amend. S311: the random baseline is a seeded shuffle used as a sanity floor;
+# it must be reproducible, which is the opposite of cryptographic.
+"evaluation/baselines.py" = ["S311", "SIM905"]
+# Fixture text quotes real job adverts and resumes, which contain the en dashes
+# and non-breaking spaces RUF001 flags as ambiguous.
+"evaluation/tests/*" = ["RUF001"]

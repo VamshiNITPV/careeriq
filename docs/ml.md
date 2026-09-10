@@ -316,6 +316,56 @@ Two implementation notes that bear directly on the Recall@200 target below:
 `LOW` (1), `IRRELEVANT` (0). Graded labels, not binary, because NDCG needs them and because
 "somewhat relevant" is the interesting case.
 
+**Built and run in Phase 6.4.** `ml/evaluation/` holds the harness;
+`ml/evaluation/results/matching.{json,md}` holds the committed numbers. 122 labelled pairs over
+**2 queries** — and the sample size is the first thing to understand about every figure below.
+
+| Ranker | P@5 | P@10 | NDCG@10 | MRR |
+|---|---|---|---|---|
+| **hybrid** | **0.800** | **0.850** | **0.611** | 0.750 |
+| embedding-only | 0.500 | 0.600 | 0.400 | 0.625 |
+| skill-only | 0.800 | 0.800 | 0.513 | 0.750 |
+| TF-IDF | 0.600 | 0.650 | 0.408 | 0.750 |
+| random | 0.600 | 0.550 | 0.508 | **1.000** |
+| _target_ | 0.70 | 0.60 | 0.75 | 0.65 |
+
+Recall@200 = **0.954** (target 0.95). Spearman(score, label) = **0.392** over 122 pairs.
+
+**The hybrid beats every baseline on NDCG@10, which is the comparison this section exists for.**
+0.611 against embedding-only's 0.400 settles the question ADR-005 posed: the six dimensions earn
+their complexity, and raw cosine alone does not rank acceptably.
+
+**NDCG@10 misses its 0.75 target** (0.611). The hybrid gets relevant jobs into the top five (P@5 0.800) but
+does not order HIGH above MEDIUM well enough. That is the one unmet target and it is not explained
+away.
+
+Four things the run revealed that were not anticipated:
+
+- **MRR is useless on this pool.** Random scores 1.000 — with 48% of pooled pairs relevant, landing
+  one first is close to a coin toss. It should not be read as a pass for anything.
+- **Random beats embedding-only on NDCG@10** (0.508 vs 0.400). Raw cosine reliably surfaces postings
+  that *read* like the resume and are wrong on seniority, which is exactly the failure ADR-005
+  predicted of pure similarity. This is the strongest evidence in the report for the hybrid design.
+- **An ablation replaces weight tuning.** Two queries cannot fit six parameters; removing one
+  dimension at a time asks a question the data can answer. Removing *skill* **improves** NDCG@10 to
+  0.739, and removing *location* improves it to 0.681 — while removing *experience* costs the most
+  (0.420). That is a strong signal and **not yet a licence to change the weights**: the labels were
+  proposed by the same process that designed the formula, and the rubric weighted seniority heavily,
+  so the experience dimension is being graded against a rubric partly built around it.
+- **The corpus has two distinct people in it**, not three. Eight candidate vectors exist and three
+  distinct resume texts, but two of those texts are the same person with different extraction. The
+  pool builder deduplicates on a normalised prefix for that reason.
+
+**Recall@200 is a real measurement, and making it one took deliberate work.** The pool is drawn from
+the recall set, so every labelled job would be inside it by construction and the metric could only
+ever report 1.0 — precisely the invisible failure the paragraph above warns about. `build_pool.py`
+therefore also samples jobs the recall stage *never returned*. Three of those turned out to be
+relevant, including a `Python- React, Next JS Fullstack Engineer` posting that matches the real resume closely.
+
+**Labels are currently Claude-proposed and pending human correction**
+(`ml/datasets/matching/REVIEW.md` exists to make that cheap). Until they are corrected, the
+ablation indicates where to look rather than what to change.
+
 **Baselines the hybrid model must beat:**
 
 | Baseline | Purpose |
