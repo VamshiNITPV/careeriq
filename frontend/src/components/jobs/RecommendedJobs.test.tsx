@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { jobService } from '@/services/jobService'
@@ -49,6 +50,20 @@ function response(overrides: Partial<RecommendationsResponse> = {}): Recommendat
     computed_at: '2026-09-09T10:00:00Z',
     ...overrides,
   }
+}
+
+/** A page of cards with distinct ids, so two pages are tellable apart. */
+function pageOf(ids: string[], nextCursor: string | null): RecommendationsResponse {
+  return response({
+    items: ids.map((id) => ({
+      job: jobFixture({ id, title: `Job ${id}` }),
+      score: '60.0',
+      breakdown: [],
+      scored_weight: '0.60',
+      skills: { matched: [], partial: [], missing: [] },
+    })),
+    next_cursor: nextCursor,
+  })
 }
 
 const renderSection = () =>
@@ -132,5 +147,198 @@ describe('RecommendedJobs', () => {
 
     expect(screen.queryByRole('meter')).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'see why' })).toHaveAttribute('href', '/jobs/j1')
+  })
+})
+
+describe('RecommendedJobs paging', () => {
+  beforeEach(() => vi.restoreAllMocks())
+
+  it('offers both controls on the first page, with Previous disabled', async () => {
+    /*
+     * Both stay mounted at every boundary. Hiding the control the reader just
+     * clicked drops focus to <body>, and a Next that appears only once a second
+     * page exists reads as the interface changing shape for no visible reason.
+     */
+    vi.spyOn(jobService, 'recommendations').mockResolvedValue(pageOf(['a', 'b'], 'CURSOR_2'))
+
+    renderSection()
+    await screen.findByRole('heading', { name: 'Recommended for you' })
+
+    expect(screen.getByRole('button', { name: 'Previous' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled()
+    expect(screen.getByText('Page 1')).toBeInTheDocument()
+  })
+
+  it('disables Next when the server stops sending a cursor', async () => {
+    // The end is discovered from next_cursor, never calculated from a total:
+    // `considered` is the size of the recall set, not of the market.
+    vi.spyOn(jobService, 'recommendations').mockResolvedValue(pageOf(['a'], null))
+
+    renderSection()
+    await screen.findByRole('heading', { name: 'Recommended for you' })
+
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled()
+  })
+
+  it('asks for exactly the cursor the server just returned', async () => {
+    /*
+     * The failure this catches is silent: send the wrong cursor, or none, and
+     * page two is page one again — which looks like the button doing nothing.
+     */
+    const fetch = vi
+      .spyOn(jobService, 'recommendations')
+      .mockResolvedValueOnce(pageOf(['a', 'b'], 'CURSOR_2'))
+      .mockResolvedValueOnce(pageOf(['c', 'd'], null))
+
+    renderSection()
+    await screen.findByText('Job a')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }))
+
+    await screen.findByText('Job c')
+    expect(fetch).toHaveBeenLastCalledWith({ limit: 5, cursor: 'CURSOR_2' })
+    expect(screen.getByText('Page 2')).toBeInTheDocument()
+    expect(screen.queryByText('Job a')).not.toBeInTheDocument()
+  })
+
+  it('walks back to an earlier page after three forward, not just one', async () => {
+    /*
+     * Three deep on purpose. A stack that remembers only the immediately
+     * previous cursor passes a one-step test and then serves the wrong page the
+     * moment someone goes further — which is the whole reason Previous is a
+     * history rather than a single remembered token.
+     */
+    const fetch = vi
+      .spyOn(jobService, 'recommendations')
+      .mockResolvedValueOnce(pageOf(['a'], 'C2'))
+      .mockResolvedValueOnce(pageOf(['b'], 'C3'))
+      .mockResolvedValueOnce(pageOf(['c'], 'C4'))
+      .mockResolvedValueOnce(pageOf(['b'], 'C3'))
+
+    renderSection()
+    await screen.findByText('Job a')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }))
+    await screen.findByText('Job b')
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }))
+    await screen.findByText('Job c')
+    expect(screen.getByText('Page 3')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Previous' }))
+
+    await screen.findByText('Job b')
+    // C2 is the cursor stored for page two — not C3, which is what a one-step
+    // memory would have replayed.
+    expect(fetch).toHaveBeenLastCalledWith({ limit: 5, cursor: 'C2' })
+    expect(screen.getByText('Page 2')).toBeInTheDocument()
+  })
+
+  it('returns to the first page with no cursor at all', async () => {
+    // Page one is the request with no cursor. Sending a token that happens to
+    // precede the first row would be a different query with the same answer
+    // today and a subtly different one later.
+    const fetch = vi
+      .spyOn(jobService, 'recommendations')
+      .mockResolvedValueOnce(pageOf(['a'], 'C2'))
+      .mockResolvedValueOnce(pageOf(['b'], null))
+      .mockResolvedValueOnce(pageOf(['a'], 'C2'))
+
+    renderSection()
+    await screen.findByText('Job a')
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }))
+    await screen.findByText('Job b')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Previous' }))
+
+    await screen.findByText('Job a')
+    expect(fetch).toHaveBeenLastCalledWith({ limit: 5 })
+    expect(screen.getByRole('button', { name: 'Previous' })).toBeDisabled()
+  })
+
+  it('keeps the rows on screen when a page turn fails', async () => {
+    /*
+     * This panel sits above other dashboard content. Blanking it over a failure
+     * the reader cannot act on would collapse the section and shift everything
+     * under their pointer — worse than simply staying put.
+     */
+    vi.spyOn(jobService, 'recommendations')
+      .mockResolvedValueOnce(pageOf(['a', 'b'], 'CURSOR_2'))
+      .mockRejectedValueOnce(new Error('offline'))
+
+    renderSection()
+    await screen.findByText('Job a')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }))
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Next' })).not.toHaveAttribute(
+        'aria-busy',
+        'true',
+      ),
+    )
+    expect(screen.getByText('Job a')).toBeInTheDocument()
+    expect(screen.getByText('Page 1')).toBeInTheDocument()
+  })
+
+  it('offers no controls when there is nothing to page', async () => {
+    for (const availability of ['NO_RESUME', 'PENDING'] as const) {
+      vi.spyOn(jobService, 'recommendations').mockResolvedValue(
+        response({ items: [], availability, considered: 0 }),
+      )
+
+      const { unmount } = renderSection()
+      await screen.findByRole('heading', { name: 'Recommended for you' })
+
+      expect(screen.queryByRole('button', { name: 'Next' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Previous' })).not.toBeInTheDocument()
+      unmount()
+    }
+  })
+})
+
+describe('RecommendedJobs paging, back and forth', () => {
+  beforeEach(() => vi.restoreAllMocks())
+
+  it('goes forward again after going back, without losing its place', async () => {
+    /*
+     * A real user path the other tests miss: page deep, retreat, advance again,
+     * retreat again. It is the sequence where `page` and the cursor array stop
+     * moving in lockstep, so it is the one that would catch a `goPrevious`
+     * written against the array's length instead of against `page`.
+     */
+    const fetch = vi
+      .spyOn(jobService, 'recommendations')
+      .mockResolvedValueOnce(pageOf(['a'], 'C2')) // page 1
+      .mockResolvedValueOnce(pageOf(['b'], 'C3')) // page 2
+      .mockResolvedValueOnce(pageOf(['c'], 'C4')) // page 3
+      .mockResolvedValueOnce(pageOf(['b'], 'C3')) // back to page 2
+      .mockResolvedValueOnce(pageOf(['c'], 'C4')) // forward to page 3 again
+      .mockResolvedValueOnce(pageOf(['b'], 'C3')) // back to page 2 again
+
+    renderSection()
+    await screen.findByText('Job a')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }))
+    await screen.findByText('Job b')
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }))
+    await screen.findByText('Job c')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Previous' }))
+    await screen.findByText('Job b')
+    expect(screen.getByText('Page 2')).toBeInTheDocument()
+
+    // Forward again from page 2 must use the cursor page 2's response carries,
+    // not the one stored before the walk back.
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }))
+    await screen.findByText('Job c')
+    expect(fetch).toHaveBeenLastCalledWith({ limit: 5, cursor: 'C3' })
+    expect(screen.getByText('Page 3')).toBeInTheDocument()
+
+    // And back once more still lands on page 2, which is the assertion the
+    // stack has to keep earning.
+    await userEvent.click(screen.getByRole('button', { name: 'Previous' }))
+    await screen.findByText('Job b')
+    expect(fetch).toHaveBeenLastCalledWith({ limit: 5, cursor: 'C2' })
+    expect(screen.getByText('Page 2')).toBeInTheDocument()
   })
 })
