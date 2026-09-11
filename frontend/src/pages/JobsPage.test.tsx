@@ -1034,6 +1034,32 @@ describe('sorting by match', () => {
     expect(await screen.findByText(/finished reading your resume/i)).toBeInTheDocument()
   })
 
+  it('carries the filtered list back from "see why" too', async () => {
+    /*
+     * The card's title already did this; the "see why" link directly beneath it
+     * did not, so one card offered two ways back that disagreed — clicking the
+     * title kept your filters and clicking the score threw them away.
+     */
+    const user = userEvent.setup()
+    mockList([scored('a', '81.2')])
+
+    render(
+      <MemoryRouter initialEntries={['/jobs?sort=match&q=python&offset=20']}>
+        <Routes>
+          <Route path="/jobs" element={<JobsPage />} />
+          <Route path="/jobs/:jobId" element={<StateProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    await screen.findByText('Job a')
+
+    await user.click(screen.getByRole('link', { name: 'see why' }))
+
+    expect(await screen.findByLabelText('link state')).toHaveTextContent(
+      JSON.stringify({ backTo: '/jobs?sort=match&q=python&offset=20' }),
+    )
+  })
+
   it('never offers to add a job when the ranking is empty', async () => {
     /*
      * "No jobs yet" is false in match mode — the corpus is not empty, nothing in

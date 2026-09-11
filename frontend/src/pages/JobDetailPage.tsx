@@ -20,6 +20,7 @@ import {
   type JobDetailLocationState,
   type JobSkillRead,
 } from '@/types/job'
+import { backLabelFor } from '@/utils/backTo'
 import { cn } from '@/utils/cn'
 import { externalLink } from '@/utils/externalUrl'
 
@@ -231,7 +232,7 @@ export function JobDetailPage() {
             Try again
           </Button>
           <Link to={backTo} className="self-center text-sm text-indigo-600 hover:underline">
-            Back to jobs
+            {backLabelFor(backTo)}
           </Link>
         </div>
       </div>
@@ -294,8 +295,13 @@ function JobDetailView({
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
+      {/*
+        The label names the destination rather than saying "Back to jobs"
+        regardless. It sat next to the browser's own Back button reading the
+        wrong thing — from Saved jobs it both said and did the wrong thing.
+      */}
       <Link to={backTo} className="text-sm font-medium text-indigo-600 hover:underline">
-        ← Back to jobs
+        ← {backLabelFor(backTo)}
       </Link>
 
       {isDuplicate && (

@@ -5,6 +5,7 @@ import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 import { useJobApplication } from '@/hooks/useJobApplication'
+import { useJobBackState } from '@/hooks/useJobBackState'
 import { applicationService } from '@/services/applicationService'
 import type { ApplicationListItem, ApplicationRead } from '@/types/application'
 import { formatSalary } from '@/types/job'
@@ -41,6 +42,7 @@ function Row({
   onChange: (next: ApplicationRead | null) => void
 }) {
   const state = useJobApplication(item.job_id, item, onChange)
+  const backState = useJobBackState()
   const salary = formatSalary(item.job)
   const when =
     context === 'applied' && item.applied_at !== null
@@ -52,6 +54,9 @@ function Row({
       <div className="min-w-0 flex-1">
         <Link
           to={`/jobs/${item.job_id}`}
+          // Without this the job page's back link falls through to `/jobs`,
+          // which both said and did the wrong thing from here.
+          state={backState}
           className="text-sm font-medium text-indigo-700 hover:underline"
         >
           {item.job.title}

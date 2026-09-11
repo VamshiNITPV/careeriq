@@ -1,12 +1,12 @@
-import { Link, useLocation } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { JobSaveControls } from '@/components/JobSaveControls'
 import { useJobApplication } from '@/hooks/useJobApplication'
+import { useJobBackState } from '@/hooks/useJobBackState'
 import type { ApplicationRead } from '@/types/application'
 import {
   formatExperience,
   formatSalary,
   humanise,
-  type JobDetailLocationState,
   type JobSummary,
 } from '@/types/job'
 import { formatPostedAge } from '@/utils/datetime'
@@ -46,7 +46,7 @@ export function JobCard({
   const salary = formatSalary(job)
   const experience = formatExperience(job)
   const state = useJobApplication(job.id, job.application, onApplicationChange)
-  const location = useLocation()
+  const backState = useJobBackState()
 
   return (
     <li className="relative rounded-lg bg-white p-4 shadow-sm ring-1 ring-slate-200 transition-shadow focus-within:ring-2 focus-within:ring-indigo-600 hover:shadow-md">
@@ -76,21 +76,11 @@ export function JobCard({
           */}
           <Link
             to={`/jobs/${job.id}`}
-            /*
-              Where this card was rendered, filters and page and all, so the
-              detail page's back link returns to the list rather than to its
-              unfiltered first page.
-
-              Derived here rather than passed as a prop: a prop is one a new
-              call site can forget, and this is correct wherever the card is
-              mounted. `satisfies` earns its keep because `state` is typed
-              `any` by React Router, so nothing else checks the shape.
-            */
-            state={
-              {
-                backTo: `${location.pathname}${location.search}`,
-              } satisfies JobDetailLocationState
-            }
+            // Where this card was rendered, filters and page and all, so the
+            // detail page's back link returns to the list rather than to its
+            // unfiltered first page. See the hook for why it is shared rather
+            // than derived here, which is how it used to be.
+            state={backState}
             className="after:absolute after:inset-0 hover:underline focus:outline-none"
           >
             {job.title}

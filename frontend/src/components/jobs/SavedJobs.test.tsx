@@ -1,10 +1,16 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { applicationService } from '@/services/applicationService'
 import type { ApplicationListItem } from '@/types/application'
 import { SavedJobs } from './SavedJobs'
+
+/** The link state a navigation carried — what the job page's back link is built from. */
+function StateProbe() {
+  const location = useLocation()
+  return <span aria-label="link state">{JSON.stringify(location.state)}</span>
+}
 
 function item(overrides: Partial<ApplicationListItem> = {}): ApplicationListItem {
   const status = overrides.status ?? 'SAVED'
@@ -95,6 +101,32 @@ describe('SavedJobs', () => {
     await screen.findByRole('heading', { name: 'Saved' })
     expect(within(section('Saved')).getByText('Senior Data Engineer')).toBeInTheDocument()
     expect(within(section('Applications')).getByText('Senior Data Engineer')).toBeInTheDocument()
+  })
+
+  it('sends you back to the saved list, not to the job list', async () => {
+    /*
+     * The reported bug. This row's link passed no navigation state, so the job
+     * page fell through to its `/jobs` default — reading "Back to jobs" and
+     * going there, from a page that was neither.
+     */
+    const user = userEvent.setup()
+    vi.spyOn(applicationService, 'list').mockResolvedValue({ items: [item()], total: 1 })
+
+    render(
+      <MemoryRouter initialEntries={['/saved-jobs']}>
+        <Routes>
+          <Route path="/saved-jobs" element={<SavedJobs />} />
+          <Route path="/jobs/:jobId" element={<StateProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    await screen.findByText('Senior Data Engineer')
+
+    await user.click(screen.getByRole('link', { name: 'Senior Data Engineer' }))
+
+    expect(await screen.findByLabelText('link state')).toHaveTextContent(
+      JSON.stringify({ backTo: '/saved-jobs' }),
+    )
   })
 
   it('offers a way in when nothing is saved', async () => {

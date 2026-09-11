@@ -1,10 +1,16 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { jobService } from '@/services/jobService'
 import type { JobSummary, RecommendationsResponse } from '@/types/job'
 import { RecommendedJobs } from './RecommendedJobs'
+
+/** The link state a navigation carried — what the job page's back link is built from. */
+function StateProbe() {
+  const location = useLocation()
+  return <span aria-label="link state">{JSON.stringify(location.state)}</span>
+}
 
 function jobFixture(overrides: Partial<JobSummary> = {}): JobSummary {
   return {
@@ -341,6 +347,31 @@ describe('RecommendedJobs paging, back and forth', () => {
     await screen.findByText('Job b')
     expect(fetch).toHaveBeenLastCalledWith({ limit: 5, cursor: 'C2' })
     expect(screen.getByText('Page 2')).toBeInTheDocument()
+  })
+})
+
+describe('returning from a recommendation', () => {
+  it('sends you back to the dashboard, not to the job list', async () => {
+    // This panel is only on the dashboard, so "Back to jobs" was both the wrong
+    // wording and the wrong destination.
+    const user = userEvent.setup()
+    vi.spyOn(jobService, 'recommendations').mockResolvedValue(pageOf(['a'], null))
+
+    render(
+      <MemoryRouter initialEntries={['/dashboard']}>
+        <Routes>
+          <Route path="/dashboard" element={<RecommendedJobs />} />
+          <Route path="/jobs/:jobId" element={<StateProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    await screen.findByText('Job a')
+
+    await user.click(screen.getByRole('link', { name: 'see why' }))
+
+    expect(await screen.findByLabelText('link state')).toHaveTextContent(
+      JSON.stringify({ backTo: '/dashboard' }),
+    )
   })
 })
 

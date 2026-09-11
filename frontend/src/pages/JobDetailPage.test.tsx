@@ -200,6 +200,21 @@ describe('JobDetailPage', () => {
 
     const backLink = () => screen.getByRole('link', { name: '← Back to jobs' })
 
+    it('names the page it returns to', async () => {
+      /*
+       * It read "Back to jobs" wherever it came from, so from Saved jobs it
+       * both said and did the wrong thing. The label is read before the click —
+       * that is the only thing it offers over the browser's own Back button
+       * sitting a few pixels away — so it has to be true.
+       */
+      vi.spyOn(jobService, 'get').mockResolvedValue(detailFixture())
+      renderPage({ backTo: '/saved-jobs' })
+      await screen.findByRole('heading', { name: 'Senior Data Engineer' })
+
+      const link = screen.getByRole('link', { name: '← Back to saved jobs' })
+      expect(link).toHaveAttribute('href', '/saved-jobs')
+    })
+
     it('returns to the list you came from', async () => {
       vi.spyOn(jobService, 'get').mockResolvedValue(detailFixture())
       renderPage({ backTo: '/jobs?q=python&offset=20' })
@@ -209,8 +224,9 @@ describe('JobDetailPage', () => {
     })
 
     it('falls back to the plain list when the job was opened directly', async () => {
-      // A pasted URL, a refresh, or the link on the saved-jobs page: no state,
-      // and the link must still work.
+      // A pasted URL or a refresh: no state, and the link must still work.
+      // Every in-app link now supplies it, so this is the arrived-from-nowhere
+      // case rather than a gap in the callers.
       vi.spyOn(jobService, 'get').mockResolvedValue(detailFixture())
       renderPage()
       await screen.findByRole('heading', { name: 'Senior Data Engineer' })

@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { Spinner } from '@/components/ui/Spinner'
 import { ApiError } from '@/services/apiClient'
+import { useJobBackState } from '@/hooks/useJobBackState'
 import { jobService } from '@/services/jobService'
 import {
   EXPERIENCE_YEAR_OPTIONS,
@@ -105,6 +106,10 @@ export function JobsPage() {
   const [lastQ, setLastQ] = useState(q)
 
   const requestId = useRef(0)
+
+  // Read once for the whole list rather than per row: every card on this page
+  // returns to the same place.
+  const backState = useJobBackState()
 
   // The page opens on a search box and a way to the rest, at every width. The
   // four dropdowns are behind the button, and while they are showing the
@@ -683,7 +688,15 @@ export function JobsPage() {
                           footer: (
                             <p className="mt-2 border-t border-slate-100 pt-2 text-xs text-slate-500">
                               Match score {job.match_score} / 100 &middot;{' '}
-                              <Link to={`/jobs/${job.id}`} className="relative z-10 underline">
+                              <Link
+                                to={`/jobs/${job.id}`}
+                                // The card's own title already carried the
+                                // filters back; this link, directly beneath it,
+                                // did not — so the same card offered two back
+                                // buttons that disagreed.
+                                state={backState}
+                                className="relative z-10 underline"
+                              >
                                 see why
                               </Link>
                             </p>

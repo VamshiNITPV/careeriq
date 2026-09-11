@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { JobCard } from '@/components/JobCard'
 import { Button } from '@/components/ui/Button'
+import { useJobBackState } from '@/hooks/useJobBackState'
 import { jobService } from '@/services/jobService'
 import type { RecommendationsResponse } from '@/types/job'
 
@@ -38,6 +39,9 @@ import type { RecommendationsResponse } from '@/types/job'
  * which is exactly the staleness 6.3 avoided by not caching server-side either.
  */
 export function RecommendedJobs({ limit = 5 }: { limit?: number }) {
+  // So "see why" returns to the dashboard rather than to the job list, which is
+  // not where the reader was.
+  const backState = useJobBackState()
   const [result, setResult] = useState<RecommendationsResponse | null>(null)
   //: `cursors[i]` fetches page `i`. `null` is the first page — no cursor at all.
   const [cursors, setCursors] = useState<(string | null)[]>([null])
@@ -156,7 +160,11 @@ export function RecommendedJobs({ limit = 5 }: { limit?: number }) {
             footer={
               <p className="mt-2 border-t border-slate-100 pt-2 text-xs text-slate-500">
                 Match score {item.score} / 100 &middot;{' '}
-                <Link to={`/jobs/${item.job.id}`} className="relative z-10 underline">
+                <Link
+                  to={`/jobs/${item.job.id}`}
+                  state={backState}
+                  className="relative z-10 underline"
+                >
                   see why
                 </Link>
               </p>
