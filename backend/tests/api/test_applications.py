@@ -68,34 +68,101 @@ class TestSavingAndApplying:
         """Exercises the applied_has_timestamp CHECK in both directions."""
         job_id = await make_job(client, auth_headers)
         saved = await client.put(f"{API}/jobs/{job_id}/application", headers=auth_headers, json={})
+        assert saved.json()["is_saved"] is True
 
         applied = await client.put(
-            f"{API}/jobs/{job_id}/application", headers=auth_headers, json={"status": "APPLIED"}
+            f"{API}/jobs/{job_id}/application",
+            headers=auth_headers,
+            json={"saved": True, "applied": True},
         )
         assert applied.json()["status"] == "APPLIED"
         assert applied.json()["applied_at"] is not None
+        # The bookmark the caller sent survives untouched.
+        assert applied.json()["is_saved"] is True
         # The same row, not a second one.
         assert applied.json()["id"] == saved.json()["id"]
 
-        # Unmarking sends SAVED rather than DELETE: the job stays saved.
+        # Unmarking keeps the bookmark rather than deleting the row.
         back = await client.put(
-            f"{API}/jobs/{job_id}/application", headers=auth_headers, json={"status": "SAVED"}
+            f"{API}/jobs/{job_id}/application",
+            headers=auth_headers,
+            json={"saved": True, "applied": False},
         )
         assert back.json()["status"] == "SAVED"
         assert back.json()["applied_at"] is None
+        assert back.json()["is_saved"] is True
 
-    async def test_marking_applied_on_a_job_never_saved(
+    async def test_applying_does_not_bookmark_the_job(
         self, client: AsyncClient, auth_headers: dict[str, str], seeded_skills: int
     ) -> None:
-        # Applying implies saving. One row, created straight into APPLIED.
+        """The reported bug.
+
+        `status` used to hold SAVED *or* APPLIED, so marking a job applied was
+        indistinguishable from bookmarking it and the interface filled the
+        bookmark on the user's behalf. The two are separate columns now, and a
+        write that says nothing about the bookmark must not invent one.
+        """
         job_id = await make_job(client, auth_headers)
 
         response = await client.put(
-            f"{API}/jobs/{job_id}/application", headers=auth_headers, json={"status": "APPLIED"}
+            f"{API}/jobs/{job_id}/application",
+            headers=auth_headers,
+            json={"saved": False, "applied": True},
         )
 
         assert response.status_code == 200
         assert response.json()["status"] == "APPLIED"
+        assert response.json()["is_saved"] is False
+
+    async def test_removing_the_bookmark_keeps_that_you_applied(
+        self, client: AsyncClient, auth_headers: dict[str, str], seeded_skills: int
+    ) -> None:
+        """Nothing is lost by un-bookmarking, which is why the client no longer
+        asks for confirmation before doing it."""
+        job_id = await make_job(client, auth_headers)
+        await client.put(
+            f"{API}/jobs/{job_id}/application",
+            headers=auth_headers,
+            json={"saved": True, "applied": True},
+        )
+
+        response = await client.put(
+            f"{API}/jobs/{job_id}/application",
+            headers=auth_headers,
+            json={"saved": False, "applied": True},
+        )
+
+        assert response.json()["is_saved"] is False
+        assert response.json()["status"] == "APPLIED"
+        assert response.json()["applied_at"] is not None
+
+    async def test_a_row_that_records_nothing_is_refused(
+        self, client: AsyncClient, auth_headers: dict[str, str], seeded_skills: int
+    ) -> None:
+        """Neither bookmarked nor applied has no content, and DELETE already
+        means "no relationship to this job" — one meaning, one route."""
+        job_id = await make_job(client, auth_headers)
+
+        response = await client.put(
+            f"{API}/jobs/{job_id}/application",
+            headers=auth_headers,
+            json={"saved": False, "applied": False},
+        )
+
+        assert response.status_code == 422, response.text
+
+    async def test_a_bare_body_still_means_save_this(
+        self, client: AsyncClient, auth_headers: dict[str, str], seeded_skills: int
+    ) -> None:
+        # What the bookmark sends, and what keeps the body optional.
+        job_id = await make_job(client, auth_headers)
+
+        response = await client.put(
+            f"{API}/jobs/{job_id}/application", headers=auth_headers, json={}
+        )
+
+        assert response.json()["is_saved"] is True
+        assert response.json()["status"] == "SAVED"
 
     async def test_an_unknown_job_is_404_and_writes_nothing(
         self,
@@ -166,7 +233,9 @@ class TestSavingAndApplying:
         """
         job_id = await make_job(client, auth_headers)
         applied = await client.put(
-            f"{API}/jobs/{job_id}/application", headers=auth_headers, json={"status": "APPLIED"}
+            f"{API}/jobs/{job_id}/application",
+            headers=auth_headers,
+            json={"saved": True, "applied": True},
         )
         await client.delete(f"{API}/jobs/{job_id}/application", headers=auth_headers)
 
@@ -227,7 +296,9 @@ class TestTheJobListReflectsIt:
         alpha = await make_job(client, auth_headers, title="Alpha Engineer")
         await make_job(client, auth_headers, title="Beta Engineer")
         await client.put(
-            f"{API}/jobs/{alpha}/application", headers=auth_headers, json={"status": "APPLIED"}
+            f"{API}/jobs/{alpha}/application",
+            headers=auth_headers,
+            json={"saved": True, "applied": True},
         )
 
         items = (await client.get(f"{API}/jobs", headers=auth_headers)).json()["items"]
@@ -275,7 +346,9 @@ class TestTheProfileLists:
         applied = await make_job(client, auth_headers, title="Beta Engineer")
         await client.put(f"{API}/jobs/{saved}/application", headers=auth_headers, json={})
         await client.put(
-            f"{API}/jobs/{applied}/application", headers=auth_headers, json={"status": "APPLIED"}
+            f"{API}/jobs/{applied}/application",
+            headers=auth_headers,
+            json={"saved": True, "applied": True},
         )
 
         only_applied = (

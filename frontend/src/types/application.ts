@@ -12,6 +12,14 @@ export interface ApplicationRead {
   id: string
   job_id: string
   status: ApplicationStatus
+  /**
+   * Whether you bookmarked this job.
+   *
+   * Independent of `status` — a job can be bookmarked, applied to, or both.
+   * **Read this for the bookmark icon**, never "does an application exist":
+   * doing the latter is what made ticking "I have applied" fill the bookmark.
+   */
+  is_saved: boolean
   /** Non-null exactly when status is APPLIED — a database CHECK enforces it. */
   applied_at: string | null
   /** When it was saved. Orders the profile lists. */

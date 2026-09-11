@@ -29,13 +29,8 @@ export interface JobApplicationState {
   isApplied: boolean
   isPending: boolean
   error: string | null
-  /** Non-null while the confirm-before-losing-an-applied-record dialog is open. */
-  pendingUnsave: ApplicationRead | null
-  dialogError: string | null
   toggleSaved: () => void
   setApplied: (applied: boolean) => void
-  confirmUnsave: () => Promise<void>
-  cancelUnsave: () => void
 }
 
 function messageOf(caught: unknown): string {
@@ -50,8 +45,6 @@ export function useJobApplication(
   const [application, setApplication] = useState<ApplicationRead | null>(initial)
   const [isPending, setIsPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [pendingUnsave, setPendingUnsave] = useState<ApplicationRead | null>(null)
-  const [dialogError, setDialogError] = useState<string | null>(null)
 
   // A ref, not the `isPending` state, and not `disabled` on the control. The
   // server is idempotent so this is not protecting data — it stops two
@@ -90,86 +83,75 @@ export function useJobApplication(
     [application, commit],
   )
 
+  const saved = application?.is_saved ?? false
+  const applied = application?.status === 'APPLIED'
+
   /**
-   * A placeholder so the icon can fill before the server answers.
+   * A placeholder so the icon can react before the server answers.
    *
    * The id and created_at are wrong for the moment the request is in flight;
    * nothing reads them in that window, and the real row replaces this the
    * instant it arrives.
    */
   const optimistic = useCallback(
-    (status: 'SAVED' | 'APPLIED'): ApplicationRead => ({
+    (next: { saved: boolean; applied: boolean }): ApplicationRead => ({
       id: application?.id ?? 'pending',
       job_id: jobId,
-      status,
-      applied_at: status === 'APPLIED' ? new Date().toISOString() : null,
+      status: next.applied ? 'APPLIED' : 'SAVED',
+      is_saved: next.saved,
+      applied_at: next.applied ? new Date().toISOString() : null,
       created_at: application?.created_at ?? new Date().toISOString(),
     }),
     [application, jobId],
   )
 
-  const toggleSaved = useCallback(() => {
-    if (application === null) {
-      void run(optimistic('SAVED'), () => applicationService.set(jobId, 'SAVED'))
-      return
-    }
-    if (application.status === 'APPLIED') {
-      // No request yet. Losing the record that you applied is worth one
-      // confirmation, and a stray tap on a phone is exactly how it would go.
-      setPendingUnsave(application)
-      setDialogError(null)
-      return
-    }
-    void run(null, async () => {
-      await applicationService.remove(jobId)
-      return null
-    })
-  }, [application, jobId, optimistic, run])
-
-  const setApplied = useCallback(
-    (applied: boolean) => {
-      // Unticking sends SAVED, never a delete: the job stays saved. Ticking a
-      // job that was never saved creates the row directly in APPLIED, because
-      // applied implies saved and there is only ever one row.
-      const status = applied ? 'APPLIED' : 'SAVED'
-      void run(optimistic(status), () => applicationService.set(jobId, status))
+  /**
+   * Write both flags, or delete the row when neither is left.
+   *
+   * The server refuses `{saved: false, applied: false}` — a row that records
+   * nothing — so "no relationship to this job" goes through DELETE. Deciding
+   * that here rather than at each call site means the two toggles cannot
+   * disagree about it.
+   */
+  const write = useCallback(
+    (next: { saved: boolean; applied: boolean }) => {
+      if (!next.saved && !next.applied) {
+        void run(null, async () => {
+          await applicationService.remove(jobId)
+          return null
+        })
+        return
+      }
+      void run(optimistic(next), () => applicationService.set(jobId, next))
     },
     [jobId, optimistic, run],
   )
 
-  const confirmUnsave = useCallback(async () => {
-    setIsPending(true)
-    setDialogError(null)
-    try {
-      await applicationService.remove(jobId)
-      commit(null)
-      setPendingUnsave(null)
-    } catch (caught) {
-      // The dialog stays open and says so. Its message must render inside the
-      // dialog: showModal() makes the rest of the document inert, so a
-      // page-level alert would sit behind the backdrop, invisible.
-      setDialogError(messageOf(caught))
-    } finally {
-      setIsPending(false)
-    }
-  }, [commit, jobId])
+  // Flips the bookmark and carries `applied` through untouched. Un-bookmarking
+  // a job you applied to keeps the applied record and leaves it under
+  // Applications — it no longer needs a confirmation, because nothing is lost.
+  const toggleSaved = useCallback(() => {
+    write({ saved: !saved, applied })
+  }, [applied, saved, write])
 
-  const cancelUnsave = useCallback(() => {
-    setPendingUnsave(null)
-    setDialogError(null)
-  }, [])
+  // Carries `saved` through untouched, which is the whole fix: this used to
+  // send a single status, so recording that you applied also asserted that you
+  // had bookmarked the job. Unticking on a job you never bookmarked leaves
+  // nothing to record, and `write` deletes the row.
+  const setApplied = useCallback(
+    (next: boolean) => {
+      write({ saved, applied: next })
+    },
+    [saved, write],
+  )
 
   return {
     application,
-    isSaved: application !== null,
-    isApplied: application?.status === 'APPLIED',
+    isSaved: saved,
+    isApplied: applied,
     isPending,
     error,
-    pendingUnsave,
-    dialogError,
     toggleSaved,
     setApplied,
-    confirmUnsave,
-    cancelUnsave,
   }
 }

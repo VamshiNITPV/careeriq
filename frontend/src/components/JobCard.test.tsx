@@ -56,12 +56,23 @@ describe('JobCard posting age', () => {
   })
 })
 
-function saved(status: 'SAVED' | 'APPLIED' = 'SAVED'): ApplicationRead {
+/**
+ * One application row, with the bookmark and the funnel stage set separately.
+ *
+ * They used to be one argument, because the model held one status. Two now,
+ * because a job can be bookmarked, applied to, or both — and conflating them is
+ * the bug these tests guard.
+ */
+function application({
+  saved = true,
+  applied = false,
+}: { saved?: boolean; applied?: boolean } = {}): ApplicationRead {
   return {
     id: 'a1',
     job_id: 'j1',
-    status,
-    applied_at: status === 'APPLIED' ? '2026-09-04T09:00:00Z' : null,
+    status: applied ? 'APPLIED' : 'SAVED',
+    is_saved: saved,
+    applied_at: applied ? '2026-09-04T09:00:00Z' : null,
     created_at: '2026-09-04T08:00:00Z',
   }
 }
@@ -91,7 +102,7 @@ describe('JobCard', () => {
   })
 
   it('says what tapping it will do once the job is saved', () => {
-    renderCard(jobFixture({ application: saved() }))
+    renderCard(jobFixture({ application: application() }))
 
     expect(
       screen.getByRole('button', { name: 'Remove Senior Data Engineer from saved' }),
@@ -99,13 +110,41 @@ describe('JobCard', () => {
   })
 
   it('marks a job you have applied to', () => {
-    renderCard(jobFixture({ application: saved('APPLIED') }))
+    renderCard(jobFixture({ application: application({ applied: true }) }))
 
     expect(screen.getByText('Applied')).toBeInTheDocument()
   })
 
+  it('leaves the bookmark empty on a job you applied to but never saved', () => {
+    /*
+     * The reported bug, from the reading side. `isSaved` used to be "does an
+     * application row exist", so any applied job showed a filled bookmark — the
+     * interface asserting something the user had not done.
+     */
+    renderCard(jobFixture({ application: application({ saved: false, applied: true }) }))
+
+    expect(screen.getByRole('button', { name: 'Save Senior Data Engineer' })).toBeInTheDocument()
+    expect(screen.getByText('Applied')).toBeInTheDocument()
+  })
+
+  it('keeps the applied record when the bookmark is removed', async () => {
+    // Nothing is lost any more, which is why the confirmation dialog went.
+    const user = userEvent.setup()
+    const set = vi
+      .spyOn(applicationService, 'set')
+      .mockResolvedValue(application({ saved: false, applied: true }))
+    renderCard(jobFixture({ application: application({ saved: true, applied: true }) }))
+
+    await user.click(
+      screen.getByRole('button', { name: 'Remove Senior Data Engineer from saved' }),
+    )
+
+    await waitFor(() => expect(set).toHaveBeenCalledWith('j1', { saved: false, applied: true }))
+    expect(screen.getByText('Applied')).toBeInTheDocument()
+  })
+
   it('says nothing about applying when you have not', () => {
-    renderCard(jobFixture({ application: saved() }))
+    renderCard(jobFixture({ application: application() }))
 
     expect(screen.queryByText('Applied')).not.toBeInTheDocument()
   })
@@ -127,7 +166,7 @@ describe('JobCard', () => {
     expect(
       screen.getByRole('button', { name: 'Remove Senior Data Engineer from saved' }),
     ).toBeInTheDocument()
-    resolve(saved())
+    resolve(application())
   })
 
   it('puts the bookmark back when the save fails', async () => {
@@ -148,12 +187,12 @@ describe('JobCard', () => {
   it('tells the list what changed, so nothing has to refetch', async () => {
     const user = userEvent.setup()
     const onChange = vi.fn()
-    vi.spyOn(applicationService, 'set').mockResolvedValue(saved())
+    vi.spyOn(applicationService, 'set').mockResolvedValue(application())
     renderCard(jobFixture(), onChange)
 
     await user.click(screen.getByRole('button', { name: 'Save Senior Data Engineer' }))
 
-    await waitFor(() => expect(onChange).toHaveBeenCalledWith(saved()))
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(application()))
   })
 
   it('keeps the bookmark out of the stretched link', () => {

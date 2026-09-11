@@ -457,7 +457,13 @@ async def set_application(
     and the verb is idempotent by definition. A POST that 409s on the second tap
     is exactly the double-tap failure a bookmark on a phone must not have.
 
-    Unmarking applied sends SAVED rather than deleting: the job stays saved.
+    **`saved` and `applied` are independent**, and the body carries both every
+    time. A client that wants to mark a job applied sends the bookmark state it
+    already has alongside it, so recording one fact can never silently rewrite
+    the other — which is exactly what went wrong when this took a single status:
+    ticking "applied" bookmarked the job too.
+
+    `{saved: false, applied: false}` is a 422 from the schema. That is `DELETE`.
 
     200 always, never 201. The caller cannot tell a create from an update and
     does not need to, and varying the status by which one happened would make an
@@ -468,12 +474,15 @@ async def set_application(
     RESTRICT violation surfacing through the catch-all as an opaque 500.
     """
     await service.get_job(job_id)
-    application = await applications.upsert(user_id=user.id, job_id=job_id, status=payload.status)
+    application = await applications.upsert(
+        user_id=user.id, job_id=job_id, saved=payload.saved, applied=payload.applied
+    )
     log.info(
         "application recorded",
         job_id=str(job_id),
         user_id=str(user.id),
         status=application.status.value,
+        is_saved=application.is_saved,
     )
     return ApplicationRead.model_validate(application)
 

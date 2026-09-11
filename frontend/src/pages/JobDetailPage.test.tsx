@@ -344,12 +344,17 @@ describe('JobDetailPage', () => {
   describe('saving and applying', () => {
     const boxes = () => screen.getAllByRole('checkbox', { name: 'I have applied' })
 
-    function application(status: 'SAVED' | 'APPLIED' = 'SAVED') {
+    /** Bookmark and funnel stage set separately — they are independent facts. */
+    function application({
+      saved = true,
+      applied = false,
+    }: { saved?: boolean; applied?: boolean } = {}) {
       return {
         id: 'a1',
         job_id: 'j1',
-        status,
-        applied_at: status === 'APPLIED' ? '2026-09-04T09:00:00Z' : null,
+        status: applied ? ('APPLIED' as const) : ('SAVED' as const),
+        is_saved: saved,
+        applied_at: applied ? '2026-09-04T09:00:00Z' : null,
         created_at: '2026-09-04T08:00:00Z',
       }
     }
@@ -359,7 +364,7 @@ describe('JobDetailPage', () => {
       // pending flag and the header and footer would disagree mid-request.
       const user = userEvent.setup()
       vi.spyOn(jobService, 'get').mockResolvedValue(detailFixture())
-      vi.spyOn(applicationService, 'set').mockResolvedValue(application('APPLIED'))
+      vi.spyOn(applicationService, 'set').mockResolvedValue(application({ applied: true }))
       renderPage()
 
       await screen.findByRole('heading', { name: 'Senior Data Engineer' })
@@ -383,16 +388,19 @@ describe('JobDetailPage', () => {
     it('unticking keeps the job saved rather than removing it', async () => {
       const user = userEvent.setup()
       vi.spyOn(jobService, 'get').mockResolvedValue(
-        detailFixture({ application: application('APPLIED') }),
+        detailFixture({ application: application({ applied: true }) }),
       )
-      const set = vi.spyOn(applicationService, 'set').mockResolvedValue(application('SAVED'))
+      const set = vi.spyOn(applicationService, 'set').mockResolvedValue(application())
       const remove = vi.spyOn(applicationService, 'remove')
       renderPage()
 
       await screen.findByRole('heading', { name: 'Senior Data Engineer' })
       await user.click(boxes()[0]!)
 
-      await waitFor(() => expect(set).toHaveBeenCalledWith('j1', 'SAVED'))
+      // The bookmark is carried through untouched; only `applied` changes.
+      await waitFor(() =>
+        expect(set).toHaveBeenCalledWith('j1', { saved: true, applied: false }),
+      )
       expect(remove).not.toHaveBeenCalled()
     })
 
@@ -411,34 +419,64 @@ describe('JobDetailPage', () => {
       expect(boxes().every((box) => !(box as HTMLInputElement).checked)).toBe(true)
     })
 
-    it('asks before forgetting that you applied', async () => {
-      // A stray tap on a phone should not silently discard a real event in
-      // someone's job hunt.
+    it('does not touch the bookmark when you mark a job applied', async () => {
+      /*
+       * The reported bug. Ticking "I have applied" used to send a single status
+       * of APPLIED, which created the row and filled the bookmark — the
+       * interface claiming the user had saved something they never saved.
+       */
       const user = userEvent.setup()
-      vi.spyOn(jobService, 'get').mockResolvedValue(
-        detailFixture({ application: application('APPLIED') }),
-      )
-      const remove = vi.spyOn(applicationService, 'remove').mockResolvedValue(undefined)
+      vi.spyOn(jobService, 'get').mockResolvedValue(detailFixture())
+      const set = vi
+        .spyOn(applicationService, 'set')
+        .mockResolvedValue(application({ saved: false, applied: true }))
       renderPage()
 
       await screen.findByRole('heading', { name: 'Senior Data Engineer' })
-      await user.click(
-        screen.getAllByRole('button', { name: /Remove Senior Data Engineer from saved/ })[0]!,
+      await user.click(boxes()[0]!)
+
+      await waitFor(() =>
+        expect(set).toHaveBeenCalledWith('j1', { saved: false, applied: true }),
       )
-
-      const dialog = await screen.findByRole('dialog')
-      expect(within(dialog).getByText(/marked this as applied/)).toBeInTheDocument()
-      expect(remove).not.toHaveBeenCalled()
-
-      await user.click(within(dialog).getByRole('button', { name: 'Remove' }))
-      await waitFor(() => expect(remove).toHaveBeenCalledWith('j1'))
+      // Still offering to save it, because it was never saved.
+      expect(
+        screen.getAllByRole('button', { name: /^Save Senior Data Engineer$/ }).length,
+      ).toBeGreaterThan(0)
     })
 
-    it('cancelling the warning changes nothing', async () => {
+    it('leaves a bookmarked job bookmarked when you mark it applied', async () => {
       const user = userEvent.setup()
       vi.spyOn(jobService, 'get').mockResolvedValue(
-        detailFixture({ application: application('APPLIED') }),
+        detailFixture({ application: application() }),
       )
+      const set = vi
+        .spyOn(applicationService, 'set')
+        .mockResolvedValue(application({ saved: true, applied: true }))
+      renderPage()
+
+      await screen.findByRole('heading', { name: 'Senior Data Engineer' })
+      await user.click(boxes()[0]!)
+
+      await waitFor(() => expect(set).toHaveBeenCalledWith('j1', { saved: true, applied: true }))
+      expect(
+        screen.getAllByRole('button', { name: /Remove Senior Data Engineer from saved/ }).length,
+      ).toBeGreaterThan(0)
+    })
+
+    it('removes the bookmark without asking, and keeps that you applied', async () => {
+      /*
+       * There is no confirmation any more, and there should not be: un-bookmarking
+       * an applied job no longer deletes anything. The dialog's warning — that the
+       * job would leave Applications — became false when the two facts were split,
+       * and a dialog stating something untrue is worse than none.
+       */
+      const user = userEvent.setup()
+      vi.spyOn(jobService, 'get').mockResolvedValue(
+        detailFixture({ application: application({ saved: true, applied: true }) }),
+      )
+      const set = vi
+        .spyOn(applicationService, 'set')
+        .mockResolvedValue(application({ saved: false, applied: true }))
       const remove = vi.spyOn(applicationService, 'remove')
       renderPage()
 
@@ -446,34 +484,30 @@ describe('JobDetailPage', () => {
       await user.click(
         screen.getAllByRole('button', { name: /Remove Senior Data Engineer from saved/ })[0]!,
       )
-      const dialog = await screen.findByRole('dialog')
-      await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
 
+      await waitFor(() => expect(set).toHaveBeenCalledWith('j1', { saved: false, applied: true }))
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
       expect(remove).not.toHaveBeenCalled()
+      // Still applied, so the checkbox stays ticked.
       expect(boxes()[0]).toBeChecked()
     })
 
-    it('keeps a failed removal visible inside the dialog', async () => {
-      // showModal() makes the rest of the page inert, so a page-level alert
-      // would sit behind the backdrop where nobody can see it.
+    it('drops the record when you untick applied on a job you never saved', async () => {
+      // Neither bookmarked nor applied leaves nothing to remember, and the
+      // server refuses a row that records nothing — so this is a DELETE.
       const user = userEvent.setup()
       vi.spyOn(jobService, 'get').mockResolvedValue(
-        detailFixture({ application: application('APPLIED') }),
+        detailFixture({ application: application({ saved: false, applied: true }) }),
       )
-      vi.spyOn(applicationService, 'remove').mockRejectedValue(
-        new ApiError(500, 'INTERNAL_ERROR', 'Could not remove that.'),
-      )
+      const set = vi.spyOn(applicationService, 'set')
+      const remove = vi.spyOn(applicationService, 'remove').mockResolvedValue(undefined)
       renderPage()
 
       await screen.findByRole('heading', { name: 'Senior Data Engineer' })
-      await user.click(
-        screen.getAllByRole('button', { name: /Remove Senior Data Engineer from saved/ })[0]!,
-      )
-      const dialog = await screen.findByRole('dialog')
-      await user.click(within(dialog).getByRole('button', { name: 'Remove' }))
+      await user.click(boxes()[0]!)
 
-      expect(await within(dialog).findByText('Could not remove that.')).toBeInTheDocument()
-      expect(screen.getByRole('dialog')).toBeInTheDocument()
+      await waitFor(() => expect(remove).toHaveBeenCalledWith('j1'))
+      expect(set).not.toHaveBeenCalled()
     })
   })
 })

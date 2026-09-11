@@ -49,6 +49,7 @@ async def list_applications(
                 id=row.id,
                 job_id=row.job_id,
                 status=row.status,
+                is_saved=row.is_saved,
                 applied_at=row.applied_at,
                 created_at=row.created_at,
                 # application=None inside: this row already is the application,

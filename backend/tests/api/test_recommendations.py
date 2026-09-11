@@ -95,9 +95,7 @@ async def upload_resume(client: AsyncClient, headers: dict[str, str], run_pipeli
     await run_pipeline(uuid.UUID(response.json()["version_id"]))
 
 
-async def index_everything(
-    session: AsyncSession, provider: FakeEmbeddingProvider
-) -> None:
+async def index_everything(session: AsyncSession, provider: FakeEmbeddingProvider) -> None:
     await index_jobs(session=session, provider=provider, batch_size=500)
     await index_candidates(session=session, provider=provider, batch_size=50)
 
@@ -120,7 +118,7 @@ class TestAvailability:
         seeded_skills: int,
         run_pipeline,
     ) -> None:
-        """"Not indexed yet" and "nothing matched" are different answers.
+        """ "Not indexed yet" and "nothing matched" are different answers.
 
         Collapsing them into an empty list makes a feature that is merely behind
         look identical to one that is broken — the same distinction `/similar`
@@ -234,9 +232,7 @@ class TestRanking:
 
         for item in items:
             job_id = item["job"]["id"]
-            single = (
-                await client.get(f"{API}/jobs/{job_id}/match", headers=auth_headers)
-            ).json()
+            single = (await client.get(f"{API}/jobs/{job_id}/match", headers=auth_headers)).json()
             assert Decimal(item["score"]) == Decimal(single["overall_score"]), job_id
             assert [row["reason"] for row in item["breakdown"]] == [
                 row["reason"] for row in single["breakdown"]
@@ -275,9 +271,9 @@ class TestRanking:
         await upload_resume(client, auth_headers, run_pipeline)
         await index_everything(db_session, embedding_provider)
 
-        everything = (
-            await client.get(f"{API}/recommendations", headers=auth_headers)
-        ).json()["items"]
+        everything = (await client.get(f"{API}/recommendations", headers=auth_headers)).json()[
+            "items"
+        ]
         floor = max(Decimal(item["score"]) for item in everything)
 
         filtered = (
@@ -306,7 +302,7 @@ class TestRecallFilters:
         marked = await client.put(
             f"{API}/jobs/{applied}/application",
             headers=auth_headers,
-            json={"status": "APPLIED"},
+            json={"saved": False, "applied": True},
         )
         assert marked.status_code in (200, 201), marked.text
 
@@ -338,7 +334,9 @@ class TestRecallFilters:
         await index_everything(db_session, embedding_provider)
 
         await client.put(
-            f"{API}/jobs/{saved}/application", headers=auth_headers, json={"status": "SAVED"}
+            f"{API}/jobs/{saved}/application",
+            headers=auth_headers,
+            json={"saved": True, "applied": False},
         )
 
         body = (await client.get(f"{API}/recommendations", headers=auth_headers)).json()
@@ -505,7 +503,10 @@ class TestPaging:
 
 class TestFeedback:
     async def test_records_a_judgement(
-        self, client: AsyncClient, db_session: AsyncSession, auth_headers: dict[str, str],
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        auth_headers: dict[str, str],
         seeded_skills: int,
     ) -> None:
         job_id = await submit(client, auth_headers, "Senior Backend Engineer", BACKEND)
@@ -525,7 +526,10 @@ class TestFeedback:
         assert row.ranking_version == "v1-hand-tuned"
 
     async def test_changing_your_mind_replaces_rather_than_appends(
-        self, client: AsyncClient, db_session: AsyncSession, auth_headers: dict[str, str],
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        auth_headers: dict[str, str],
         seeded_skills: int,
     ) -> None:
         """A record of somebody changing their mind is not a training label.
@@ -547,7 +551,10 @@ class TestFeedback:
         assert row.rating is RecommendationFeedback.RELEVANT
 
     async def test_an_unknown_job_is_404_and_writes_nothing(
-        self, client: AsyncClient, db_session: AsyncSession, auth_headers: dict[str, str],
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        auth_headers: dict[str, str],
     ) -> None:
         response = await client.post(
             f"{API}/recommendations/{uuid.uuid4()}/feedback",

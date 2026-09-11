@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Link, useLocation, useParams } from 'react-router-dom'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
-import { JobSaveControls, UnsaveConfirmation } from '@/components/JobSaveControls'
+import { JobSaveControls } from '@/components/JobSaveControls'
 import { MatchBreakdown } from '@/components/jobs/MatchBreakdown'
 import { SimilarJobs } from '@/components/jobs/SimilarJobs'
 import { buttonClass } from '@/components/ui/buttonStyles'
@@ -474,7 +474,6 @@ function JobDetailView({
             into showModal() for one event. */}
         <SimilarJobs jobId={job.id} />
 
-      <UnsaveConfirmation state={application} />
       </div>
     </div>
   )

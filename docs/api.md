@@ -223,8 +223,8 @@ code `UNEXTRACTABLE_DOCUMENT` (requirements.md §6).
 | `GET` | `/jobs/{id}` | Detail with parsed structure and extracted skills |
 | `PATCH` | `/jobs/{id}/application-link` | Attach an application link to a job that has none |
 | `GET` | `/jobs/{id}/match` | **This caller's** score breakdown for this job |
-| `PUT` | `/jobs/{id}/application` | Save this job, or mark that you applied to it |
-| `DELETE` | `/jobs/{id}/application` | Remove it from your saved list |
+| `PUT` | `/jobs/{id}/application` | Set `{saved, applied}` — independent, both sent every time |
+| `DELETE` | `/jobs/{id}/application` | Drop the job from your lists entirely |
 | `GET` | `/jobs/{id}/similar` | Nearest neighbours by embedding |
 | `POST` | `/admin/jobs/import` | 🔒 `ADMIN` — bulk dataset import → `202` |
 | `POST` | `/admin/jobs/fetch` | 🔒 `ADMIN` — pull current postings from the configured jobs provider |
@@ -346,8 +346,19 @@ code `UNEXTRACTABLE_DOCUMENT` (requirements.md §6).
 > path has nowhere to put the other three writes — it grows into `/save`, `/unsave`, `/apply`,
 > `/unapply` — whereas a singleton sub-resource takes two verbs that are idempotent by definition.
 > That matters: a bookmark is a control people tap twice on a phone, and a POST that 409s on the
-> second tap is the exact failure this must not have. Unmarking applied sends `{"status": "SAVED"}`
-> rather than deleting, so the job stays saved.
+> second tap is the exact failure this must not have.
+>
+> **The body is `{saved, applied}` — two independent booleans, not one status** (changed
+> 2026-09-11). It was a single `status` of `SAVED` *or* `APPLIED`, which made the two mutually
+> exclusive: marking a job applied was indistinguishable from bookmarking it, so the interface
+> filled the bookmark for something the user had not done. They are separate columns now, and the
+> body carries both every time — a client recording one fact passes the other through unchanged, so
+> a write can never rewrite the other by omission. `extra="forbid"`, so the old body is a 422
+> rather than being silently read as "save this".
+>
+> `{"saved": false, "applied": false}` is refused. That request means "no relationship to this
+> job", which is what `DELETE` already says, and one meaning should not have two routes. A bare
+> `{}` still means "save this", which is what the bookmark sends.
 >
 > `PUT` answers **200, never 201**. The caller cannot tell a create from an update and does not need
 > to; varying the status by which one happened would make an idempotent endpoint's *response*

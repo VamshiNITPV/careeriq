@@ -1,8 +1,5 @@
-import { Alert } from '@/components/ui/Alert'
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import type { JobApplicationState } from '@/hooks/useJobApplication'
 import { cn } from '@/utils/cn'
-import { formatDateTime } from '@/utils/datetime'
 
 /**
  * Save a job, and record whether you applied to it.
@@ -98,47 +95,5 @@ export function JobSaveControls({
         </span>
       )}
     </div>
-  )
-}
-
-/**
- * The confirmation shown before an applied job leaves the saved list.
- *
- * Rendered **once per hook**, not once per control. The detail page shows two
- * JobSaveControls driven by one `useJobApplication`, and a dialog inside the
- * control would mean two <dialog> elements calling showModal() for the same
- * event.
- */
-export function UnsaveConfirmation({ state }: { state: JobApplicationState }) {
-  const { pendingUnsave, dialogError, isPending } = state
-  // formatDateTime returns '' for anything it cannot read, so the sentence has
-  // to survive an empty string as well as a null.
-  const appliedOn = pendingUnsave?.applied_at ? formatDateTime(pendingUnsave.applied_at) : ''
-
-  return (
-    <ConfirmDialog
-      open={pendingUnsave !== null}
-      title="Remove this from saved?"
-      confirmLabel="Remove"
-      destructive
-      isBusy={isPending}
-      onConfirm={() => void state.confirmUnsave()}
-      onCancel={() => {
-        if (!isPending) state.cancelUnsave()
-      }}
-    >
-      <p>
-        You marked this as applied{appliedOn !== '' && <> on {appliedOn}</>}. Removing it from
-        saved forgets that too, and it will no longer appear under Applications.
-      </p>
-      {/* Inside the dialog, never at page level: showModal() makes the rest of
-          the document inert, so an alert outside it sits behind the backdrop
-          where nobody can see it. */}
-      {dialogError !== null && (
-        <Alert tone="error" className="mt-3">
-          {dialogError}
-        </Alert>
-      )}
-    </ConfirmDialog>
   )
 }

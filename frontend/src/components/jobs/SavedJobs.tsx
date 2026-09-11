@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { JobSaveControls, UnsaveConfirmation } from '@/components/JobSaveControls'
+import { JobSaveControls } from '@/components/JobSaveControls'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
@@ -25,15 +25,25 @@ import { formatDateTime } from '@/utils/datetime'
 
 function Row({
   item,
+  context,
   onChange,
 }: {
   item: ApplicationListItem
+  /**
+   * Which list this row is in, so the date answers that list's question.
+   *
+   * Needed because the lists overlap now: a job you bookmarked and then applied
+   * to renders in both. Deriving the date from `status` alone put "Applied 4
+   * Sept" on the row under **Saved**, which reads as the wrong date for the
+   * heading above it — and made the same job identical in both places.
+   */
+  context: 'saved' | 'applied'
   onChange: (next: ApplicationRead | null) => void
 }) {
   const state = useJobApplication(item.job_id, item, onChange)
   const salary = formatSalary(item.job)
   const when =
-    item.status === 'APPLIED' && item.applied_at !== null
+    context === 'applied' && item.applied_at !== null
       ? `Applied ${formatDateTime(item.applied_at)}`
       : `Saved ${formatDateTime(item.created_at)}`
 
@@ -60,7 +70,6 @@ function Row({
       {/* The same controls as the card, so someone pruning their list here does
           not have to open every job to do it. */}
       <JobSaveControls state={state} jobTitle={item.job.title} variant="icon" />
-      <UnsaveConfirmation state={state} />
     </li>
   )
 }
@@ -69,12 +78,14 @@ function Section({
   title,
   description,
   items,
+  context,
   empty,
   onChange,
 }: {
   title: string
   description: string
   items: ApplicationListItem[]
+  context: 'saved' | 'applied'
   empty: React.ReactNode
   onChange: (jobId: string, next: ApplicationRead | null) => void
 }) {
@@ -87,7 +98,12 @@ function Section({
       ) : (
         <ul className="mt-4 divide-y divide-slate-200">
           {items.map((item) => (
-            <Row key={item.id} item={item} onChange={(next) => onChange(item.job_id, next)} />
+            <Row
+              key={item.id}
+              item={item}
+              context={context}
+              onChange={(next) => onChange(item.job_id, next)}
+            />
           ))}
         </ul>
       )}
@@ -145,10 +161,17 @@ export function SavedJobs() {
     )
   }
 
-  // Disjoint on purpose. An applied job in both lists would make "Saved" a
-  // to-do list that never empties; that it is still saved stays visible on the
-  // job itself, where the bookmark is filled.
-  const saved = items.filter((item) => item.status === 'SAVED')
+  /*
+    Overlapping on purpose, which reverses the earlier rule here.
+
+    These were disjoint while a job could only be saved *or* applied. Now that
+    the bookmark and the funnel stage are independent facts, they answer two
+    different questions — "what did I bookmark" and "what did I apply to" — and
+    a job you bookmarked and then applied to is a true answer to both. Filtering
+    it out of Saved would hide a bookmark the user set and never cleared, which
+    is the same class of surprise as the bug that prompted the split.
+  */
+  const saved = items.filter((item) => item.is_saved)
   const applied = items.filter((item) => item.status === 'APPLIED')
 
   return (
@@ -159,6 +182,7 @@ export function SavedJobs() {
         title="Saved"
         description="Jobs you bookmarked to come back to."
         items={saved}
+        context="saved"
         onChange={apply}
         empty={
           <>
@@ -174,6 +198,7 @@ export function SavedJobs() {
         title="Applications"
         description="Jobs you told us you applied to. Nothing here is inferred — you marked each one."
         items={applied}
+        context="applied"
         onChange={apply}
         empty={<>Nothing marked applied yet. Tick &ldquo;I have applied&rdquo; on a job.</>}
       />

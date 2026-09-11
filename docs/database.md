@@ -550,6 +550,21 @@ ALTER TABLE applications ADD CONSTRAINT ck_applications_applied_has_timestamp
 > `ux_applications_user_job` already leads on `user_id` with the same partial predicate. It returns
 > as `(user_id, status, created_at DESC)` when a funnel or real volume arrives.
 >
+> **`is_saved` was added 2026-09-11, and it is not in the original design.** Section 3.7 assumed
+> `status` could carry both meanings, with SAVED as stage zero of the funnel. It cannot: a funnel
+> stage is one value at a time, so a job that was bookmarked *and* applied to had nowhere to record
+> the bookmark — and the interface, reading "does a row exist", filled the bookmark icon whenever
+> someone ticked "I have applied". Reported as a bug, and it was one.
+>
+> `status` stays the funnel stage it was designed to be. `is_saved` is the separate fact, with
+> `CHECK (is_saved OR status = 'APPLIED')` so a live row always records something — neither
+> bookmarked nor applied has no content, and `DELETE` is how that relationship ends.
+>
+> The backfill (`is_saved = (status = 'SAVED')`) is **a choice, not a recovery**: the old schema
+> never held the information, so nothing can restore it. It matches the Saved list users could
+> already see, at the cost of emptying the bookmark on jobs they had applied to. The alternative —
+> `true` everywhere — would have invented bookmarks nobody made, which is the failure being fixed.
+>
 > **The partial index is the save toggle's whole idempotency mechanism** — at most one live
 > application per `(user, job)`, enforced by the database rather than by a read-then-write that a
 > double tap can slip between. It also deliberately does not cover tombstones, so unsaving and

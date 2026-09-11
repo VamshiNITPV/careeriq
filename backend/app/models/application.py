@@ -12,7 +12,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -40,11 +40,17 @@ def _pg_enum(enum_cls: type, name: str) -> SAEnum:
 class Application(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     """One user's relationship to one job.
 
+    **Two independent facts, not one.** `is_saved` is the user's bookmark;
+    `status` is how far the job has got. A job can be bookmarked, applied to, or
+    both, and neither action implies the other — conflating them meant ticking
+    "I have applied" silently bookmarked the job as well.
+
     Soft-deleted, which is what `SoftDeleteMixin` was written for — its docstring
     names resumes and applications as the only two places recovery genuinely
-    matters. Here it also does real work: unsaving a job you had marked applied
-    leaves a tombstone carrying that fact, so the history survives an action the
-    user may regret.
+    matters. Here it does real work on the one path that still removes a row:
+    dropping a job that is neither bookmarked nor applied leaves a tombstone
+    carrying the fact that the user once applied, so that history survives an
+    action they may regret.
     """
 
     __tablename__ = "applications"
@@ -70,8 +76,19 @@ class Application(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
         default=ApplicationStatus.SAVED,
         server_default=text("'SAVED'::application_status"),
     )
+    # Whether the user bookmarked this job, independently of where it sits in
+    # the funnel.
+    #
+    # Separate from `status` because the two are different facts and conflating
+    # them was a reported bug: `status` held SAVED *or* APPLIED, so marking a job
+    # applied was indistinguishable from bookmarking it, and the interface filled
+    # the bookmark on the user's behalf for something they had not done. A funnel
+    # stage answers "how far has this got"; this answers "did I bookmark it".
+    is_saved: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
     # Set when the user marks it applied, cleared when they unmark it. The
-    # confirmation dialog names this date, and the profile list shows it.
+    # profile list shows it.
     applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Joined, not lazy. Every path that serialises an application needs the job,
@@ -105,6 +122,16 @@ class Application(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
         CheckConstraint(
             "(status = 'APPLIED') = (applied_at IS NOT NULL)",
             name="applied_has_timestamp",
+        ),
+        # A live row has to mean something. Once `is_saved` and `status` became
+        # independent, "not bookmarked and not applied" stopped being a state
+        # with any content — there is nothing left to remember about the job, so
+        # the row is deleted rather than kept as an empty relationship. The API
+        # rejects that combination too; this is the backstop that makes it
+        # unreachable by any other writer.
+        CheckConstraint(
+            "is_saved OR status = 'APPLIED'",
+            name="saved_or_applied",
         ),
         # database.md section 3.7 also specifies ix_applications_status on
         # (user_id, status, last_status_change_at DESC). Not built: that column

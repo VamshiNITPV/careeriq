@@ -12,6 +12,9 @@ function item(overrides: Partial<ApplicationListItem> = {}): ApplicationListItem
     id: 'a1',
     job_id: 'j1',
     status,
+    // Defaults to bookmarked, and independent of `status` — an override can set
+    // either without implying the other, which is the point of the split.
+    is_saved: overrides.is_saved ?? true,
     applied_at: status === 'APPLIED' ? '2026-09-04T09:00:00Z' : null,
     created_at: '2026-09-04T08:00:00Z',
     job: {
@@ -61,6 +64,7 @@ describe('SavedJobs', () => {
           id: 'a2',
           job_id: 'j2',
           status: 'APPLIED',
+          is_saved: false,
           job: { ...item().job, id: 'j2', title: 'Backend Engineer' },
         }),
       ],
@@ -71,9 +75,26 @@ describe('SavedJobs', () => {
     await screen.findByRole('heading', { name: 'Saved' })
     expect(within(section('Saved')).getByText('Senior Data Engineer')).toBeInTheDocument()
     expect(within(section('Applications')).getByText('Backend Engineer')).toBeInTheDocument()
-    // Disjoint: an applied job in both would make "Saved" a to-do list that
-    // never empties.
+    // Applied but never bookmarked, so it is not in Saved.
     expect(within(section('Saved')).queryByText('Backend Engineer')).not.toBeInTheDocument()
+  })
+
+  it('shows a job you bookmarked and applied to in both lists', async () => {
+    /*
+     * These lists were disjoint while a job could only be saved *or* applied.
+     * They ask two different questions now, and a job you bookmarked and then
+     * applied to is a true answer to both — filtering it out of Saved would hide
+     * a bookmark the user set and never cleared.
+     */
+    vi.spyOn(applicationService, 'list').mockResolvedValue({
+      items: [item({ status: 'APPLIED', is_saved: true })],
+      total: 1,
+    })
+    renderSaved()
+
+    await screen.findByRole('heading', { name: 'Saved' })
+    expect(within(section('Saved')).getByText('Senior Data Engineer')).toBeInTheDocument()
+    expect(within(section('Applications')).getByText('Senior Data Engineer')).toBeInTheDocument()
   })
 
   it('offers a way in when nothing is saved', async () => {
@@ -105,22 +126,31 @@ describe('SavedJobs', () => {
   })
 
   it('moves a row between the lists without refetching', async () => {
+    // Un-bookmarking an applied job takes it out of Saved and leaves it under
+    // Applications. No confirmation: nothing is lost by it any more.
     const user = userEvent.setup()
     const list = vi.spyOn(applicationService, 'list').mockResolvedValue({
-      items: [item({ status: 'APPLIED' })],
+      items: [item({ status: 'APPLIED', is_saved: true })],
       total: 1,
     })
-    vi.spyOn(applicationService, 'remove').mockResolvedValue(undefined)
+    vi.spyOn(applicationService, 'set').mockResolvedValue({
+      ...item({ status: 'APPLIED', is_saved: false }),
+    })
     renderSaved()
 
-    await screen.findByText('Senior Data Engineer')
+    await screen.findByRole('heading', { name: 'Saved' })
+    expect(within(section('Saved')).getByText('Senior Data Engineer')).toBeInTheDocument()
+
+    await user.click(
+      within(section('Saved')).getByRole('button', {
+        name: /Remove Senior Data Engineer from saved/,
+      }),
+    )
+
+    await waitFor(() =>
+      expect(within(section('Saved')).queryByText('Senior Data Engineer')).not.toBeInTheDocument(),
+    )
     expect(within(section('Applications')).getByText('Senior Data Engineer')).toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: /Remove Senior Data Engineer from saved/ }))
-    const dialog = await screen.findByRole('dialog')
-    await user.click(within(dialog).getByRole('button', { name: 'Remove' }))
-
-    await waitFor(() => expect(screen.queryByText('Senior Data Engineer')).not.toBeInTheDocument())
     // The list is derived from one request, so nothing had to be re-fetched.
     expect(list).toHaveBeenCalledTimes(1)
   })

@@ -21,27 +21,40 @@ class ApplicationRepository(BaseRepository[Application]):
         *,
         user_id: uuid.UUID,
         job_id: uuid.UUID,
-        status: ApplicationStatus,
+        saved: bool,
+        applied: bool,
     ) -> Application:
-        """Set this user's application to this job, creating it if absent.
+        """Set this user's relationship to this job, creating it if absent.
+
+        **Two independent facts.** `saved` is the bookmark, `applied` is the
+        funnel stage, and writing one never disturbs the other — which is the
+        whole point of the split. Both are required rather than optional, so a
+        caller states the complete desired state and a partial write cannot leave
+        the row half-updated.
+
+        Callers must not pass `saved=False, applied=False`: that row would mean
+        nothing and the `saved_or_applied` CHECK rejects it. `DELETE` is how a
+        relationship ends.
 
         One statement, not a read-then-decide. The toggle is a button someone
         taps twice on a phone, and a read followed by a write has a window a
         second tap fits through — the same reasoning the career repository
         records for its own upsert.
 
-        `applied_at` is derived here rather than passed in, so the invariant the
-        `applied_has_timestamp` CHECK enforces cannot be violated by a caller,
-        and it is `func.now()` so the value comes from PostgreSQL like every
-        other timestamp in the schema.
+        `status` and `applied_at` are both derived here rather than passed in, so
+        the invariant the `applied_has_timestamp` CHECK enforces cannot be
+        violated by a caller, and the timestamp is `func.now()` so the value
+        comes from PostgreSQL like every other one in the schema.
         """
-        applied_at = func.now() if status is ApplicationStatus.APPLIED else None
+        status = ApplicationStatus.APPLIED if applied else ApplicationStatus.SAVED
+        applied_at = func.now() if applied else None
 
         stmt = pg_insert(Application).values(
             id=uuid7(),
             user_id=user_id,
             job_id=job_id,
             status=status,
+            is_saved=saved,
             applied_at=applied_at,
         )
         stmt = stmt.on_conflict_do_update(
@@ -54,6 +67,7 @@ class ApplicationRepository(BaseRepository[Application]):
             index_where=Application.deleted_at.is_(None),
             set_={
                 "status": stmt.excluded.status,
+                "is_saved": stmt.excluded.is_saved,
                 "applied_at": stmt.excluded.applied_at,
                 # `onupdate=func.now()` is an ORM-level hook and does not fire
                 # for a Core insert, so without this line updated_at stays at

@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom'
-import { JobSaveControls, UnsaveConfirmation } from '@/components/JobSaveControls'
+import { JobSaveControls } from '@/components/JobSaveControls'
 import { useJobApplication } from '@/hooks/useJobApplication'
 import type { ApplicationRead } from '@/types/application'
 import {
@@ -122,7 +122,6 @@ export function JobCard({
             </span>
           )}
           <JobSaveControls state={state} jobTitle={job.title} variant="icon" />
-          <UnsaveConfirmation state={state} />
         </div>
       </div>
 
