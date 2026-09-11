@@ -86,9 +86,16 @@ function clamp(value: number, count: number): number {
  * would simply not render.
  */
 function segmentClass(filled: boolean): string {
+  // `min-h-10` and the vertical padding are the touch target, not decoration.
+  // These two segments are the *only* way to open the picker, and at `px-1` with
+  // no `py` they rendered 24x20 and 40x20 — under the 24px WCAG 2.5.8 floor, so
+  // date entry was unreliable on a phone. The wrapping row already has `py-2`,
+  // but padding on a parent is not tappable: the press has to land on the
+  // button itself.
   const base =
-    'rounded px-1 text-sm tabular-nums focus:outline-none ' +
-    'focus-visible:ring-2 focus-visible:ring-indigo-600 disabled:cursor-not-allowed'
+    'inline-flex min-h-10 items-center rounded px-2 text-sm tabular-nums sm:min-h-0 sm:py-0 ' +
+    'focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 ' +
+    'disabled:cursor-not-allowed'
   return filled ? `${base} text-slate-900` : `${base} text-slate-400`
 }
 
@@ -391,7 +398,9 @@ export function MonthPicker({
                 close()
                 monthRef.current?.focus()
               }}
-              className="rounded p-0.5 text-slate-400 hover:text-slate-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600"
+              // 32px, for the reason Combobox's clear button gives: over the
+              // 24px floor, and capped by the icon gutter it shares.
+              className="rounded p-2 text-slate-400 hover:text-slate-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600"
             >
               <svg viewBox="0 0 20 20" fill="currentColor" className="size-4" aria-hidden="true">
                 <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
@@ -412,8 +421,15 @@ export function MonthPicker({
           <div
             id={paneId}
             className={cn(
-              'absolute top-full left-0 z-30 mt-1 w-full min-w-60 rounded-md',
-              'border border-slate-200 bg-white p-2 shadow-lg',
+              // `max-w-[calc(100vw-2rem)]` caps the 240px floor against the
+              // viewport, copying DropdownMenu. Without it this was the one
+              // genuine horizontal overflow in the app: these fields sit in a
+              // `p-4` panel inside a `p-6` section, leaving 208px at a 320px
+              // viewport, so `min-w-60` hung 32px past the card and — with
+              // nothing clipping it — scrolled the entire document sideways the
+              // moment a date field was tapped.
+              'absolute top-full left-0 z-30 mt-1 w-full min-w-60 max-w-[calc(100vw-2rem)]',
+              'rounded-md border border-slate-200 bg-white p-2 shadow-lg',
             )}
           >
             {pane === 'year' ? (

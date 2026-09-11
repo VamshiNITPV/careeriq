@@ -77,7 +77,15 @@ export function JobSaveControls({
         // changes — on an applied job it opens a confirmation instead.
         aria-label={isSaved ? `Remove ${jobTitle} from saved` : `Save ${jobTitle}`}
         className={cn(
-          'rounded p-1 focus-visible:ring-2 focus-visible:ring-indigo-600 focus-visible:outline-none',
+          // `size-10` on phones — the most-tapped control in the app was a 28px
+          // target (a `size-5` icon in `p-1`), which clears the 24px WCAG 2.5.8
+          // minimum but is small for a thumb on a dense list of cards. The icon
+          // is unchanged; only the hit area grows. `-m-1` keeps the larger box
+          // from pushing the card's header row taller, and it shrinks back at
+          // `sm` where pointers are precise and the row is tight.
+          'inline-flex size-10 shrink-0 items-center justify-center rounded -m-1',
+          'sm:m-0 sm:size-auto sm:p-1',
+          'focus-visible:ring-2 focus-visible:ring-indigo-600 focus-visible:outline-none',
           isSaved ? 'text-slate-900' : 'text-slate-400 hover:text-slate-600',
         )}
       >

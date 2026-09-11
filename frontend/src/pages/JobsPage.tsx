@@ -401,7 +401,7 @@ export function JobsPage() {
           the attribute and let Tailwind's internal ordering decide.
 
           There is no `lg:grid` any more, and there must not be: the panel is
-          closed at every width now. `sm:grid-cols-2` and `lg:grid-cols-4` are
+          closed at every width now. `sm:grid-cols-2` and `lg:grid-cols-3` are
           safe in the base string because grid-template-columns does not set
           `display`, so neither can un-hide the panel at a breakpoint.
 

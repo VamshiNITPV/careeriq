@@ -311,7 +311,15 @@ export function ResumeDetailPage() {
       </Link>
 
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0 flex-1">
+        {/*
+          `min-w-48`, not `min-w-0`. With `flex-1` the basis is 0%, and `min-w-0`
+          removes the automatic minimum — so the hypothetical width is zero, the
+          line can never overflow and the `flex-wrap` above is dead code. The
+          heading was therefore squeezed into whatever the `shrink-0` buttons
+          left it: about 52px at a 320px viewport. A real floor makes the row
+          wrap instead.
+        */}
+        <div className="min-w-48 flex-1">
           {isRenaming ? (
             /*
               A real form, not ConfirmDialog. That primitive is for actions that
@@ -354,7 +362,14 @@ export function ResumeDetailPage() {
             </form>
           ) : (
             <>
-              <h1 className="text-2xl font-bold tracking-tight text-slate-900">{detail.title}</h1>
+              {/*
+                `break-words` because a resume title is a raw filename, so it is
+                routinely one unbreakable token: `Parshuram_Bardawal_Resume_2026.pdf`
+                rendered as a one-word-per-line tower in a narrow column.
+              */}
+              <h1 className="text-2xl font-bold tracking-tight break-words text-slate-900">
+                {detail.title}
+              </h1>
               <p className="mt-1 text-sm text-slate-600">
                 Added {formatDateTime(detail.created_at)}
                 {version?.processed_at != null && ` · Read ${formatDateTime(version.processed_at)}`}

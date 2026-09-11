@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useEffect, useId, useRef, type ReactNode } from 'react'
 import { cn } from '@/utils/cn'
 import { Button } from './Button'
 
@@ -36,6 +36,15 @@ export function ConfirmDialog({
   onCancel,
 }: ConfirmDialogProps) {
   const ref = useRef<HTMLDialogElement>(null)
+  /*
+   * Per-instance, because this id was hardcoded as "confirm-title" and every
+   * JobCard renders one of these: a 20-job list put twenty identical ids in the
+   * document. `aria-labelledby` resolves to the *first* match, so an open dialog
+   * on the seventeenth card was announced with the first card's title — telling
+   * a screen reader user they were about to act on the wrong job. Every other
+   * id-bearing component here already uses useId().
+   */
+  const titleId = useId()
 
   useEffect(() => {
     const dialog = ref.current
@@ -71,15 +80,29 @@ export function ConfirmDialog({
         'max-h-[85vh] overflow-auto',
         'backdrop:bg-slate-900/40 backdrop:backdrop-blur-[1px]',
       )}
-      aria-labelledby="confirm-title"
+      aria-labelledby={titleId}
     >
-      <div className="p-6">
-        <h2 id="confirm-title" className="text-base font-semibold text-slate-900">
+      {/*
+        `p-4 sm:p-6` — at a 320px viewport the dialog is 288px wide, and `p-6`
+        spent 48px of that on padding.
+      */}
+      <div className="p-4 sm:p-6">
+        {/*
+          `break-words` because the title is caller-supplied and is sometimes a
+          raw filename: `Delete "Parshuram_Bardawal_Resume_2026.pdf"?` is a
+          single unbreakable token far wider than the dialog, which turned the
+          modal into a horizontal scroller with the title running under its edge.
+        */}
+        <h2 id={titleId} className="text-base font-semibold break-words text-slate-900">
           {title}
         </h2>
         <div className="mt-2 text-sm text-slate-600">{children}</div>
 
-        <div className="mt-6 flex justify-end gap-2">
+        {/*
+          `flex-wrap` so a longer confirmLabel stacks rather than overflowing.
+          `justify-end` still holds once wrapped.
+        */}
+        <div className="mt-6 flex flex-wrap justify-end gap-2">
           <Button variant="secondary" size="sm" onClick={onCancel} disabled={isBusy}>
             {cancelLabel}
           </Button>

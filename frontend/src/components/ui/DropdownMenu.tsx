@@ -175,7 +175,14 @@ export function DropdownMenu({
           // users are not dropped at the top of the document.
           onClick={() => close(true)}
           className={cn(
-            'absolute top-full z-30 mt-2 w-60 max-w-[calc(100vw-2rem)] overflow-hidden',
+            // Width was already capped against the viewport; height was not, and
+            // `overflow-hidden` meant the excess could not even be scrolled to.
+            // This panel is anchored in a `sticky` header that never scrolls
+            // away, so on a landscape phone — roughly 250-300px of usable height
+            // — "Sign out" sat below the fold and was unreachable by any means.
+            // `overflow-y-auto` replaces `overflow-hidden`; `max-h` bounds it.
+            'absolute top-full z-30 mt-2 w-60 max-w-[calc(100vw-2rem)]',
+            'max-h-[calc(100vh-5rem)] overflow-x-hidden overflow-y-auto',
             'rounded-lg border border-slate-200 bg-white py-1 shadow-lg',
             align === 'right' ? 'right-0' : 'left-0',
             className,

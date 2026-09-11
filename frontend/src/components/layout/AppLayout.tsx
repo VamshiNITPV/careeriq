@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
-import { NavLink, Outlet, useLocation } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { NavLink, Outlet } from 'react-router-dom'
 import { UserMenu } from '@/components/layout/UserMenu'
+import { usePopoverDismiss } from '@/components/ui/popoverDismiss'
 import { cn } from '@/utils/cn'
 
 const NAV_ITEMS = [
@@ -35,18 +36,38 @@ function MenuIcon({ open }: { open: boolean }) {
 
 export function AppLayout() {
   const [menuOpen, setMenuOpen] = useState(false)
-  const location = useLocation()
+  const triggerRef = useRef<HTMLButtonElement>(null)
 
-  // Close on navigation. Without this the panel stays open over the page the
-  // user just asked for, hiding the thing they navigated to.
-  useEffect(() => setMenuOpen(false), [location.pathname])
+  /*
+   * Close on an outside tap and on navigation, via the shared hook rather than
+   * the hand-rolled route effect this used to carry.
+   *
+   * The missing piece was outside-tap dismissal: on a phone the panel covers the
+   * page, and tapping the content behind it did nothing — the only way out was
+   * to find the hamburger again. DropdownMenu.tsx names this layout by name as
+   * the inferior precedent it was extracted away from, so this is that debt
+   * being paid rather than a new idea.
+   *
+   * The ref goes on the element wrapping *both* the trigger and the panel, so
+   * one containment check covers both and the opening tap is not also read as an
+   * outside tap.
+   */
+  const shellRef = usePopoverDismiss<HTMLDivElement>({
+    open: menuOpen,
+    onOutsidePointer: () => setMenuOpen(false),
+    onRouteChange: () => setMenuOpen(false),
+  })
 
   // Escape closes it. A menu that can only be dismissed by hitting the exact
-  // toggle button again is a trap for keyboard users.
+  // toggle button again is a trap for keyboard users. Focus goes back to the
+  // trigger, because hiding the panel would otherwise drop it on <body> and
+  // reset tab order to the top of the document.
   useEffect(() => {
     if (!menuOpen) return
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setMenuOpen(false)
+      if (event.key !== 'Escape') return
+      setMenuOpen(false)
+      triggerRef.current?.focus()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
@@ -62,7 +83,10 @@ export function AppLayout() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
+      <header
+        ref={shellRef}
+        className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur"
+      >
         <div className="mx-auto flex h-16 max-w-7xl items-center gap-4 px-4 sm:px-6 lg:px-8">
           <NavLink
             to="/dashboard"
@@ -83,12 +107,15 @@ export function AppLayout() {
               them it announces as an unlabelled button that appears to do
               nothing. */}
           <button
+            ref={triggerRef}
             type="button"
             onClick={() => setMenuOpen((open) => !open)}
             aria-expanded={menuOpen}
             aria-controls="mobile-nav"
             aria-label={menuOpen ? 'Close menu' : 'Open menu'}
-            className="rounded-md p-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900 md:hidden"
+            // `size-10` on the hit area: this was 36px, and it is the only route
+            // to navigation on a phone. The icon is unchanged.
+            className="inline-flex size-10 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100 hover:text-slate-900 md:hidden"
           >
             <MenuIcon open={menuOpen} />
           </button>

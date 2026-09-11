@@ -26,9 +26,21 @@ export const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
     'bg-red-600 text-white hover:bg-red-500 focus-visible:outline-red-600 disabled:bg-red-300',
 }
 
+/**
+ * `sm` and `md` carry a phone-only height floor.
+ *
+ * `sm` computed to 32px and `md` to 36px, and `sm` is the default for nearly
+ * every row action in the app — Edit, Remove, Re-extract, the pagers, the
+ * confirmation dialog's buttons. That is a comfortable mouse target and a poor
+ * thumb one, and it applied to destructive actions among others.
+ *
+ * Expressed as a floor that relaxes at `sm:` rather than as new padding, so the
+ * desktop appearance is unchanged and ~15 call sites need no edit. `min-h`
+ * rather than larger `py` keeps the label centred without moving the text.
+ */
 export const BUTTON_SIZES: Record<ButtonSize, string> = {
-  sm: 'px-2.5 py-1.5 text-sm',
-  md: 'px-3.5 py-2 text-sm',
+  sm: 'min-h-10 px-2.5 py-1.5 text-sm sm:min-h-0',
+  md: 'min-h-10 px-3.5 py-2 text-sm sm:min-h-0',
   lg: 'px-4 py-2.5 text-base',
 }
 

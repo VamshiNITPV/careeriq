@@ -51,7 +51,21 @@ export function JobCard({
   return (
     <li className="relative rounded-lg bg-white p-4 shadow-sm ring-1 ring-slate-200 transition-shadow focus-within:ring-2 focus-within:ring-indigo-600 hover:shadow-md">
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
-        <h3 className="text-base font-semibold text-indigo-700">
+        {/*
+          `min-w-0 flex-1` so the title column shrinks instead of setting the
+          row's width. Without it the h3's flex base was the title's full
+          max-content width, so almost every real job title pushed the
+          salary/bookmark group onto a second flex line — where `justify-between`
+          places a lone item at flex-start. The bookmark therefore jumped from
+          top-right to mid-card-left depending on title length, zig-zagging down
+          a twenty-card list, and landed in the 2-4px gap between the title and
+          the company name, reading as part of neither.
+
+          `break-words` for the rarer case: job titles come from a parser over
+          pasted text, so a single 40-character token is possible, and its
+          min-content width would otherwise overflow the card.
+        */}
+        <h3 className="min-w-0 flex-1 text-base font-semibold break-words text-indigo-700">
           {/*
             Only the title is the link, but `after:absolute after:inset-0`
             stretches its hit area over the whole card. Wrapping everything in
@@ -95,7 +109,18 @@ export function JobCard({
           layout, so no test in this repo can catch that.
         */}
         <div className="relative z-10 flex shrink-0 items-center gap-2">
-          {salary !== null && <span className="text-sm font-medium text-slate-900">{salary}</span>}
+          {/*
+            `truncate` and a cap, because this sits in the `shrink-0` group and
+            is not always short. `formatSalary` uses compact notation above
+            100k ("INR 2.8M – 4.5M/yr", ~115px) but falls through to standard
+            below it — "USD 45,000 – 85,000/yr" is ~165px of unshrinkable width
+            in a 256px card.
+          */}
+          {salary !== null && (
+            <span className="max-w-36 truncate text-sm font-medium text-slate-900" title={salary}>
+              {salary}
+            </span>
+          )}
           <JobSaveControls state={state} jobTitle={job.title} variant="icon" />
           <UnsaveConfirmation state={state} />
         </div>

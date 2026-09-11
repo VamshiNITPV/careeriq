@@ -32,7 +32,12 @@ export function Alert({ tone = 'info', title, children, correlationId, className
       {correlationId !== undefined && (
         // Surfaced deliberately: it is the value that ties this failure to a
         // specific server log entry, turning "it broke" into a findable request.
-        <p className="mt-2 font-mono text-xs opacity-70">Reference: {correlationId}</p>
+        // `break-all`, because a correlation id is a 36-character token with no
+        // space in it. At 320px the alert's content box is 256px and the id
+        // renders about 260px wide in `font-mono`, so without this it pushes out
+        // of the alert and scrolls the whole document sideways — on every page
+        // that can show an API error. Same fix as JobDetailPage's apply link.
+        <p className="mt-2 font-mono text-xs break-all opacity-70">Reference: {correlationId}</p>
       )}
     </div>
   )

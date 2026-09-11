@@ -224,7 +224,7 @@ function Section({ children }: { children: React.ReactNode }) {
   return (
     <section
       aria-labelledby="recommended-heading"
-      className="rounded-xl border border-slate-200 bg-white p-6"
+      className="rounded-xl border border-slate-200 bg-white p-4 sm:p-6"
     >
       <div className="flex flex-wrap items-baseline justify-between gap-x-4">
         <h2 id="recommended-heading" className="text-base font-semibold text-slate-900">

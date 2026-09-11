@@ -186,7 +186,11 @@ export function Combobox({
                 setQuery(null)
                 nav.inputRef.current?.focus()
               }}
-              className="rounded p-0.5 text-slate-400 hover:text-slate-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600"
+              // `p-2` rather than `p-0.5`: 16px icon + 16px padding = 32px, over
+              // the 24px WCAG 2.5.8 floor it previously failed at 20px. Not the
+              // 40px used elsewhere, because this sits in the input's fixed
+              // 64px icon gutter alongside the chevron and would push it out.
+              className="rounded p-2 text-slate-400 hover:text-slate-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600"
             >
               <svg viewBox="0 0 20 20" fill="currentColor" className="size-4" aria-hidden="true">
                 <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />

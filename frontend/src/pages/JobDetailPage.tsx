@@ -312,7 +312,15 @@ function JobDetailView({
           {job.location !== null && <span className="text-slate-400"> · {job.location}</span>}
         </p>
 
-        <dl className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+        {/*
+          One column on the narrowest phones. This was the only grid in the app
+          without a single-column base, and at 320px two columns left 112px each
+          — too narrow for its own values, since `formatSalary` returns strings
+          like "INR 2.8M – 4.5M/yr" (~130px). `min-[380px]:` rather than `sm:`
+          because two columns are fine well before 640px; the break is where the
+          values stop fitting, not at a device class.
+        */}
+        <dl className="mt-5 grid grid-cols-1 gap-4 min-[380px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
           <Fact label="Pay" value={formatSalary(job)} />
           <Fact label="Experience" value={formatExperience(job)} />
           <Fact label="Level" value={job.experience_level && humanise(job.experience_level)} />

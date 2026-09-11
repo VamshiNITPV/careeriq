@@ -298,7 +298,7 @@ export function CareerSection<T extends CareerEntry>({
   )
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-6">
+    <section className="rounded-xl border border-slate-200 bg-white p-4 sm:p-6">
       <ConfirmDialog
         open={pendingDelete !== null}
         title={`Remove this ${noun}?`}
@@ -363,7 +363,15 @@ export function CareerSection<T extends CareerEntry>({
                   <div className="rounded-lg bg-slate-50 p-4">{form}</div>
                 ) : (
                   <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
+                    {/*
+                      `min-w-48`, not `min-w-0`. `flex-1` gives a basis of 0% and
+                      `min-w-0` removes the automatic minimum, so the hypothetical
+                      width is zero and the `flex-wrap` beside it can never fire —
+                      leaving roughly 85px for a job title or degree at a 320px
+                      viewport, next to ~138px of unshrinkable Edit/Remove
+                      buttons. A real floor makes the row wrap instead.
+                    */}
+                    <div className="min-w-48 flex-1">
                       <p className="text-sm font-medium text-slate-900">{summary.primary}</p>
                       {summary.secondary !== null && (
                         <p className="text-sm text-slate-600">{summary.secondary}</p>

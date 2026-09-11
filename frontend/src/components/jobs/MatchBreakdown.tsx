@@ -97,7 +97,7 @@ export function MatchBreakdown({ jobId }: { jobId: string }) {
   return (
     <section
       aria-labelledby="match-heading"
-      className="rounded-xl border border-slate-200 bg-white p-6"
+      className="rounded-xl border border-slate-200 bg-white p-4 sm:p-6"
     >
       <h2 id="match-heading" className="text-base font-semibold text-slate-900">
         How you match

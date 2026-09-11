@@ -101,7 +101,11 @@ function SkillChip({
         disabled={disabled || isBusy}
         aria-busy={isBusy}
         aria-label={`Remove ${skill.skill.name}`}
-        className="rounded-full px-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+        // `size-7` is the touch target. `px-1.5` with no vertical padding
+        // rendered about 12x20px, and these chips sit shoulder to shoulder in a
+        // cloud of dozens — small enough that removing the wrong skill was easy.
+        // The chip's `pr-1` leaves room for the wider box without reflowing it.
+        className="inline-flex size-7 shrink-0 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
       >
         ×
       </button>
@@ -486,9 +490,34 @@ export function ResumePage() {
               return (
                 <li
                   key={resume.id}
-                  className="relative flex items-center gap-3 px-4 py-3 focus-within:ring-2 focus-within:ring-indigo-600 focus-within:ring-inset"
+                  /*
+                    `flex-wrap` with `gap-y-2` is the fix for the worst layout
+                    bug in the app. This row has two `shrink-0` children — the
+                    status pill and the Re-extract/Delete pair — which for a
+                    failed resume total 307px against the 256px available at a
+                    320px viewport. Without wrapping, the overflow was *clipped*
+                    by the `overflow-hidden` on the <ul>, so the right edge of
+                    **Delete** was cut off the card and could not be tapped at
+                    all: a destructive action made unreachable on a phone.
+
+                    `items-start` rather than `items-center` so that once the
+                    actions wrap to their own line, the title stays aligned to
+                    the top of the row instead of floating beside a tall stack.
+                  */
+                  className="relative flex flex-wrap items-start gap-x-3 gap-y-2 px-4 py-3 focus-within:ring-2 focus-within:ring-indigo-600 focus-within:ring-inset"
                 >
-                  <div className="min-w-0 flex-1">
+                  {/*
+                    `min-w-48`, not `min-w-0`, and the difference is what makes
+                    the `flex-wrap` above work at all. `flex-1` sets
+                    `flex-basis: 0%`, and `min-w-0` removes the automatic minimum
+                    size — so the item's hypothetical width is zero, the line can
+                    never overflow, and the wrap never fires. A real floor gives
+                    the row something to overflow with. 192px is a wrap
+                    threshold, not a layout width: the `truncate` below still
+                    shortens the filename, because `overflow-hidden` zeroes the
+                    minimum size on its own. Same idea as JobsPage's `min-w-56`.
+                  */}
+                  <div className="min-w-48 flex-1">
                     <p className="truncate text-sm font-medium text-slate-900">
                       {/*
                         Only the title is the link, but `after:absolute

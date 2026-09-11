@@ -194,9 +194,18 @@ export function MultiCombobox({
           {value.map((item) => (
             <span
               key={item}
-              className="inline-flex items-center gap-1 rounded-full border border-indigo-600 bg-indigo-50 py-1 pr-1 pl-3 text-sm text-indigo-700"
+              className="inline-flex max-w-full items-center gap-1 rounded-full border border-indigo-600 bg-indigo-50 py-1 pr-1 pl-3 text-sm text-indigo-700"
             >
-              {labelFor(item)}
+              {/*
+                `truncate` on the label, `max-w-full` on the chip. Several chips
+                already wrapped correctly, but a *single* over-wide one could not
+                shrink and pushed out of the field's ring — reachable in practice
+                because "Preferred locations" accepts free text up to 100
+                characters. The full value stays available as the title.
+              */}
+              <span className="truncate" title={labelFor(item)}>
+                {labelFor(item)}
+              </span>
               <button
                 type="button"
                 aria-label={`Remove ${labelFor(item)}`}
@@ -205,7 +214,13 @@ export function MultiCombobox({
                   event.stopPropagation()
                   remove(item)
                 }}
-                className="rounded-full p-0.5 text-indigo-500 hover:bg-indigo-100 hover:text-indigo-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600"
+                // 14px icon + `p-1.5` = 26px, over the 24px WCAG 2.5.8 floor it
+                // failed at 18px — the smallest target in the app, and the only
+                // touch route to removing a location (Backspace is keyboard
+                // only). Up to twenty of these sit side by side, so a mis-tap
+                // removed the wrong one. `shrink-0` keeps it at full size when
+                // the label beside it truncates.
+                className="shrink-0 rounded-full p-1.5 text-indigo-500 hover:bg-indigo-100 hover:text-indigo-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600"
               >
                 <svg viewBox="0 0 20 20" fill="currentColor" className="size-3.5" aria-hidden="true">
                   <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
