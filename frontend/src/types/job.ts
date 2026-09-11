@@ -184,6 +184,18 @@ export interface JobFilters {
    * nothing about age.
    */
   posted_within_days?: number
+  /**
+   * `match` ranks against the caller's resume; omitted means newest first.
+   *
+   * The two below are only meaningful with it. `min_score` sent without
+   * `sort: 'match'` is a **422**, not a silent no-op — a date-sorted list that
+   * looked like it honoured a threshold would be indistinguishable from one
+   * that did.
+   */
+  sort?: 'recent' | 'match'
+  min_score?: number
+  /** Defaults to true server-side, so send it only to turn it off. */
+  exclude_applied?: boolean
   limit?: number
   offset?: number
 }

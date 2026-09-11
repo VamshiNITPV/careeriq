@@ -6,6 +6,7 @@ import { Spinner } from '@/components/ui/Spinner'
 import { authService } from '@/services/authService'
 import { jobService } from '@/services/jobService'
 import { resumeService, skillService } from '@/services/resumeService'
+import type { JobListResponse } from '@/types/job'
 import { firstNameFor } from '@/utils/initials'
 import { cn } from '@/utils/cn'
 
@@ -18,6 +19,15 @@ import { cn } from '@/utils/cn'
  * nobody can tell what is actually finished — the same fabrication problem
  * ADR-012 guards against, applied to the UI.
  */
+
+/**
+ * The score a job must reach to count as a match on the dashboard tile.
+ *
+ * 50, matching the lowest "Minimum score" option on the Jobs page — so the tile
+ * and `/jobs?sort=match&min_score=50` are the same question asked twice and
+ * cannot disagree. Change one and change the other.
+ */
+const MATCH_TILE_FLOOR = 50
 
 interface Stat {
   label: string
@@ -149,21 +159,39 @@ export function DashboardPage() {
   const [resumeCount, setResumeCount] = useState(0)
   const [skillCount, setSkillCount] = useState(0)
   const [matchCount, setMatchCount] = useState(0)
+  const [matchState, setMatchState] = useState<JobListResponse['availability']>('READY')
   const [loaded, setLoaded] = useState(false)
 
   const load = useCallback(async () => {
     // Tolerant of failure: a dashboard that renders nothing because one count
     // could not be fetched is worse than one showing zeros.
-    const [resumes, skills, recommended] = await Promise.all([
+    const [resumes, skills, matches] = await Promise.all([
       resumeService.list().catch(() => []),
       skillService.mySkills().catch(() => []),
-      // `considered` rather than `items.length`: the card is asking how many
-      // jobs were ranked for this user, not how many fit on the panel below.
-      jobService.recommendations({ limit: 1 }).catch(() => null),
+      /*
+        `total` from a match-sorted list, floored at MATCH_TILE_FLOOR — not
+        `recommendations().considered`, which this used to read.
+
+        `considered` is the size of the *recall set*: the ~200 postings stage one
+        handed to the scorer. It answers "how many jobs did we look at", and the
+        card says "Job matches", so it read 200 on a corpus where only a handful
+        actually scored well. A number that large under that label is not a
+        flattering rounding — it is a different quantity wearing the wrong name.
+
+        `limit: 1` because only the count is wanted; the panel below fetches its
+        own rows.
+      */
+      jobService
+        .list({ sort: 'match', min_score: MATCH_TILE_FLOOR, limit: 1 })
+        .catch(() => null),
     ])
     setResumeCount(resumes.length)
     setSkillCount(skills.length)
-    setMatchCount(recommended?.considered ?? 0)
+    setMatchCount(matches?.total ?? 0)
+    // Kept so the caption can tell "nothing scored that well" apart from "we
+    // have nothing to score you against". Both render 0, and only one of them is
+    // something the reader can do anything about.
+    setMatchState(matches?.availability ?? 'READY')
   }, [])
 
   useEffect(() => {
@@ -186,7 +214,17 @@ export function DashboardPage() {
     {
       label: 'Job matches',
       value: String(matchCount),
-      caption: matchCount === 0 ? 'Upload a resume to see matches' : 'Ranked against your resume',
+      // The threshold is named rather than implied. "Ranked against your resume"
+      // described the old number, which counted everything ranked — a caption
+      // that no longer matches what is above it is worse than none.
+      caption:
+        matchState === 'NO_RESUME'
+          ? 'Upload a resume to see matches'
+          : matchState === 'PENDING'
+            ? 'Still reading your resume'
+            : matchCount === 0
+              ? `Nothing scoring ${MATCH_TILE_FLOOR} or above yet`
+              : `Scoring ${MATCH_TILE_FLOOR} or above`,
       available: true,
     },
     {
