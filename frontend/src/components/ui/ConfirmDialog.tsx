@@ -18,6 +18,15 @@ interface ConfirmDialogProps {
   children: ReactNode
   confirmLabel?: string
   cancelLabel?: string
+  /**
+   * A third way out, between cancelling and going through with it.
+   *
+   * Optional, and worth having when the *reason* an action is destructive has a
+   * remedy: offering it here beats making the reader cancel, go and do the
+   * remedy themselves, and come back. Rendered between Cancel and the confirm
+   * button, so the destructive one stays last.
+   */
+  secondaryAction?: { label: string; onClick: () => void }
   destructive?: boolean
   isBusy?: boolean
   onConfirm: () => void
@@ -30,6 +39,7 @@ export function ConfirmDialog({
   children,
   confirmLabel = 'Confirm',
   cancelLabel = 'Cancel',
+  secondaryAction,
   destructive = false,
   isBusy = false,
   onConfirm,
@@ -106,6 +116,16 @@ export function ConfirmDialog({
           <Button variant="secondary" size="sm" onClick={onCancel} disabled={isBusy}>
             {cancelLabel}
           </Button>
+          {secondaryAction !== undefined && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={secondaryAction.onClick}
+              disabled={isBusy}
+            >
+              {secondaryAction.label}
+            </Button>
+          )}
           <Button
             variant={destructive ? 'danger' : 'primary'}
             size="sm"

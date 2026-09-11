@@ -508,22 +508,138 @@ describe('JobDetailPage', () => {
       expect(boxes()[0]).toBeChecked()
     })
 
-    it('drops the record when you untick applied on a job you never saved', async () => {
-      // Neither bookmarked nor applied leaves nothing to remember, and the
-      // server refuses a row that records nothing — so this is a DELETE.
-      const user = userEvent.setup()
-      vi.spyOn(jobService, 'get').mockResolvedValue(
-        detailFixture({ application: application({ saved: false, applied: true }) }),
-      )
-      const set = vi.spyOn(applicationService, 'set')
-      const remove = vi.spyOn(applicationService, 'remove').mockResolvedValue(undefined)
-      renderPage()
+    describe('forgetting that you applied', () => {
+      /*
+       * Unticking "I have applied" on a job with no bookmark deletes the row —
+       * the date, the Applications entry, and any way to find the job again all
+       * go at once. That is worth one question (US-7.0 AC3), and a stray tap on
+       * a phone is exactly how it would happen.
+       *
+       * Half of these tests exist for when the dialog must *not* appear. A
+       * confirmation that fires on the harmless cases is a nag, and nagging is
+       * how the previous dialog ended up warning about a loss that no longer
+       * happened.
+       */
 
-      await screen.findByRole('heading', { name: 'Senior Data Engineer' })
-      await user.click(boxes()[0]!)
+      const unsavedApplied = () =>
+        detailFixture({ application: application({ saved: false, applied: true }) })
 
-      await waitFor(() => expect(remove).toHaveBeenCalledWith('j1'))
-      expect(set).not.toHaveBeenCalled()
+      it('asks first, and sends nothing until it is answered', async () => {
+        const user = userEvent.setup()
+        vi.spyOn(jobService, 'get').mockResolvedValue(unsavedApplied())
+        const set = vi.spyOn(applicationService, 'set')
+        const remove = vi.spyOn(applicationService, 'remove')
+        renderPage()
+
+        await screen.findByRole('heading', { name: 'Senior Data Engineer' })
+        await user.click(boxes()[0]!)
+
+        const dialog = await screen.findByRole('dialog')
+        // Names the date, so the reader knows what they are discarding.
+        expect(within(dialog).getByText(/marked this as applied/)).toBeInTheDocument()
+        expect(remove).not.toHaveBeenCalled()
+        expect(set).not.toHaveBeenCalled()
+      })
+
+      it('drops the record once confirmed', async () => {
+        const user = userEvent.setup()
+        vi.spyOn(jobService, 'get').mockResolvedValue(unsavedApplied())
+        const remove = vi.spyOn(applicationService, 'remove').mockResolvedValue(undefined)
+        renderPage()
+
+        await screen.findByRole('heading', { name: 'Senior Data Engineer' })
+        await user.click(boxes()[0]!)
+        await user.click(within(await screen.findByRole('dialog')).getByRole('button', {
+          name: 'Forget',
+        }))
+
+        await waitFor(() => expect(remove).toHaveBeenCalledWith('j1'))
+      })
+
+      it('can keep the job bookmarked instead of losing it', async () => {
+        /*
+         * The remedy for the harm the dialog describes, offered in the same
+         * breath. Without it the reader has to cancel, find the bookmark, tap
+         * it, and untick again — three steps to avoid a loss they just said
+         * they did not want.
+         */
+        const user = userEvent.setup()
+        vi.spyOn(jobService, 'get').mockResolvedValue(unsavedApplied())
+        const set = vi
+          .spyOn(applicationService, 'set')
+          .mockResolvedValue(application({ saved: true, applied: false }))
+        const remove = vi.spyOn(applicationService, 'remove')
+        renderPage()
+
+        await screen.findByRole('heading', { name: 'Senior Data Engineer' })
+        await user.click(boxes()[0]!)
+        await user.click(within(await screen.findByRole('dialog')).getByRole('button', {
+          name: 'Keep it saved',
+        }))
+
+        await waitFor(() =>
+          expect(set).toHaveBeenCalledWith('j1', { saved: true, applied: false }),
+        )
+        expect(remove).not.toHaveBeenCalled()
+      })
+
+      it('changes nothing when cancelled', async () => {
+        const user = userEvent.setup()
+        vi.spyOn(jobService, 'get').mockResolvedValue(unsavedApplied())
+        const set = vi.spyOn(applicationService, 'set')
+        const remove = vi.spyOn(applicationService, 'remove')
+        renderPage()
+
+        await screen.findByRole('heading', { name: 'Senior Data Engineer' })
+        await user.click(boxes()[0]!)
+        await user.click(within(await screen.findByRole('dialog')).getByRole('button', {
+          name: 'Cancel',
+        }))
+
+        expect(remove).not.toHaveBeenCalled()
+        expect(set).not.toHaveBeenCalled()
+        expect(boxes()[0]).toBeChecked()
+      })
+
+      it('does not ask when the job is bookmarked, because nothing is lost', async () => {
+        // The guard. Without the `!saved` condition this dialog would open on
+        // every untick, warning about a deletion that does not happen.
+        const user = userEvent.setup()
+        vi.spyOn(jobService, 'get').mockResolvedValue(
+          detailFixture({ application: application({ saved: true, applied: true }) }),
+        )
+        const set = vi
+          .spyOn(applicationService, 'set')
+          .mockResolvedValue(application({ saved: true, applied: false }))
+        renderPage()
+
+        await screen.findByRole('heading', { name: 'Senior Data Engineer' })
+        await user.click(boxes()[0]!)
+
+        await waitFor(() =>
+          expect(set).toHaveBeenCalledWith('j1', { saved: true, applied: false }),
+        )
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      })
+
+      it('keeps a failed removal visible inside the dialog', async () => {
+        // showModal() makes the rest of the page inert, so a page-level alert
+        // would sit behind the backdrop where nobody can see it.
+        const user = userEvent.setup()
+        vi.spyOn(jobService, 'get').mockResolvedValue(unsavedApplied())
+        vi.spyOn(applicationService, 'remove').mockRejectedValue(
+          new ApiError(500, 'INTERNAL_ERROR', 'Could not remove that.'),
+        )
+        renderPage()
+
+        await screen.findByRole('heading', { name: 'Senior Data Engineer' })
+        await user.click(boxes()[0]!)
+        const dialog = await screen.findByRole('dialog')
+        await user.click(within(dialog).getByRole('button', { name: 'Forget' }))
+
+        expect(await within(dialog).findByText('Could not remove that.')).toBeInTheDocument()
+        expect(screen.getByRole('dialog')).toBeInTheDocument()
+      })
     })
   })
 })

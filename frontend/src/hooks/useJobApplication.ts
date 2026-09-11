@@ -29,8 +29,22 @@ export interface JobApplicationState {
   isApplied: boolean
   isPending: boolean
   error: string | null
+  /**
+   * Non-null while the confirm-before-forgetting dialog is open.
+   *
+   * Only one action opens it: unticking "I have applied" on a job that is not
+   * bookmarked, because that is the only one that destroys something. Carries
+   * the application so the dialog can name the date.
+   */
+  pendingForget: ApplicationRead | null
+  /** A failure from inside the dialog, which has to render inside it. */
+  dialogError: string | null
   toggleSaved: () => void
   setApplied: (applied: boolean) => void
+  confirmForget: () => Promise<void>
+  /** The third way out: drop the applied mark but keep the job bookmarked. */
+  keepSaved: () => void
+  cancelForget: () => void
 }
 
 function messageOf(caught: unknown): string {
@@ -45,6 +59,8 @@ export function useJobApplication(
   const [application, setApplication] = useState<ApplicationRead | null>(initial)
   const [isPending, setIsPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [pendingForget, setPendingForget] = useState<ApplicationRead | null>(null)
+  const [dialogError, setDialogError] = useState<string | null>(null)
 
   // A ref, not the `isPending` state, and not `disabled` on the control. The
   // server is idempotent so this is not protecting data — it stops two
@@ -134,16 +150,66 @@ export function useJobApplication(
     write({ saved: !saved, applied })
   }, [applied, saved, write])
 
-  // Carries `saved` through untouched, which is the whole fix: this used to
-  // send a single status, so recording that you applied also asserted that you
-  // had bookmarked the job. Unticking on a job you never bookmarked leaves
-  // nothing to record, and `write` deletes the row.
+  /**
+   * Carries `saved` through untouched, which is the whole point: this used to
+   * send a single status, so recording that you applied also asserted that you
+   * had bookmarked the job.
+   *
+   * **Unticking is intercepted in exactly one case**, and the narrowness
+   * matters. With no bookmark, clearing the applied mark leaves nothing to
+   * record, so `write` deletes the row — losing the date, the Applications
+   * entry, and any way to find the job again. That is worth one question
+   * (US-7.0 AC3), and a stray tap on a phone is exactly how it would happen.
+   *
+   * Every other combination writes straight through. A dialog on a bookmarked
+   * job would be a nag about a loss that does not occur — which is how the
+   * previous confirmation ended up stating something untrue.
+   */
   const setApplied = useCallback(
     (next: boolean) => {
+      if (!next && applied && !saved) {
+        // No request yet; the dialog decides.
+        setPendingForget(application)
+        setDialogError(null)
+        return
+      }
       write({ saved, applied: next })
     },
-    [saved, write],
+    [application, applied, saved, write],
   )
+
+  const confirmForget = useCallback(async () => {
+    setIsPending(true)
+    setDialogError(null)
+    try {
+      await applicationService.remove(jobId)
+      commit(null)
+      setPendingForget(null)
+    } catch (caught) {
+      /*
+       * The dialog stays open and says so, and the message must render *inside*
+       * it: showModal() makes the rest of the document inert, so a page-level
+       * alert would sit behind the backdrop where nobody can read it.
+       */
+      setDialogError(messageOf(caught))
+    } finally {
+      setIsPending(false)
+    }
+  }, [commit, jobId])
+
+  // Keeps the job findable instead of dropping it, which is the remedy for the
+  // very harm the dialog warns about — so it belongs in the dialog rather than
+  // three steps away.
+  const keepSaved = useCallback(() => {
+    setPendingForget(null)
+    setDialogError(null)
+    write({ saved: true, applied: false })
+  }, [write])
+
+  const cancelForget = useCallback(() => {
+    setPendingForget(null)
+    setDialogError(null)
+  }, [])
 
   return {
     application,
@@ -151,7 +217,12 @@ export function useJobApplication(
     isApplied: applied,
     isPending,
     error,
+    pendingForget,
+    dialogError,
     toggleSaved,
     setApplied,
+    confirmForget,
+    keepSaved,
+    cancelForget,
   }
 }

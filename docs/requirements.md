@@ -211,7 +211,7 @@ Each story carries acceptance criteria (AC) that become test cases.
 **US-7.0** As a user, I want to save a job and record that I have applied to it, so that I can find it again and know what I have already acted on.
 - AC1: A job can be saved and unsaved from the browse list and from the job page, and the control shows its current state.
 - AC2: A job is marked applied **by the user only** — the system never infers it (see section 3, out of scope).
-- AC3: Removing a job that is marked applied asks for confirmation and names when it was applied.
+- AC3: Discarding the applied mark asks for confirmation and names when it was applied, **whenever doing so would leave no record of the job at all**. Reworded 2026-09-11: saved and applied became independent, so un-bookmarking an applied job no longer loses anything and asking there would warn about a loss that does not happen. The action that destroys the record is now unticking "I have applied" on a job that was never bookmarked, and that is what is guarded. The intent is unchanged — never silently discard a real event in someone's job hunt. The dialog also offers to keep the job bookmarked, since "nothing left to find it by" is the actual harm.
 - AC4: Saved jobs and applied jobs are listed on the profile page.
 - AC5: Repeating a save, or an applied mark, has no additional effect.
 

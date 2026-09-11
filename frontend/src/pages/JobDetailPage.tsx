@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Link, useLocation, useParams } from 'react-router-dom'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
-import { JobSaveControls } from '@/components/JobSaveControls'
+import { ForgetAppliedConfirmation, JobSaveControls } from '@/components/JobSaveControls'
 import { MatchBreakdown } from '@/components/jobs/MatchBreakdown'
 import { SimilarJobs } from '@/components/jobs/SimilarJobs'
 import { buttonClass } from '@/components/ui/buttonStyles'
@@ -474,6 +474,12 @@ function JobDetailView({
         <div className="border-t border-slate-200 pt-6">
           <JobSaveControls state={application} jobTitle={job.title} />
         </div>
+
+        {/* Once per hook, not once per control. Three JobSaveControls on this
+            page share one useJobApplication, and a dialog inside the control
+            would mean three <dialog> elements calling showModal() for one
+            event. */}
+        <ForgetAppliedConfirmation state={application} />
 
         {/* Once for the page, not once per control: both copies above read the
             same hook, and a dialog inside each would put two <dialog> elements

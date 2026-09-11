@@ -1,5 +1,8 @@
+import { Alert } from '@/components/ui/Alert'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import type { JobApplicationState } from '@/hooks/useJobApplication'
 import { cn } from '@/utils/cn'
+import { formatDateTime } from '@/utils/datetime'
 
 /**
  * Save a job, and record whether you applied to it.
@@ -95,5 +98,57 @@ export function JobSaveControls({
         </span>
       )}
     </div>
+  )
+}
+
+/**
+ * Asked before the applied mark is discarded along with the job.
+ *
+ * Only reachable in one situation: unticking "I have applied" on a job that is
+ * not bookmarked, where clearing the mark leaves nothing to record and the row
+ * is deleted. Bookmarked jobs keep their row and need no question — a dialog
+ * there would warn about a loss that does not happen, which is how the previous
+ * confirmation came to state something untrue.
+ *
+ * Rendered **once per hook**, not once per control. The job page shows three
+ * `JobSaveControls` driven by one `useJobApplication`, and a dialog inside the
+ * control would mean three `<dialog>` elements calling `showModal()` for one
+ * event.
+ */
+export function ForgetAppliedConfirmation({ state }: { state: JobApplicationState }) {
+  const { pendingForget, dialogError, isPending } = state
+  // formatDateTime returns '' for anything it cannot read, so the sentence has
+  // to survive an empty string as well as a null.
+  const appliedOn = pendingForget?.applied_at ? formatDateTime(pendingForget.applied_at) : ''
+
+  return (
+    <ConfirmDialog
+      open={pendingForget !== null}
+      title="Forget that you applied?"
+      confirmLabel="Forget"
+      // The remedy for the harm the dialog describes, offered in the same
+      // breath rather than leaving the reader to cancel and go find it.
+      secondaryAction={{ label: 'Keep it saved', onClick: state.keepSaved }}
+      destructive
+      isBusy={isPending}
+      onConfirm={() => void state.confirmForget()}
+      onCancel={() => {
+        if (!isPending) state.cancelForget()
+      }}
+    >
+      <p>
+        You marked this as applied{appliedOn !== '' && <> on {appliedOn}</>}. You haven&apos;t
+        bookmarked it, so forgetting that removes the job from your lists entirely and leaves
+        nothing to find it by.
+      </p>
+      {/* Inside the dialog, never at page level: showModal() makes the rest of
+          the document inert, so an alert outside it sits behind the backdrop
+          where nobody can see it. */}
+      {dialogError !== null && (
+        <Alert tone="error" className="mt-3">
+          {dialogError}
+        </Alert>
+      )}
+    </ConfirmDialog>
   )
 }

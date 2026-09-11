@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { ConfirmDialog } from './ConfirmDialog'
 
@@ -64,5 +65,38 @@ describe('ConfirmDialog', () => {
       // fails if a dialog borrows the other's heading.
       expect(screen.getByRole('dialog', { name: title })).toBeInTheDocument()
     }
+  })
+
+  it('offers a third way out only when one is given', async () => {
+    /*
+     * The escape hatch for a destructive action whose harm has a remedy — used
+     * by "forget that you applied" to offer keeping the job bookmarked instead.
+     * Absent by default, so the two existing dialogs are unaffected.
+     */
+    const user = userEvent.setup()
+    const keep = vi.fn()
+
+    const { unmount } = render(
+      <ConfirmDialog open title="Forget it?" onConfirm={() => {}} onCancel={() => {}}>
+        Body.
+      </ConfirmDialog>,
+    )
+    expect(screen.queryByRole('button', { name: 'Keep it saved' })).not.toBeInTheDocument()
+    unmount()
+
+    render(
+      <ConfirmDialog
+        open
+        title="Forget it?"
+        secondaryAction={{ label: 'Keep it saved', onClick: keep }}
+        onConfirm={() => {}}
+        onCancel={() => {}}
+      >
+        Body.
+      </ConfirmDialog>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Keep it saved' }))
+    expect(keep).toHaveBeenCalledOnce()
   })
 })
