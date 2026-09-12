@@ -46,7 +46,7 @@ class TestHeadingsRealPostingsUse:
     """
 
     def test_ampersand_forms_of_responsibilities(self):
-        """"Role & Responsibilities" was the single commonest missing heading.
+        """ "Role & Responsibilities" was the single commonest missing heading.
 
         `classify_heading` turns "&" into a space and collapses, so the folded
         form is "role responsibilities" — which matched nothing, because the
@@ -233,3 +233,81 @@ class TestNarrativePostingsStillYieldNothing:
         )
         assert responsibilities == []
         assert requirements == []
+
+
+class TestGenericTermsNeedAClaim:
+    """Terms that are real skills *and* ordinary words.
+
+    "Optimize application performance, scalability, and security" describes the
+    work; it does not say the employer wants Security as a skill, and a reader
+    would not list it. The extraction evaluation measured this as the whole of
+    the precision shortfall — `Security` was a false positive in ten of thirty
+    postings, and the word was genuinely present in all ten.
+
+    Marking, never deleting: a requirements block saying "Security" *is* asking
+    for it, and that must still be found.
+    """
+
+    GENERIC = frozenset({"Security", "Scalability", "Teamwork"})
+
+    def names(self, description: str, *, generic: bool) -> set[str]:
+        from app.data.skill_taxonomy import SEED_SKILLS
+        from app.services.job.skills import extract_job_skills
+        from app.services.resume.skill_extraction import build_matcher
+
+        taxonomy = {s.name: [s.normalized_name, *s.normalized_aliases] for s in SEED_SKILLS}
+        matcher = build_matcher(taxonomy)
+        return {
+            m.canonical_name
+            for m in extract_job_skills(
+                matcher=matcher,
+                sections=section_map(detect_sections(clean_description(description))),
+                full_text=description,
+                generic_names=self.GENERIC if generic else None,
+            )
+        }
+
+    def test_a_responsibilities_bullet_is_not_a_requirement(self):
+        posting = (
+            "Responsibilities\n"
+            "- Optimize application performance, scalability, and security\n"
+            "Requirements\n"
+            "- Strong Python and PostgreSQL\n"
+        )
+
+        assert "Security" not in self.names(posting, generic=True)
+        assert "Scalability" not in self.names(posting, generic=True)
+        # The specific skills are untouched — this narrows where vague terms are
+        # believed, not what the matcher can find.
+        assert {"Python", "PostgreSQL"} <= self.names(posting, generic=True)
+
+    def test_the_same_term_in_requirements_is_kept(self):
+        """The reason this marks rather than deletes."""
+        posting = (
+            "Responsibilities\n- Build services\n"
+            "Requirements\n- Security and Python experience essential\n"
+        )
+
+        assert "Security" in self.names(posting, generic=True)
+
+    def test_repetition_in_prose_cannot_promote_a_generic_term(self):
+        """The cap is applied after the repeat bonus.
+
+        Saying "security" five times across a responsibilities list is how a job
+        description reads, not evidence of a requirement.
+        """
+        posting = (
+            "Responsibilities\n"
+            "- Own security reviews\n- Improve security posture\n"
+            "- Security incident response\n- Security tooling\n- Security training\n"
+            "Requirements\n- Strong Python\n"
+        )
+
+        assert "Security" not in self.names(posting, generic=True)
+
+    def test_without_the_set_nothing_changes(self):
+        """The parameter defaults to none, so a caller that has not loaded the
+        set gets the previous behaviour rather than a silent half-change."""
+        posting = "Responsibilities\n- Optimize performance, scalability, and security\n"
+
+        assert "Security" in self.names(posting, generic=False)

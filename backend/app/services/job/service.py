@@ -125,6 +125,7 @@ class JobService:
             matcher=matcher,
             title_hint=title,
             company_hint=company_name,
+            generic_names=await self.skills.generic_names(),
         )
 
         canonical = await self.jobs.find_by_content_hash(parsed.content_hash)

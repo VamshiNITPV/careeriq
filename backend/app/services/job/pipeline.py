@@ -99,6 +99,7 @@ def parse_description(
     matcher: SkillMatcher,
     title_hint: str | None = None,
     company_hint: str | None = None,
+    generic_names: frozenset[str] | set[str] | None = None,
 ) -> ParsedJob:
     """Parse a description into the fields US-3.1 AC2 lists.
 
@@ -152,5 +153,12 @@ def parse_description(
         salary_max=salary.maximum if salary else None,
         salary_currency=salary.currency if salary else None,
         salary_period=salary.period if salary else None,
-        skills=extract_job_skills(matcher=matcher, sections=by_type, full_text=cleaned),
+        skills=extract_job_skills(
+            matcher=matcher,
+            sections=by_type,
+            full_text=cleaned,
+            # Generic terms count only from a requirements block; see the
+            # extractor for why a responsibilities bullet is not a claim.
+            generic_names=generic_names,
+        ),
     )

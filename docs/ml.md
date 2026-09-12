@@ -91,9 +91,22 @@ classifier's confidence weighting, which stays unmeasured.
 | | Precision | Recall | F1 | Gold skills with no taxonomy entry |
 |---|---|---|---|---|
 | First measurement (267-skill taxonomy) | 0.670 | 0.948 | 0.785 | 122 (24%) |
-| **After the taxonomy gaps were filled** | **0.703** | **0.949** | **0.808** | **36 (7%)** |
+| After the taxonomy gaps were filled | 0.703 | 0.949 | 0.808 | 36 (7%) |
+| **After generic terms required a claim** | **0.767** | 0.909 | **0.832** ✅ | 36 (7%) |
 | Naive lookup (the baseline below) | 0.719 | 0.772 | 0.745 | — |
-| _Target_ | 0.85 | 0.80 | 0.82 | — |
+| _Target_ | 0.85 | 0.80 | **0.82** | — |
+
+**F1 meets its target.** Precision does not, but the remaining gap is a different
+problem from the one that was diagnosed — see below.
+
+**The second step was isolated before it was believed.** The evaluator was
+changed at the same time, from a bare span scan to the real `extract_job_skills`
+path, and two changes at once is how a confound gets shipped as a finding.
+Measured separately, the evaluator change is worth **nothing** (0.703 → 0.703)
+and the whole movement is the generic rule: **+6.4pp precision for −3.8pp
+recall**. That trade is the right direction here, because this document weights
+precision above recall and gives the reason — a false skill lands on a profile
+and may be asked about in an interview, while a missed one is one click to add.
 
 **The 52 added entries raised precision, which is not what adding vocabulary
 normally does.** The mechanism: a skill outside the taxonomy could never be found
@@ -105,7 +118,22 @@ generic was added — see below.
 **Recall clears its target comfortably; precision does not, and precision is the one this document
 says matters more.** Three findings, in order of how much they should change what happens next.
 
-**1. The precision figure is not a hallucination rate, and must not be read as one.** Term by term,
+**1. The precision shortfall was one mechanism, and it is now fixed at the
+source.** `skills.is_generic` marks the 28 entries that are real skills *and*
+ordinary words — `Security`, `Deployment`, `Scalability`, `Software Engineering`,
+plus every soft skill. Extraction believes them only where skills are *listed*: a
+resume's Skills block, a posting's Requirements block. Elsewhere they fall below
+the write threshold, so a responsibilities bullet reading "optimize performance,
+scalability, and security" no longer puts three skills on the posting. Marking
+rather than deleting, because a requirements block saying "Security" genuinely is
+asking for it.
+
+This also removes the cause of the `Communication`-in-45%-of-postings problem
+that 6.5 treated symptomatically with rarity weighting.
+
+The original diagnosis, which the fix came from:
+
+**1a. The precision figure was not a hallucination rate, and must not be read as one.** Term by term,
 about four in five counted false positives are words literally present in the posting — `Security`
 in all ten postings it was penalised for, `Deployment` seven of seven, `Scalability` seven of seven.
 The real disagreement is about what counts as a skill: *"optimize application performance,

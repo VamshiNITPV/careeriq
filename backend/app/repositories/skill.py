@@ -69,6 +69,17 @@ class SkillRepository(BaseRepository[Skill]):
         rows = (await self.session.execute(stmt)).all()
         return {name: [normalized, *(aliases or [])] for name, normalized, aliases in rows}
 
+    async def generic_names(self) -> set[str]:
+        """Canonical names that only count where skills are listed.
+
+        Separate from `load_taxonomy` rather than folded into it: the matcher
+        takes `name -> forms` and nothing else, and widening that shape would
+        push this distinction into every caller that only wants to match text.
+        """
+        return set(
+            (await self.session.scalars(select(Skill.name).where(Skill.is_generic))).all()
+        )
+
     async def upsert_many(self, rows: list[dict[str, object]]) -> int:
         """Insert seed skills, refreshing `aliases` and `category` on existing ones.
 
@@ -91,6 +102,10 @@ class SkillRepository(BaseRepository[Skill]):
             set_={
                 "aliases": statement.excluded.aliases,
                 "category": statement.excluded.category,
+                # Refreshed like the others, so re-marking an entry generic in
+                # `SEED_SKILLS` takes effect on the next seeder run rather than
+                # only on a fresh database.
+                "is_generic": statement.excluded.is_generic,
             },
         )
         result = await self.session.execute(statement)

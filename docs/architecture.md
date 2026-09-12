@@ -644,7 +644,7 @@ plausible." That is unmeasurable and unfalsifiable.
 | Component | Dataset | Metrics |
 |---|---|---|
 | Job matching / ranking | ≥100 labelled resume–JD pairs (high/medium/low relevance) | Precision@5, Precision@10, NDCG@10, Recall@200 (retrieval stage) |
-| Skill extraction | **Discharged 2026-09-12** — 30 hand-labelled job postings, 511 gold skills | P 0.703 / R 0.949 / F1 0.808 after filling the taxonomy gaps the first run exposed; recall target met, precision not |
+| Skill extraction | **Discharged 2026-09-12** — 30 hand-labelled job postings, 511 gold skills | P 0.767 / R 0.909 / **F1 0.832** after filling the taxonomy gaps and requiring generic terms to appear where skills are listed; recall and F1 targets met, precision not |
 | Duplicate detection | Labelled duplicate/non-duplicate job pairs | Precision, Recall, confusion matrix |
 
 > **Discharged in Phase 6.4, and the result is a trade-off rather than a pass.** 72 labelled pairs,

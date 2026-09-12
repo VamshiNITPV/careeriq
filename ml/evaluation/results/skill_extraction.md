@@ -1,6 +1,6 @@
 # Skill extraction evaluation
 
-Generated 2026-09-12T10:48:57.785095+00:00. 30 job postings, 511 hand-written gold labels, against a taxonomy of 319 skills.
+Generated 2026-09-12T11:18:38.609815+00:00. 30 job postings, 511 hand-written gold labels, against a taxonomy of 319 skills.
 
 > Labels are Claude-written and pending human review. A weaker caveat than on the matching dataset: "does this posting name Kubernetes" has an answer a second reader can check against the text, unlike a relevance judgement.
 
@@ -8,7 +8,7 @@ Generated 2026-09-12T10:48:57.785095+00:00. 30 job postings, 511 hand-written go
 
 | | Precision | Recall | F1 |
 |---|---|---|---|
-| **Shipped extractor** | 0.703 | 0.949 | 0.808 |
+| **Shipped extractor** | 0.767 | 0.909 | 0.832 |
 | Naive lookup (baseline) | 0.719 | 0.772 | 0.745 |
 | _ml.md target_ | 0.85 | 0.80 | 0.82 |
 
@@ -52,31 +52,31 @@ Most frequently missing:
 
 | False positive | Postings |
 |---|---|
-| Security | 10 |
-| Software Testing | 8 |
-| Deployment | 7 |
-| Performance Optimization | 7 |
-| Scalability | 7 |
-| Software Engineering | 6 |
-| Technical Documentation | 6 |
-| Leadership | 5 |
-| Mentoring | 5 |
-| Teamwork | 5 |
-| Backend Development | 4 |
-| Caching | 4 |
+| Git | 4 |
+| Performance Optimization | 4 |
+| Software Engineering | 4 |
+| AWS | 3 |
+| Deep Learning | 3 |
+| Fine-tuning | 3 |
+| Go | 3 |
+| Leadership | 3 |
+| Teamwork | 3 |
+| TensorFlow | 3 |
+| Algorithms | 2 |
+| Backend Development | 2 |
 
 | Missed (in taxonomy) | Postings |
 |---|---|
-| Debugging | 2 |
+| Communication | 4 |
+| Debugging | 4 |
+| Code Review | 3 |
+| Teamwork | 3 |
+| DevOps | 2 |
 | Embeddings | 2 |
+| MLOps | 2 |
+| Problem Solving | 2 |
 | Prompt Engineering | 2 |
 | REST API | 2 |
 | Amazon SageMaker | 1 |
-| Communication | 1 |
 | Database Design | 1 |
-| FAISS | 1 |
-| Hugging Face | 1 |
-| Keras | 1 |
-| LangChain | 1 |
-| LangGraph | 1 |
 

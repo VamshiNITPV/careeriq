@@ -65,6 +65,7 @@ async def reextract_job_skills(session: AsyncSession) -> ReextractResult:
     skills_repo = SkillRepository(session)
     job_skills_repo = JobSkillRepository(session)
     matcher = build_matcher(await skills_repo.load_taxonomy())
+    generic = await skills_repo.generic_names()
 
     before_total = (
         await session.scalar(
@@ -91,7 +92,9 @@ async def reextract_job_skills(session: AsyncSession) -> ReextractResult:
     for job in jobs:
         text = job.description_clean or job.description_raw or ""
         by_type = section_map(detect_sections(text))
-        mentions = extract_job_skills(matcher=matcher, sections=by_type, full_text=text)
+        mentions = extract_job_skills(
+            matcher=matcher, sections=by_type, full_text=text, generic_names=generic
+        )
 
         resolved = await skills_repo.get_by_names([m.canonical_name for m in mentions])
         rows = [

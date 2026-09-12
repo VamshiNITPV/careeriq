@@ -52,6 +52,8 @@ from typing import Any
 from app.core.database import get_session_factory
 from app.data.skill_taxonomy import normalize_skill_text
 from app.repositories.skill import SkillRepository
+from app.services.job.sections import detect_sections, section_map
+from app.services.job.skills import extract_job_skills
 from app.services.resume.skill_extraction import build_matcher
 
 DATA = pathlib.Path("/ml/datasets/skill_extraction")
@@ -116,7 +118,9 @@ async def main() -> dict[str, Any]:
         raise SystemExit(f"{len(missing)} documents are unlabelled: {missing}")
 
     async with get_session_factory()() as session:
-        taxonomy = await SkillRepository(session).load_taxonomy()
+        repo = SkillRepository(session)
+        taxonomy = await repo.load_taxonomy()
+        generic = await repo.generic_names()
 
     matcher = build_matcher(taxonomy)
     canonical = sorted(taxonomy)
@@ -152,7 +156,16 @@ async def main() -> dict[str, Any]:
             else:
                 gold_canonical.add(resolved)
 
-        shipped = {span.canonical_name for span in matcher.find_spans(text)}
+        # Through the real job extractor, not a bare span scan. The span scan
+        # cannot see sections, so it could not show the effect of a rule that is
+        # entirely about *where* a term was found.
+        by_type = section_map(detect_sections(text))
+        shipped = {
+            m.canonical_name
+            for m in extract_job_skills(
+                matcher=matcher, sections=by_type, full_text=text, generic_names=generic
+            )
+        }
         naive = naive_lookup(text, canonical)
 
         for name in shipped - gold_canonical:

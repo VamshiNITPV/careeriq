@@ -71,6 +71,20 @@ class Skill(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     # False for skills auto-created by extraction, true once a human confirms
     # them. Keeps the taxonomy from silently filling with parser noise.
+    # A real skill that is also an ordinary word in a job description.
+    #
+    # "Optimize performance, scalability and security" describes the work; it is
+    # not a claim that Security is wanted as a skill. Extraction therefore
+    # believes these only where skills are *listed* — a resume's Skills block, a
+    # posting's Requirements block — and discounts them in prose. Measured as
+    # the entire precision shortfall in the extraction evaluation.
+    #
+    # Never true for a skill created from user input: a term someone typed into
+    # their own profile is a claim by definition.
+    is_generic: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+
     is_verified: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )

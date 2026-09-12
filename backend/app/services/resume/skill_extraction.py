@@ -162,18 +162,43 @@ def build_matcher(taxonomy: dict[str, list[str]]) -> SkillMatcher:
     return SkillMatcher(taxonomy)
 
 
+#: Sections where writing a term down is a claim to the skill.
+#:
+#: A resume's skills block is a list the author chose; prose is narrative that
+#: happens to contain words. Generic entries are believed in the first and
+#: discounted in the second.
+_CLAIM_SECTIONS = frozenset({SectionType.SKILLS, SectionType.CERTIFICATIONS})
+
+#: What a generic term is worth outside a claim section.
+#:
+#: Below `REVIEW_THRESHOLD` on purpose, so it is surfaced for the user to accept
+#: rather than written to their profile — the same treatment any low-confidence
+#: mention gets. Not zero, because the mention is real and hiding it entirely
+#: would make an accurate extraction look like a parser failure.
+_GENERIC_IN_PROSE = 0.50
+
+
 def extract_skills(
     *,
     matcher: SkillMatcher,
     sections: dict[SectionType, str],
     full_text: str,
+    generic_names: frozenset[str] | set[str] | None = None,
 ) -> list[SkillCandidate]:
     """Find skills across a resume and merge mentions per skill.
 
     Falls back to scanning the whole document when no sections were detected, so
     an unusually formatted resume still yields skills — at the lower confidence
     that an unstructured match deserves.
+
+    `generic_names` are entries that are real skills *and* ordinary words —
+    `Security`, `Deployment`, `Teamwork`. Outside an explicit skills block they
+    are capped below the review threshold, so "led a team" stops putting
+    Teamwork on someone's profile as though they had listed it. Optional and
+    defaulting to none, so a caller that has not loaded the set gets exactly the
+    old behaviour rather than a silent half-change.
     """
+    generic = frozenset(generic_names or ())
     mentions: list[SkillMention] = []
 
     if sections:
@@ -193,6 +218,13 @@ def extract_skills(
         # prose should not dilute that.
         best = max(group, key=lambda m: m.confidence)
         confidence = min(_MAX_CONFIDENCE, best.confidence + _REPEAT_BONUS * (len(group) - 1))
+
+        # A generic term is only a claim where skills are listed. Capped rather
+        # than dropped, and capped *after* the repeat bonus so that mentioning
+        # "security" five times in prose still cannot promote it — repetition in
+        # narrative is how a job description reads, not evidence of a skill.
+        if canonical in generic and best.section not in _CLAIM_SECTIONS:
+            confidence = min(confidence, _GENERIC_IN_PROSE)
         candidates.append(
             SkillCandidate(
                 canonical_name=canonical,

@@ -42,6 +42,22 @@ class SeedSkill:
     category: str
     aliases: tuple[str, ...] = field(default_factory=tuple)
     parent: str | None = None
+    #: Only a claim when it appears where skills are *listed*.
+    #:
+    #: Some entries are real skills that are also ordinary words in a job
+    #: description. "Optimize application performance, scalability, and
+    #: security" describes the work; it does not say the employer requires
+    #: Security as a skill, and a reader would not list it. The extraction
+    #: evaluation measured this as the whole of the precision shortfall —
+    #: `Security` was counted a false positive in ten postings, `Deployment` in
+    #: seven, `Scalability` in seven, and in every case the word was genuinely
+    #: in the text.
+    #:
+    #: Marking rather than deleting, because the skill is real: someone whose
+    #: resume has "Security" under **Skills** is claiming it, and that must
+    #: still be found. The flag narrows *where* the term is believed, not
+    #: whether it exists.
+    generic: bool = False
 
     @property
     def normalized_name(self) -> str:
@@ -209,7 +225,9 @@ SEED_SKILLS: tuple[SeedSkill, ...] = (
     SeedSkill("Cypress", TOOL),
     SeedSkill("Postman", TOOL),
     SeedSkill("Figma", TOOL),
-    SeedSkill("System Design", PRACTICE, ("distributed systems", "software architecture")),
+    SeedSkill(
+        "System Design", PRACTICE, ("distributed systems", "software architecture"), generic=True
+    ),
     SeedSkill(
         "Data Structures",
         PRACTICE,
@@ -226,8 +244,10 @@ SEED_SKILLS: tuple[SeedSkill, ...] = (
         ("oop", "oops", "oop concepts", "oops concepts", "object oriented programming"),
     ),
     SeedSkill("Design Patterns", PRACTICE),
-    SeedSkill("Code Review", PRACTICE, ("code reviews",)),
-    SeedSkill("Security", PRACTICE, ("application security", "appsec", "cybersecurity")),
+    SeedSkill("Code Review", PRACTICE, ("code reviews",), generic=True),
+    SeedSkill(
+        "Security", PRACTICE, ("application security", "appsec", "cybersecurity"), generic=True
+    ),
     SeedSkill("OAuth", PRACTICE, ("oauth2", "oauth 2.0")),
     SeedSkill("JWT", PRACTICE, ("json web token", "json web tokens")),
     # ---------------------------------------------------------------- analytics
@@ -297,7 +317,7 @@ SEED_SKILLS: tuple[SeedSkill, ...] = (
     SeedSkill("Operating Systems", PRACTICE, ("os", "operating system")),
     SeedSkill("Computer Networks", PRACTICE, ("networking", "computer networking")),
     SeedSkill("Compiler Design", PRACTICE, ("compilers",)),
-    SeedSkill("Software Engineering", PRACTICE, ("sdlc",)),
+    SeedSkill("Software Engineering", PRACTICE, ("sdlc",), generic=True),
     SeedSkill("Theory of Computation", PRACTICE, ("automata theory", "toc")),
     SeedSkill("Computer Architecture", PRACTICE, ("coa", "computer organization")),
     SeedSkill("Discrete Mathematics", PRACTICE, ("discrete maths",)),
@@ -379,37 +399,48 @@ SEED_SKILLS: tuple[SeedSkill, ...] = (
         "Frontend Development",
         PRACTICE,
         ("front end development", "frontend engineering", "ui development"),
+        generic=True,
     ),
     SeedSkill(
         "Backend Development",
         PRACTICE,
         ("back end development", "server side development", "backend engineering"),
+        generic=True,
     ),
     SeedSkill(
         "Responsive Web Design",
         PRACTICE,
         ("responsive design", "responsive ui", "mobile responsive"),
+        generic=True,
     ),
     SeedSkill("Web Development", PRACTICE, ("web application development",)),
     SeedSkill("API Development", PRACTICE, ("api design", "rest api development")),
-    SeedSkill("Authentication", PRACTICE, ("user authentication", "auth")),
+    SeedSkill("Authentication", PRACTICE, ("user authentication", "auth"), generic=True),
     SeedSkill("Authorization", PRACTICE, ("access control", "role based access control", "rbac")),
-    SeedSkill("Database Design", PRACTICE, ("schema design", "data modeling", "data modelling")),
+    SeedSkill(
+        "Database Design",
+        PRACTICE,
+        ("schema design", "data modeling", "data modelling"),
+        generic=True,
+    ),
     SeedSkill("Database Management", PRACTICE, ("database administration",)),
-    SeedSkill("Debugging", PRACTICE, ("troubleshooting",)),
-    SeedSkill("Software Testing", PRACTICE, ("testing", "qa", "quality assurance")),
+    SeedSkill("Debugging", PRACTICE, ("troubleshooting",), generic=True),
+    SeedSkill("Software Testing", PRACTICE, ("testing", "qa", "quality assurance"), generic=True),
     SeedSkill("Integration Testing", PRACTICE, parent="Software Testing"),
-    SeedSkill("Performance Optimization", PRACTICE, ("performance tuning", "optimization")),
-    SeedSkill("Deployment", PRACTICE, ("web deployment", "application deployment")),
+    SeedSkill(
+        "Performance Optimization", PRACTICE, ("performance tuning", "optimization"), generic=True
+    ),
+    SeedSkill("Deployment", PRACTICE, ("web deployment", "application deployment"), generic=True),
     SeedSkill(
         "Scalability",
         PRACTICE,
         ("scalable systems", "scalable applications"),
         parent="System Design",
+        generic=True,
     ),
-    SeedSkill("Caching", PRACTICE, ("cache", "caching strategies")),
+    SeedSkill("Caching", PRACTICE, ("cache", "caching strategies"), generic=True),
     SeedSkill("Data Processing", PRACTICE, ("data transformation",)),
-    SeedSkill("Technical Documentation", PRACTICE, ("documentation",)),
+    SeedSkill("Technical Documentation", PRACTICE, ("documentation",), generic=True),
     # ---------------------------------------------------------------- framework features
     SeedSkill("Next.js App Router", FRAMEWORK, ("app router",), parent="Next.js"),
     SeedSkill("Server-Side Rendering", PRACTICE, ("ssr",), parent="Next.js"),
@@ -421,16 +452,18 @@ SEED_SKILLS: tuple[SeedSkill, ...] = (
     SeedSkill("Google Workspace", TOOL, ("google sheets", "google docs", "g suite")),
     SeedSkill("LaTeX", TOOL),
     # ---------------------------------------------------------------- soft skills
-    SeedSkill("Communication", SOFT, ("verbal communication", "written communication")),
-    SeedSkill("Leadership", SOFT, ("team leadership",)),
-    SeedSkill("Teamwork", SOFT, ("collaboration", "team player")),
-    SeedSkill("Problem Solving", SOFT, ("problem-solving", "analytical thinking")),
-    SeedSkill("Mentoring", SOFT, ("mentorship", "coaching")),
-    SeedSkill("Project Management", SOFT),
-    SeedSkill("Time Management", SOFT),
-    SeedSkill("Critical Thinking", SOFT),
-    SeedSkill("Adaptability", SOFT, ("flexibility",)),
-    SeedSkill("Stakeholder Management", SOFT),
+    SeedSkill(
+        "Communication", SOFT, ("verbal communication", "written communication"), generic=True
+    ),
+    SeedSkill("Leadership", SOFT, ("team leadership",), generic=True),
+    SeedSkill("Teamwork", SOFT, ("collaboration", "team player"), generic=True),
+    SeedSkill("Problem Solving", SOFT, ("problem-solving", "analytical thinking"), generic=True),
+    SeedSkill("Mentoring", SOFT, ("mentorship", "coaching"), generic=True),
+    SeedSkill("Project Management", SOFT, generic=True),
+    SeedSkill("Time Management", SOFT, generic=True),
+    SeedSkill("Critical Thinking", SOFT, generic=True),
+    SeedSkill("Adaptability", SOFT, ("flexibility",), generic=True),
+    SeedSkill("Stakeholder Management", SOFT, generic=True),
     # ------------------------------------------------- added 2026-09-12, measured
     #
     # The skill-extraction evaluation found **24% of the skills a reader names in
@@ -495,8 +528,8 @@ SEED_SKILLS: tuple[SeedSkill, ...] = (
     SeedSkill("WebRTC", PRACTICE),
     SeedSkill("SIP", PRACTICE, ("session initiation protocol",)),
     SeedSkill("JSON", PRACTICE),
-    SeedSkill("DevOps", PRACTICE),
-    SeedSkill("MLOps", PRACTICE),
+    SeedSkill("DevOps", PRACTICE, generic=True),
+    SeedSkill("MLOps", PRACTICE, generic=True),
     SeedSkill("LLMOps", PRACTICE),
     SeedSkill("Text Generation Inference", TOOL, ("tgi",)),
     SeedSkill("Blockchain", PRACTICE),

@@ -90,18 +90,47 @@ def _years_near(line: str) -> Decimal | None:
     return Decimal(years) if 0 < years <= _MAX_PLAUSIBLE_YEARS else None
 
 
+#: Blocks where naming a skill is a requirement rather than a description.
+#:
+#: A requirements list is what the employer is asking for. A responsibilities
+#: bullet describes the job — "optimize application performance, scalability and
+#: security" says what the work involves, and reading `Security` out of it as a
+#: required skill is how a generic term ends up penalising every candidate who
+#: did not list it.
+_CLAIM_SECTIONS = frozenset({JobSectionType.REQUIREMENTS, JobSectionType.NICE_TO_HAVE})
+
+#: What a generic term is worth outside a claim block.
+#:
+#: Below `MIN_CONFIDENCE`, so it is not written to `job_skills` at all. That is
+#: the right severity here, unlike the resume side where a low-confidence
+#: mention is offered to the user: nobody reviews a posting's skills, so a wrong
+#: one silently distorts every ranking it touches.
+_GENERIC_IN_PROSE = 0.40
+
+
 def extract_job_skills(
     *,
     matcher: SkillMatcher,
     sections: dict[JobSectionType, str],
     full_text: str,
+    generic_names: frozenset[str] | set[str] | None = None,
 ) -> list[JobSkillMention]:
     """Find the skills a posting asks for, and how badly.
 
     Falls back to scanning the whole description when no sections were detected,
     at the lower confidence an unstructured match deserves — many real postings
     are a single unbroken paragraph.
+
+    `generic_names` are entries that are real skills *and* ordinary words. They
+    count only from a requirements block; elsewhere they fall below
+    `MIN_CONFIDENCE` and are dropped. The skill-extraction evaluation measured
+    this as the entire precision shortfall — `Security` was a false positive in
+    ten of thirty postings, and the word was genuinely in all ten.
+
+    Optional, defaulting to none, so a caller that has not loaded the set gets
+    the previous behaviour rather than a silent half-change.
     """
+    generic = frozenset(generic_names or ())
     blocks = sections or {JobSectionType.UNKNOWN: full_text}
 
     found: dict[str, list[JobSkillMention]] = {}
@@ -147,6 +176,12 @@ def extract_job_skills(
 
         confidence = min(_MAX_CONFIDENCE, best.confidence + _REPEAT_BONUS * (len(mentions) - 1))
         years = next((m.min_years for m in pool if m.min_years is not None), None)
+
+        # Applied after the repeat bonus, so repeating "security" through a
+        # responsibilities list cannot promote it. Repetition in narrative is
+        # how a job description reads, not evidence of a requirement.
+        if canonical in generic and best.section not in _CLAIM_SECTIONS:
+            confidence = min(confidence, _GENERIC_IN_PROSE)
 
         if confidence < MIN_CONFIDENCE:
             continue

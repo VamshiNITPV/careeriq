@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-12T10:48:57.785095+00:00",
+  "generated_at": "2026-09-12T11:18:38.609815+00:00",
   "documents": 30,
   "gold_labels": 511,
   "taxonomy_size": 319,
@@ -112,14 +112,14 @@
   },
   "shipped": {
     "micro": {
-      "precision": 0.7034700315457413,
-      "recall": 0.948936170212766,
-      "f1": 0.8079710144927535
+      "precision": 0.7666068222621185,
+      "recall": 0.9085106382978724,
+      "f1": 0.8315481986368063
     },
     "macro": {
-      "precision": 0.7292918838646245,
-      "recall": 0.959140557871208,
-      "f1": 0.8111888710428027
+      "precision": 0.7951822209722154,
+      "recall": 0.8981582516783756,
+      "f1": 0.8146099384952062
     }
   },
   "naive_baseline": {
@@ -136,67 +136,19 @@
   },
   "worst_false_positives": [
     [
-      "Security",
-      10
-    ],
-    [
-      "Software Testing",
-      8
-    ],
-    [
-      "Deployment",
-      7
-    ],
-    [
-      "Performance Optimization",
-      7
-    ],
-    [
-      "Scalability",
-      7
-    ],
-    [
-      "Software Engineering",
-      6
-    ],
-    [
-      "Technical Documentation",
-      6
-    ],
-    [
-      "Leadership",
-      5
-    ],
-    [
-      "Mentoring",
-      5
-    ],
-    [
-      "Teamwork",
-      5
-    ],
-    [
-      "Backend Development",
-      4
-    ],
-    [
-      "Caching",
-      4
-    ],
-    [
-      "DevOps",
-      4
-    ],
-    [
       "Git",
       4
     ],
     [
-      "AWS",
-      3
+      "Performance Optimization",
+      4
     ],
     [
-      "Communication",
+      "Software Engineering",
+      4
+    ],
+    [
+      "AWS",
       3
     ],
     [
@@ -212,17 +164,89 @@
       3
     ],
     [
-      "System Design",
+      "Leadership",
       3
+    ],
+    [
+      "Teamwork",
+      3
+    ],
+    [
+      "TensorFlow",
+      3
+    ],
+    [
+      "Algorithms",
+      2
+    ],
+    [
+      "Backend Development",
+      2
+    ],
+    [
+      "Caching",
+      2
+    ],
+    [
+      "Communication",
+      2
+    ],
+    [
+      "DBMS",
+      2
+    ],
+    [
+      "Data Processing",
+      2
+    ],
+    [
+      "DevOps",
+      2
+    ],
+    [
+      "Docker",
+      2
+    ],
+    [
+      "FAISS",
+      2
+    ],
+    [
+      "Hadoop",
+      2
     ]
   ],
   "worst_false_negatives": [
     [
+      "Communication",
+      4
+    ],
+    [
       "Debugging",
+      4
+    ],
+    [
+      "Code Review",
+      3
+    ],
+    [
+      "Teamwork",
+      3
+    ],
+    [
+      "DevOps",
       2
     ],
     [
       "Embeddings",
+      2
+    ],
+    [
+      "MLOps",
+      2
+    ],
+    [
+      "Problem Solving",
       2
     ],
     [
@@ -238,15 +262,15 @@
       1
     ],
     [
-      "Communication",
-      1
-    ],
-    [
       "Database Design",
       1
     ],
     [
       "FAISS",
+      1
+    ],
+    [
+      "Flask",
       1
     ],
     [
@@ -271,30 +295,6 @@
     ],
     [
       "Natural Language Processing",
-      1
-    ],
-    [
-      "OpenAI API",
-      1
-    ],
-    [
-      "Pinecone",
-      1
-    ],
-    [
-      "PyTorch",
-      1
-    ],
-    [
-      "TensorFlow",
-      1
-    ],
-    [
-      "Transformers",
-      1
-    ],
-    [
-      "scikit-learn",
       1
     ]
   ],

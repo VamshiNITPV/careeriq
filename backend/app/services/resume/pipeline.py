@@ -258,7 +258,12 @@ async def _run(
         log.error("pipeline: skill taxonomy is empty; run the seeder")
 
     matcher = build_matcher(taxonomy)
-    candidates = extract_skills(matcher=matcher, sections=by_type, full_text=extracted.text)
+    candidates = extract_skills(
+        matcher=matcher,
+        sections=by_type,
+        full_text=extracted.text,
+        generic_names=await skills_repo.generic_names(),
+    )
 
     accepted = [c for c in candidates if not c.needs_review]
     for_review = [c for c in candidates if c.needs_review]
@@ -368,6 +373,7 @@ async def seed_skill_taxonomy(session: AsyncSession) -> int:
             "category": seed.category,
             "aliases": seed.normalized_aliases,
             "is_verified": True,
+            "is_generic": seed.generic,
         }
         for seed in SEED_SKILLS
     ]

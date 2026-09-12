@@ -62,6 +62,7 @@ async def reextract_candidate_skills(session: AsyncSession) -> ReextractResult:
     if not taxonomy:
         raise RuntimeError("The skill taxonomy is empty; run the seeder first.")
     matcher = build_matcher(taxonomy)
+    generic = await skills_repo.generic_names()
 
     # Only the version each resume currently points at. Older versions are
     # history: re-deriving skills from a resume the user has already replaced
@@ -88,7 +89,9 @@ async def reextract_candidate_skills(session: AsyncSession) -> ReextractResult:
             continue
 
         by_type = section_map(detect_sections(text))
-        found = extract_skills(matcher=matcher, sections=by_type, full_text=text)
+        found = extract_skills(
+            matcher=matcher, sections=by_type, full_text=text, generic_names=generic
+        )
         # `needs_review` matches the pipeline: a low-confidence mention is
         # surfaced for the user to accept, never written to their profile.
         candidates = [c for c in found if not c.needs_review]
