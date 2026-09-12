@@ -80,8 +80,48 @@ threshold (initially 0.6) it is surfaced for user review instead of silently acc
 | Skill extraction F1 | ≥ 0.82 |
 | Section detection accuracy | ≥ 0.90 |
 
-**Dataset:** `ml/datasets/resume_extraction/` — 50 resumes across varied formats and layouts,
-hand-annotated with gold skill sets and section boundaries.
+**Dataset:** `ml/datasets/skill_extraction/` — **built 2026-09-12, and not as specified.** 30 job
+postings, not 50 resumes: there are three distinct resume texts in this corpus and 319 live
+postings, and `services/job/skills.py` reuses `SkillMatcher` from the resume side, so postings
+exercise the same matcher on real, varied text. What they cannot exercise is the resume section
+classifier's confidence weighting, which stays unmeasured.
+
+**Measured** (`ml/evaluation/results/skill_extraction.md`), 511 hand-written gold labels:
+
+| | Precision | Recall | F1 |
+|---|---|---|---|
+| **Shipped extractor** | 0.670 | **0.948** | 0.785 |
+| Naive lookup (the baseline below) | 0.693 | 0.753 | 0.722 |
+| _Target_ | 0.85 | 0.80 | 0.82 |
+
+**Recall clears its target comfortably; precision does not, and precision is the one this document
+says matters more.** Three findings, in order of how much they should change what happens next.
+
+**1. The precision figure is not a hallucination rate, and must not be read as one.** Term by term,
+about four in five counted false positives are words literally present in the posting — `Security`
+in all ten postings it was penalised for, `Deployment` seven of seven, `Scalability` seven of seven.
+The real disagreement is about what counts as a skill: *"optimize application performance,
+scalability, and security"* describes the work rather than listing requirements, and the taxonomy
+holds `Security`, `Scalability` and `Software Engineering` as entries the matcher dutifully fires
+on. **It cannot tell "the job involves security" from "security is a required skill"** — both sit in
+a RESPONSIBILITIES block, which maps to REQUIRED at 0.80. This is the same defect 6.5 met from the
+other side, where `Communication` appeared in 45% of postings and flattened the skill dimension;
+rarity weighting treated the symptom and this is the cause.
+
+**2. A quarter of what a reader names is not in the taxonomy at all.** 122 of 511 gold labels (24%)
+have no entry — `NoSQL`, `Anthropic`, `DevOps`, `MLOps`, `Azure DevOps`, `Databricks`,
+`Django REST Framework`, `LlamaIndex`, `vector databases`. That is a hard ceiling on recall that no
+matcher change can lift, and the cheapest available improvement to the whole system: these are
+common, unambiguous, and adding them is data entry rather than modelling.
+
+**3. The baseline is beaten, but not everywhere.** Naive lookup gets *higher* precision (0.693 vs
+0.670) — alias resolution finds more, and more of what it finds is arguable. The shipped matcher
+earns its complexity on recall (0.948 vs 0.753) and F1, which is the right trade given the ceiling
+above, but the honest summary is "wins on recall, loses slightly on precision", not "wins".
+
+Labels are Claude-written and pending human review. A weaker caveat than on the matching dataset —
+"does this posting name Kubernetes" has an answer a second reader can check — but the precision
+figure above is exactly where that caveat bites hardest.
 
 **Baseline to beat:** naive keyword lookup against the skill list with no section awareness or
 alias resolution. If the spaCy pipeline does not beat that baseline, the added complexity is not
