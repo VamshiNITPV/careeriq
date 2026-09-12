@@ -406,13 +406,21 @@ class TestRecallFilters:
         assert "ix_job_embeddings_hnsw" in plan
 
     def test_the_recall_overfetches_before_filtering(self) -> None:
-        """pgvector applies relational filters *after* the approximate scan, so
-        a bare LIMIT 200 over a corpus with expired or applied-to postings comes
-        back short — quietly, with the missing rows being exactly the ones stage
-        two would have ranked. This is the direct threat to ml.md's Recall@200
-        target, so the multiplier is pinned rather than left to drift."""
+        """pgvector applies relational filters *after* the approximate scan, so a
+        bare LIMIT over a corpus with expired or applied-to postings comes back
+        short — quietly, with the missing rows being exactly the ones stage two
+        would have ranked. This is the direct threat to ml.md's recall target, so
+        the multiplier is pinned rather than left to drift.
+
+        The *limit* is deliberately not pinned to an exact number any more. It was
+        `== 200`, which turned a measured, expected change into a failing test
+        saying nothing about correctness. What matters is that it stays large
+        enough to be a real safety margin over the ~20 rows a reader sees, and
+        small enough that `evaluation.bench_recall_window` still fits NFR-2 — and
+        a number chosen by measurement should be re-measured, not asserted.
+        """
         assert OVERFETCH >= 2
-        assert RECALL_LIMIT == 200
+        assert RECALL_LIMIT >= 200
 
 
 class TestPaging:

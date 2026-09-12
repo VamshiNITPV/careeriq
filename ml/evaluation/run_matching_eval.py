@@ -88,7 +88,10 @@ TARGETS = {
     "precision@10": 0.60,
     "ndcg@10": 0.75,
     "mrr": 0.65,
-    "recall@200": 0.95,
+    # Not "recall@200": the key named the window, the window is chosen by
+    # measurement and has already moved once, and a key saying 200 while the
+    # report says 300 is a trap for whoever reads the JSON next.
+    "recall_at_limit": 0.95,
 }
 
 
@@ -244,7 +247,7 @@ async def main() -> dict[str, Any]:
                     "labelled": len(labels),
                     "ranked": len(hybrid),
                     "relevant": len(relevant_ids),
-                    "recall@200": retrieval_recall,
+                    "recall_at_limit": retrieval_recall,
                     "recall_curve": recall_curve,
                     "recall_missed": missed,
                     "rankers": {
@@ -339,7 +342,7 @@ def _assemble(
         name: {
             metric: _mean([q["rankers"][name][metric] for q in per_query])
             for metric in TARGETS
-            if metric != "recall@200"
+            if metric != "recall_at_limit"
         }
         for name in names
     }
@@ -359,7 +362,7 @@ def _assemble(
         "label_distribution": dict(sorted(Counter(r["label"] for r in pair_rows).items())),
         "per_query": per_query,
         "rankers": overall,
-        "recall@200": _mean([q["recall@200"] for q in per_query]),
+        "recall_at_limit": _mean([q["recall_at_limit"] for q in per_query]),
         "score_label_spearman": spearman(
             [r["score"] for r in pair_rows], [float(r["label"]) for r in pair_rows]
         ),
@@ -439,8 +442,8 @@ def _markdown(report: dict[str, Any]) -> str:
         "",
         "## Retrieval",
         "",
-        f"**Recall@{RECALL_LIMIT} = {_cell(report['recall@200'])}** "
-        f"(target {targets['recall@200']:.2f}). Measured over every labelled relevant job, "
+        f"**Recall@{RECALL_LIMIT} = {_cell(report['recall_at_limit'])}** "
+        f"(target {targets['recall_at_limit']:.2f}). Measured over every labelled relevant job, "
         "including those sampled from outside the recall set — without that sample this number "
         "would be 1.0 by construction.",
         "",
@@ -471,7 +474,7 @@ def _markdown(report: dict[str, Any]) -> str:
         lines.append(
             f"- `{query['query_id']}` ({query['resume_chars']} chars): "
             f"{query['relevant']} relevant of {query['labelled']} labelled, "
-            f"{query['ranked']} ranked, recall {_cell(query['recall@200'])}"
+            f"{query['ranked']} ranked, recall {_cell(query['recall_at_limit'])}"
         )
         for title in missed:
             lines.append(f"  - missed by stage one: {title}")

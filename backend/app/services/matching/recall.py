@@ -2,7 +2,7 @@
 
 The corpus is scored in two passes because scoring all of it on every request
 cannot meet NFR-2. This module is the cheap pass: **one SQL statement** that uses
-the pgvector HNSW index to pull the ~200 nearest postings to a candidate's
+the pgvector HNSW index to pull the nearest `RECALL_LIMIT` postings to a candidate's
 vector, applying every hard filter in the same statement so the expensive pass
 never sees a row it would have thrown away.
 
@@ -35,28 +35,44 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 #: How many postings the cheap pass hands to the expensive one (ADR-006).
 #:
-#: 200 against the ~20 a user actually sees. The gap is the whole safety margin:
+#: 300 against the ~20 a user actually sees. The gap is the whole safety margin:
 #: stage two can reorder heavily, but it can never recover a job stage one did
 #: not return, so recall here bounds the quality of everything downstream. ml.md
-#: sets the target at **Recall@200 >= 0.95** and tracks it as a separate metric
-#: for exactly that reason — a retrieval failure is invisible in the ranking
-#: metrics and looks like bad ranking, which is a long way to debug.
-RECALL_LIMIT = 200
+#: sets the target at **>= 0.95** and tracks it as a separate metric for exactly
+#: that reason — a retrieval failure is invisible in the ranking metrics and looks
+#: like bad ranking, which is a long way to debug.
+#:
+#: **Raised from 200 on 2026-09-12, on measurement rather than judgement.** The
+#: recall sweep in `evaluation.run_matching_eval` put recall at 0.917 at a window
+#: of 200 and **1.000 at 300** — every labelled-relevant job sits inside the top
+#: 300, so stage one was ordering them correctly and the cut simply came too
+#: early. `evaluation.bench_recall_window` priced the wider window at **+37ms
+#: median** (160.6 -> 197.5) with a worst case of 278ms, against NFR-2's 500ms.
+#:
+#: **This number decays and will need re-measuring.** It is a fixed row count
+#: over a corpus that grows daily — 292 live jobs when 200 was chosen, 319 when
+#: it was raised. Each new posting competes for the same slots, so recall falls
+#: with no code change at all. Re-run the benchmark rather than guessing a
+#: replacement; the last guess here ("roughly 72ms for 300") was out by a factor
+#: of three.
+RECALL_LIMIT = 300
 
 #: Multiplier applied to the vector scan before the relational filters bite.
 #:
 #: This exists because of a specific pgvector behaviour, and it is the main
 #: correctness risk in this module. **Once the planner chooses HNSW, the index
 #: returns its `ef_search` best matches and the WHERE clause is applied to those
-#: rows afterwards.** So a LIMIT of 200 over a corpus where many postings are
+#: rows afterwards.** So a bare LIMIT over a corpus where many postings are
 #: expired, duplicated, or already applied to comes back with fewer than 200 —
 #: quietly, with no error, and the missing rows are exactly the ones stage two
 #: would have ranked.
 #:
 #: Over-fetching is the cheaper of the two remedies (the other is raising
 #: `hnsw.ef_search`, which is a session GUC and affects every query on the
-#: connection). Three is a starting point, not a measured constant; 6.4's
-#: Recall@200 measurement is what will settle it.
+#: connection). Three is a starting point, not a measured constant, and it is
+#: still unsettled: the corpus has never been large enough for the planner to
+#: choose HNSW over a sequential scan, so the behaviour this guards against has
+#: not yet happened here.
 OVERFETCH = 3
 
 
@@ -148,7 +164,7 @@ async def recall_jobs(
     exclude_applied: bool = True,
     allowed_job_ids: list[uuid.UUID] | None = None,
 ) -> list[RecalledJob] | None:
-    """The ~200 postings nearest this resume, nearest first.
+    """The nearest `RECALL_LIMIT` postings to this resume, nearest first.
 
     Returns `None` when the resume has no vector — reported by the caller as
     PENDING rather than as an empty list, because "not indexed yet" and "nothing

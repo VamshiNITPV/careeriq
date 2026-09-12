@@ -332,8 +332,9 @@ and section parsing). **Read the comparability note below the table before readi
 | random | 0.500 | 0.450 | 0.508 | 0.345 |
 | _target_ | 0.70 | 0.60 | 0.75 | 0.75 |
 
-P@5 and P@10 are the 6.5 figures. Recall@200 = **0.917** at a 319-job corpus, **below the 0.95
-target** — see the sweep below for why, and why the number is not comparable across corpus sizes. Spearman(score, label) = **0.386** over 102 ranked pairs of 122 labelled.
+P@5 and P@10 are the 6.5 figures. Recall = **1.000** at a 319-job corpus with `RECALL_LIMIT` 300,
+meeting the 0.95 target — see below for how the window was chosen, and why the number is not
+comparable across corpus sizes. Spearman(score, label) = **0.386** over 102 ranked pairs of 122 labelled.
 
 **The two deltas that mean something, and the one that does not:**
 
@@ -350,31 +351,46 @@ target** — see the sweep below for why, and why the number is not comparable a
   **ranked-pair digest** so this is visible rather than inferred. At two queries, a 0.017 difference
   across a shifted comparison set is not a result.
 
-**Recall@200 is 0.917 and the cause is now measured, not guessed** (re-run 2026-09-12). The earlier
-reading of 0.931 was attributed to the document change moving cosines. That was wrong, or at most
-half of it. The real driver is that **`RECALL_LIMIT` is a fixed 200 rows over a corpus that grows
-daily**: 292 live jobs when this was first measured, 319 two days later. The window was 68% of
-everything and is now 63%, so the same query competes against 27 more postings for the same slots.
-Recall@200 will keep falling on its own with no code change at all, which makes it useless as a
-regression signal unless the corpus size is read beside it. The report now prints both.
+**Recall is 1.000 — the target is met.** `RECALL_LIMIT` was raised 200 -> 300 on 2026-09-12, and the
+route to that number is the point rather than the number.
 
-**The sweep says the misses are reachable:**
+Recall@200 had been falling: 0.954, then 0.931, then 0.917. The earlier reading was blamed on the
+document change moving cosines. That was wrong. The real driver is that **the window is a fixed row
+count over a corpus that grows daily** — 292 live jobs when 200 was chosen, 319 two days later. The
+window was 68% of everything and had become 63%, so each query competed against 27 more postings for
+the same slots. It would have kept falling with no code change at all, which makes the raw number
+useless as a regression signal unless corpus size is read beside it. **The report now prints both.**
 
-| Window | 50 | 100 | **200** | 300 | 500 |
+The sweep, not judgement, chose the replacement:
+
+| Window | 50 | 100 | 200 | **300** | 500 |
 |---|---|---|---|---|---|
-| Recall | 0.491 | 0.697 | **0.917** | **1.000** | 1.000 |
+| Recall | 0.491 | 0.697 | 0.917 | **1.000** | 1.000 |
 
-Every labelled-relevant job is inside the top 300. So this is a *window* problem, not a ranking one —
-stage one orders them correctly and the cut comes too early. Raising `RECALL_LIMIT` to 300 would clear
-the 0.95 target outright, at the cost of stage two scoring 300 jobs instead of 200 (measured at 47.8ms
-for 200 after the N+1 fix, so roughly 72ms against NFR-2's 500ms budget). **Not changed here**: it is a
-shipped constant on the latency path, the decision belongs with whoever owns that budget, and the
-right long-run answer is probably a window that scales with the corpus rather than another fixed
-number that decays the same way.
+Every labelled-relevant job sits inside the top 300, so stage one was ordering them correctly and the
+cut simply came too early — a *window* problem wearing a retrieval label.
+`evaluation.bench_recall_window` then priced it: **+37ms median** (160.6 -> 197.5), worst case 278ms
+against NFR-2's 500ms. Scoring the entire 319-job corpus costs 230ms, so two-stage retrieval is
+currently buying latency headroom the corpus does not yet need — it earns its keep at NFR-2's
+10,000, not here.
 
-The first version of this sweep was wrong and reported a flat 0.917 across every window — it asked for
-200 rows and then measured recall at 300 and 500 against that same 200-row list. It would have read as
-"a wider window buys nothing", the exact opposite of the truth.
+**NDCG@10 fell from 0.637 to 0.613, and that is not a regression.** Widening the window admitted 18
+labelled pairs that stage one had never returned, taking the ranked set from 99 pairs to 117 of 122 —
+nearly the whole dataset. Those pairs skew *irrelevant* (label 0 went 12 -> 19), because a job ranked
+200th-300th by cosine is usually there on merit. The ranker now has to push more distractors down, and
+the average falls. **The exam got harder, not the student worse** — which is exactly why the
+ranked-pair digest exists, and why it changed here (`b964e7` -> `57fc74`).
+
+Two mistakes are recorded here because both nearly shipped as findings. The first version of the sweep
+asked for 200 rows and then measured recall at 300 and 500 *against that same 200-row list*, reporting
+a flat 0.917 everywhere — it would have read as "a wider window buys nothing", the exact opposite of
+the truth. And the cost of the wider window was first estimated at "roughly 72ms" by extrapolating an
+older 47.8ms figure; the measured answer is ~198ms, out by a factor of three, because the old number
+timed the scoring step alone rather than the whole path.
+
+**This number decays and will need re-measuring**, not re-guessing. A fixed window over a growing
+corpus is structurally the same trap whatever value it holds, and the benchmark is committed so the
+next revision is a measurement.
 
 **NDCG@10 still misses its 0.75 target** (0.628). The hybrid gets relevant jobs into the top five
 (P@5 0.900) but does not order HIGH above MEDIUM well enough. That remains the headline gap.

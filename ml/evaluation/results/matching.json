@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-12T05:32:47.235492+00:00",
+  "generated_at": "2026-09-12T05:49:39.720537+00:00",
   "ranking_version": "v1-hand-tuned",
   "weights": {
     "semantic": "0.35",
@@ -11,7 +11,7 @@
   },
   "relevant_threshold": 2,
   "queries": 2,
-  "pairs": 99,
+  "pairs": 117,
   "labelled_pairs": 122,
   "corpus_size": 319,
   "recall_curve": {
@@ -21,12 +21,12 @@
     "300": 1.0,
     "500": 1.0
   },
-  "ranked_pairs_digest": "b964e709782e",
+  "ranked_pairs_digest": "57fc741ecb62",
   "label_distribution": {
-    "0": 12,
-    "1": 28,
-    "2": 39,
-    "3": 20
+    "0": 19,
+    "1": 34,
+    "2": 41,
+    "3": 23
   },
   "per_query": [
     {
@@ -34,9 +34,9 @@
       "kind": "real-resume",
       "resume_chars": 3701,
       "labelled": 63,
-      "ranked": 49,
+      "ranked": 59,
       "relevant": 27,
-      "recall@200": 0.8888888888888888,
+      "recall_at_limit": 1.0,
       "recall_curve": {
         "50": 0.3333333333333333,
         "100": 0.5555555555555556,
@@ -44,50 +44,46 @@
         "300": 1.0,
         "500": 1.0
       },
-      "recall_missed": [
-        "Python- React, Next JS Fullstack Engineer",
-        "Python With Gen AI Developer",
-        "AI Engineering Interns | Claude & Engineering AI (Pune)"
-      ],
+      "recall_missed": [],
       "rankers": {
         "hybrid": {
           "precision@5": 1.0,
           "precision@10": 0.8,
-          "ndcg@10": 0.6446271612834578,
+          "ndcg@10": 0.5967866126641727,
           "mrr": 1.0
         },
         "embedding_only": {
           "precision@5": 0.4,
           "precision@10": 0.3,
-          "ndcg@10": 0.40642205582742985,
+          "ndcg@10": 0.37625973054928,
           "mrr": 1.0
         },
         "skill_only": {
-          "precision@5": 0.8,
-          "precision@10": 0.9,
-          "ndcg@10": 0.7792849850587478,
+          "precision@5": 0.6,
+          "precision@10": 0.8,
+          "ndcg@10": 0.6615946137242656,
           "mrr": 1.0
         },
         "tfidf": {
           "precision@5": 0.6,
           "precision@10": 0.6,
-          "ndcg@10": 0.41111759686076504,
+          "ndcg@10": 0.38132598773884707,
           "mrr": 0.5
         },
         "random": {
-          "precision@5": 0.6,
-          "precision@10": 0.4,
-          "ndcg@10": 0.3294590906164143,
-          "mrr": 1.0
+          "precision@5": 0.8,
+          "precision@10": 0.5,
+          "ndcg@10": 0.3450010181624277,
+          "mrr": 0.5
         }
       },
       "ablation": {
-        "semantic": 0.6581369986039416,
-        "skill": 0.6101200233808042,
-        "experience": 0.6042049285714728,
-        "education": 0.6446271612834578,
-        "location": 0.7738932486761007,
-        "salary": 0.6386737646027655
+        "semantic": 0.6191861180866514,
+        "skill": 0.5648403975827936,
+        "experience": 0.559364287349058,
+        "education": 0.5967866126641727,
+        "location": 0.7164593088531005,
+        "salary": 0.5912750431053556
       }
     },
     {
@@ -95,9 +91,9 @@
       "kind": "test-fixture",
       "resume_chars": 1402,
       "labelled": 59,
-      "ranked": 50,
+      "ranked": 58,
       "relevant": 37,
-      "recall@200": 0.9459459459459459,
+      "recall_at_limit": 1.0,
       "recall_curve": {
         "50": 0.6486486486486487,
         "100": 0.8378378378378378,
@@ -105,10 +101,7 @@
         "300": 1.0,
         "500": 1.0
       },
-      "recall_missed": [
-        "Python Developer (3-6 Years)",
-        "AI/ML Engineer (Open-Source LLM \u2013 BFSI Domain)"
-      ],
+      "recall_missed": [],
       "rankers": {
         "hybrid": {
           "precision@5": 0.8,
@@ -131,13 +124,13 @@
         "tfidf": {
           "precision@5": 0.8,
           "precision@10": 0.7,
-          "ndcg@10": 0.4272925203731238,
-          "mrr": 1.0
+          "ndcg@10": 0.40932276478454066,
+          "mrr": 0.5
         },
         "random": {
-          "precision@5": 1.0,
-          "precision@10": 0.9,
-          "ndcg@10": 0.45444066128656047,
+          "precision@5": 0.8,
+          "precision@10": 0.5,
+          "ndcg@10": 0.4744907309336869,
           "mrr": 1.0
         }
       },
@@ -155,49 +148,49 @@
     "hybrid": {
       "precision@5": 0.9,
       "precision@10": 0.8500000000000001,
-      "ndcg@10": 0.6370343810970169,
+      "ndcg@10": 0.6131141067873743,
       "mrr": 0.75
     },
     "embedding_only": {
       "precision@5": 0.7,
       "precision@10": 0.6,
-      "ndcg@10": 0.4802426434852221,
+      "ndcg@10": 0.46516148084614717,
       "mrr": 1.0
     },
     "skill_only": {
-      "precision@5": 0.8,
-      "precision@10": 0.8500000000000001,
-      "ndcg@10": 0.6041412255130103,
+      "precision@5": 0.7,
+      "precision@10": 0.8,
+      "ndcg@10": 0.5452960398457691,
       "mrr": 0.75
     },
     "tfidf": {
       "precision@5": 0.7,
       "precision@10": 0.6499999999999999,
-      "ndcg@10": 0.41920505861694446,
-      "mrr": 0.75
+      "ndcg@10": 0.39532437626169387,
+      "mrr": 0.5
     },
     "random": {
       "precision@5": 0.8,
-      "precision@10": 0.65,
-      "ndcg@10": 0.3919498759514874,
-      "mrr": 1.0
+      "precision@10": 0.5,
+      "ndcg@10": 0.4097458745480573,
+      "mrr": 0.75
     }
   },
-  "recall@200": 0.9174174174174174,
-  "score_label_spearman": 0.3939537972810753,
+  "recall_at_limit": 1.0,
+  "score_label_spearman": 0.4712057069170958,
   "ablation_ndcg@10": {
-    "semantic": 0.5757954750416696,
-    "skill": 0.7229321155563444,
-    "experience": 0.5897466992578144,
-    "education": 0.6025234311738166,
-    "location": 0.7016674247933383,
-    "salary": 0.6340576827566707
+    "semantic": 0.5563200347830245,
+    "skill": 0.7002923026573391,
+    "experience": 0.567326378646607,
+    "education": 0.5786031568641741,
+    "location": 0.6729504548818382,
+    "salary": 0.6103583220079658
   },
   "targets": {
     "precision@5": 0.7,
     "precision@10": 0.6,
     "ndcg@10": 0.75,
     "mrr": 0.65,
-    "recall@200": 0.95
+    "recall_at_limit": 0.95
   }
 }
