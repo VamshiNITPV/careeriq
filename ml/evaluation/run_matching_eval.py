@@ -58,7 +58,7 @@ from app.repositories.matching import MatchingRepository
 from app.services.matching.recall import RECALL_LIMIT, recall_jobs
 from app.services.matching.service import MatchingService
 from app.services.matching.weights import RANKING_VERSION, WEIGHTS, Dimension
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from evaluation.baselines import rank_random, rank_skill_only, rank_tfidf
 from evaluation.metrics import (
@@ -72,6 +72,15 @@ from evaluation.metrics import (
 
 DATA = pathlib.Path("/ml/datasets/matching")
 RESULTS = pathlib.Path("/ml/evaluation/results")
+
+#: Windows to measure recall at, beyond the shipped one.
+#:
+#: `RECALL_LIMIT` is a fixed number of rows over a corpus that grows daily, so
+#: Recall@200 falls on its own as the corpus expands — at 292 live jobs the
+#: window was 68% of everything, at 319 it is 63%, and the trend has one
+#: direction. Measuring several windows separates "stage one is losing good jobs"
+#: from "the window is now too small a slice", which the single number cannot.
+RECALL_SWEEP = (50, 100, 200, 300, 500)
 
 #: Targets from ml.md section 4.3, for the report to compare against.
 TARGETS = {
@@ -119,6 +128,21 @@ async def main() -> dict[str, Any]:
     pair_rows: list[dict[str, Any]] = []
 
     async with get_session_factory()() as session:
+        # Recorded because it moves the numbers on its own. A run against 319
+        # live jobs is not comparable with one against 292: the recall window is
+        # a fixed 200 rows either way, so a larger corpus means more competition
+        # for the same slots and fewer labelled jobs inside them. Without this in
+        # the report, that shows up as an unexplained regression and gets
+        # debugged as one.
+        corpus_size = (
+            await session.scalar(
+                text("""
+                    SELECT count(*) FROM jobs
+                    WHERE status = 'ACTIVE' AND (expires_at IS NULL OR expires_at > now())
+                """)
+            )
+        ) or 0
+
         repo = MatchingRepository(session)
         service = MatchingService(repo=repo, provider=provider)
 
@@ -127,20 +151,36 @@ async def main() -> dict[str, Any]:
             labelled = {p["job_id"]: p for p in pairs if p["query_id"] == query_id}
             labels = {job_id: row["label"] for job_id, row in labelled.items()}
 
+            # Fetched at the widest window in the sweep, then sliced, rather than
+            # at RECALL_LIMIT. The first version asked for 200 rows and then
+            # "measured" recall at 300 and 500 against that same 200-row list —
+            # which reported a perfectly flat curve and would have been read as
+            # "a wider window buys nothing". The ordering is by distance and does
+            # not depend on the limit, so one query at the top of the sweep gives
+            # every window below it for free, and slot 200 is unchanged.
             recalled = await recall_jobs(
                 session=session,
                 user_id=uuid.UUID(query["user_id"]),
                 resume_version_id=uuid.UUID(query["resume_version_id"]),
                 model_name=provider.model_name,
+                limit=max(RECALL_SWEEP),
                 exclude_applied=False,
             )
             assert recalled is not None, f"{query_id}: no recall"
-            recalled_ids = [str(r.job_id) for r in recalled]
+            widest_ids = [str(r.job_id) for r in recalled]
+            # What the system would actually return, which is what everything
+            # below stage one must be measured against.
+            recalled_ids = widest_ids[:RECALL_LIMIT]
 
             # Retrieval, measured over everything known to be relevant — the only
             # place a stage-one miss can show up.
             relevant_ids = [job_id for job_id, label in labels.items() if label >= RELEVANT_AT]
             retrieval_recall = recall_at_k(recalled_ids, relevant_ids, RECALL_LIMIT)
+            # The same measurement at other windows, which turns "Recall@200 is
+            # below target" from a complaint into a decision: it shows whether a
+            # bigger window would fix it, or whether the misses are ranked so far
+            # down that no reachable window helps.
+            recall_curve = {k: recall_at_k(widest_ids, relevant_ids, k) for k in RECALL_SWEEP}
             missed = [
                 labelled[job_id]["title"] for job_id in relevant_ids if job_id not in recalled_ids
             ]
@@ -205,6 +245,7 @@ async def main() -> dict[str, Any]:
                     "ranked": len(hybrid),
                     "relevant": len(relevant_ids),
                     "recall@200": retrieval_recall,
+                    "recall_curve": recall_curve,
                     "recall_missed": missed,
                     "rankers": {
                         name: _evaluate(scores, pooled_labels) for name, scores in rankers.items()
@@ -226,7 +267,7 @@ async def main() -> dict[str, Any]:
                     }
                 )
 
-    return _assemble(per_query, pair_rows, labelled_pairs=len(pairs))
+    return _assemble(per_query, pair_rows, labelled_pairs=len(pairs), corpus_size=corpus_size)
 
 
 def _write_report(report: dict[str, Any]) -> None:
@@ -291,6 +332,7 @@ def _assemble(
     per_query: list[dict[str, Any]],
     pair_rows: list[dict[str, Any]],
     labelled_pairs: int,
+    corpus_size: int,
 ) -> dict[str, Any]:
     names = list(per_query[0]["rankers"])
     overall = {
@@ -309,6 +351,10 @@ def _assemble(
         "queries": len(per_query),
         "pairs": len(pair_rows),
         "labelled_pairs": labelled_pairs,
+        "corpus_size": corpus_size,
+        "recall_curve": {
+            str(k): _mean([q["recall_curve"][k] for q in per_query]) for k in RECALL_SWEEP
+        },
         "ranked_pairs_digest": _ranked_pairs_digest(pair_rows),
         "label_distribution": dict(sorted(Counter(r["label"] for r in pair_rows).items())),
         "per_query": per_query,
@@ -397,6 +443,27 @@ def _markdown(report: dict[str, Any]) -> str:
         f"(target {targets['recall@200']:.2f}). Measured over every labelled relevant job, "
         "including those sampled from outside the recall set — without that sample this number "
         "would be 1.0 by construction.",
+        "",
+        f"**Measured against {report['corpus_size']} live jobs**, and that number belongs next to "
+        "the one above. The window is a fixed "
+        f"{RECALL_LIMIT} rows however large the corpus is, so recall falls on its own as postings "
+        "are fetched — more competition for the same slots. A run against a bigger corpus is not "
+        "comparable with one against a smaller one, and the difference reads as a regression if "
+        "this is not on the page.",
+        "",
+        "| Window | Recall | Share of corpus |",
+        "|---|---|---|",
+        *[
+            f"| {k}{' **(shipped)**' if int(k) == RECALL_LIMIT else ''} | {_cell(value)} | "
+            f"{min(int(k) / report['corpus_size'], 1.0):.0%} |"
+            for k, value in report["recall_curve"].items()
+        ],
+        "",
+        "The curve says which problem this is. If recall is already flat before "
+        f"{RECALL_LIMIT}, the missed jobs are ranked far down by the embedding and a wider window "
+        "buys nothing — that is a *ranking* problem wearing a retrieval label. If it is still "
+        "climbing, the window is simply too small a slice of the corpus and raising it is the "
+        "cheap fix.",
         "",
     ]
     for query in report["per_query"]:

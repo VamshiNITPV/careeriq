@@ -332,8 +332,8 @@ and section parsing). **Read the comparability note below the table before readi
 | random | 0.500 | 0.450 | 0.508 | 0.345 |
 | _target_ | 0.70 | 0.60 | 0.75 | 0.75 |
 
-P@5 and P@10 are the 6.5 figures. Recall@200 = **0.931**, down from 0.954 and **now below the 0.95
-target**. Spearman(score, label) = **0.386** over 102 ranked pairs of 122 labelled.
+P@5 and P@10 are the 6.5 figures. Recall@200 = **0.917** at a 319-job corpus, **below the 0.95
+target** — see the sweep below for why, and why the number is not comparable across corpus sizes. Spearman(score, label) = **0.386** over 102 ranked pairs of 122 labelled.
 
 **The two deltas that mean something, and the one that does not:**
 
@@ -350,9 +350,31 @@ target**. Spearman(score, label) = **0.386** over 102 ranked pairs of 122 labell
   **ranked-pair digest** so this is visible rather than inferred. At two queries, a 0.017 difference
   across a shifted comparison set is not a result.
 
-**Recall@200 regressed to 0.931.** Four labelled-relevant jobs are now ranked below 200th by the
-embedding, against three before. The cause is the same document change that helped ranking: a longer
-document moves every cosine slightly. This is a real unmet target, recorded rather than rounded.
+**Recall@200 is 0.917 and the cause is now measured, not guessed** (re-run 2026-09-12). The earlier
+reading of 0.931 was attributed to the document change moving cosines. That was wrong, or at most
+half of it. The real driver is that **`RECALL_LIMIT` is a fixed 200 rows over a corpus that grows
+daily**: 292 live jobs when this was first measured, 319 two days later. The window was 68% of
+everything and is now 63%, so the same query competes against 27 more postings for the same slots.
+Recall@200 will keep falling on its own with no code change at all, which makes it useless as a
+regression signal unless the corpus size is read beside it. The report now prints both.
+
+**The sweep says the misses are reachable:**
+
+| Window | 50 | 100 | **200** | 300 | 500 |
+|---|---|---|---|---|---|
+| Recall | 0.491 | 0.697 | **0.917** | **1.000** | 1.000 |
+
+Every labelled-relevant job is inside the top 300. So this is a *window* problem, not a ranking one —
+stage one orders them correctly and the cut comes too early. Raising `RECALL_LIMIT` to 300 would clear
+the 0.95 target outright, at the cost of stage two scoring 300 jobs instead of 200 (measured at 47.8ms
+for 200 after the N+1 fix, so roughly 72ms against NFR-2's 500ms budget). **Not changed here**: it is a
+shipped constant on the latency path, the decision belongs with whoever owns that budget, and the
+right long-run answer is probably a window that scales with the corpus rather than another fixed
+number that decays the same way.
+
+The first version of this sweep was wrong and reported a flat 0.917 across every window — it asked for
+200 rows and then measured recall at 300 and 500 against that same 200-row list. It would have read as
+"a wider window buys nothing", the exact opposite of the truth.
 
 **NDCG@10 still misses its 0.75 target** (0.628). The hybrid gets relevant jobs into the top five
 (P@5 0.900) but does not order HIGH above MEDIUM well enough. That remains the headline gap.

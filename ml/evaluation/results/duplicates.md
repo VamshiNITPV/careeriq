@@ -1,6 +1,6 @@
 # Near-duplicate detection
 
-Generated 2026-09-10T10:59:34.606553+00:00.
+Generated 2026-09-12T05:29:19.678945+00:00.
 
 > **The positive class has three members.** 72 labelled pairs, 3 of them duplicates. Precision and recall computed over three positives move by a third of their range when one pair is reclassified, so every figure here is a direction, not a measurement. The targets below are reported because ml.md names them, not because this dataset can settle them.
 
