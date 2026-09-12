@@ -1,79 +1,19 @@
 {
-  "generated_at": "2026-09-12T10:28:34.842026+00:00",
+  "generated_at": "2026-09-12T10:48:57.785095+00:00",
   "documents": 30,
   "gold_labels": 511,
-  "taxonomy_size": 267,
+  "taxonomy_size": 319,
   "coverage": {
-    "in_taxonomy": 389,
-    "outside_taxonomy": 122,
-    "share_covered": 0.761252446183953,
+    "in_taxonomy": 475,
+    "outside_taxonomy": 36,
+    "share_covered": 0.9295499021526419,
     "most_common_missing": [
-      [
-        "NoSQL",
-        5
-      ],
-      [
-        "Anthropic",
-        4
-      ],
-      [
-        "DevOps",
-        4
-      ],
-      [
-        "MLOps",
-        4
-      ],
       [
         "monitoring",
         4
       ],
       [
-        "Azure DevOps",
-        3
-      ],
-      [
-        "Databricks",
-        3
-      ],
-      [
-        "Django REST Framework",
-        3
-      ],
-      [
-        "LlamaIndex",
-        3
-      ],
-      [
-        "vector databases",
-        3
-      ],
-      [
-        "Azure OpenAI",
-        2
-      ],
-      [
-        "CloudFormation",
-        2
-      ],
-      [
         "GPU",
-        2
-      ],
-      [
-        "LangGraph",
-        2
-      ],
-      [
-        "LangSmith",
-        2
-      ],
-      [
-        "LoRA",
-        2
-      ],
-      [
-        "Mistral",
         2
       ],
       [
@@ -101,37 +41,97 @@
         2
       ],
       [
-        "quantization",
-        2
+        "Big Data",
+        1
       ],
       [
-        "semantic search",
-        2
+        "ISDN",
+        1
+      ],
+      [
+        "SRE",
+        1
+      ],
+      [
+        "TCP/UDP",
+        1
+      ],
+      [
+        "analytical skills",
+        1
+      ],
+      [
+        "attention to detail",
+        1
+      ],
+      [
+        "data integration",
+        1
+      ],
+      [
+        "data quality",
+        1
+      ],
+      [
+        "data science",
+        1
+      ],
+      [
+        "dimensional modeling",
+        1
+      ],
+      [
+        "gradient boosting",
+        1
+      ],
+      [
+        "information retrieval",
+        1
+      ],
+      [
+        "model distillation",
+        1
+      ],
+      [
+        "predictive analytics",
+        1
+      ],
+      [
+        "test automation",
+        1
+      ],
+      [
+        "time series analysis",
+        1
+      ],
+      [
+        "time series forecasting",
+        1
       ]
     ]
   },
   "shipped": {
     "micro": {
-      "precision": 0.6703499079189686,
-      "recall": 0.9479166666666666,
-      "f1": 0.785329018338727
+      "precision": 0.7034700315457413,
+      "recall": 0.948936170212766,
+      "f1": 0.8079710144927535
     },
     "macro": {
-      "precision": 0.6983392628611598,
-      "recall": 0.9517039750373083,
-      "f1": 0.7838487787080896
+      "precision": 0.7292918838646245,
+      "recall": 0.959140557871208,
+      "f1": 0.8111888710428027
     }
   },
   "naive_baseline": {
     "micro": {
-      "precision": 0.6930455635491607,
-      "recall": 0.7526041666666666,
-      "f1": 0.7215980024968789
+      "precision": 0.7188118811881188,
+      "recall": 0.7723404255319148,
+      "f1": 0.7446153846153846
     },
     "macro": {
-      "precision": 0.7258888753234595,
-      "recall": 0.7612162106546164,
-      "f1": 0.71688082400661
+      "precision": 0.7598475033784382,
+      "recall": 0.7947676456670264,
+      "f1": 0.7554756727270181
     }
   },
   "worst_false_positives": [
@@ -184,6 +184,10 @@
       4
     ],
     [
+      "DevOps",
+      4
+    ],
+    [
       "Git",
       4
     ],
@@ -205,10 +209,6 @@
     ],
     [
       "Go",
-      3
-    ],
-    [
-      "Microsoft Azure",
       3
     ],
     [
@@ -234,11 +234,19 @@
       2
     ],
     [
+      "Amazon SageMaker",
+      1
+    ],
+    [
       "Communication",
       1
     ],
     [
       "Database Design",
+      1
+    ],
+    [
+      "FAISS",
       1
     ],
     [
@@ -251,6 +259,14 @@
     ],
     [
       "LangChain",
+      1
+    ],
+    [
+      "LangGraph",
+      1
+    ],
+    [
+      "LangSmith",
       1
     ],
     [

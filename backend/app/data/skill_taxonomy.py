@@ -119,7 +119,7 @@ SEED_SKILLS: tuple[SeedSkill, ...] = (
     SeedSkill("Laravel", FRAMEWORK, parent="PHP"),
     SeedSkill(".NET", FRAMEWORK, ("dotnet", "asp.net", "aspnet", ".net core"), parent="C#"),
     SeedSkill("GraphQL", FRAMEWORK),
-    SeedSkill("gRPC", FRAMEWORK),
+    SeedSkill("gRPC", FRAMEWORK, ("rpc",)),
     SeedSkill("REST API", PRACTICE, ("rest", "restful", "rest apis", "restful api")),
     SeedSkill("WebSockets", PRACTICE, ("websocket", "web sockets")),
     SeedSkill("Microservices", PRACTICE, ("microservice", "micro services")),
@@ -132,7 +132,11 @@ SEED_SKILLS: tuple[SeedSkill, ...] = (
     SeedSkill("Elasticsearch", DATABASE, ("elastic search", "elastic", "opensearch")),
     SeedSkill("Cassandra", DATABASE, ("apache cassandra",)),
     SeedSkill("DynamoDB", DATABASE, ("dynamo db",)),
-    SeedSkill("Oracle Database", DATABASE, ("oracle db", "oracle sql", "plsql", "pl sql")),
+    SeedSkill(
+        "Oracle Database",
+        DATABASE,
+        ("oracle", "oracle db", "oracle sql", "plsql", "pl sql"),
+    ),
     SeedSkill("Microsoft SQL Server", DATABASE, ("sql server", "mssql", "t sql", "tsql")),
     SeedSkill("Neo4j", DATABASE),
     SeedSkill("pgvector", DATABASE, ("pg vector",), parent="PostgreSQL"),
@@ -427,6 +431,75 @@ SEED_SKILLS: tuple[SeedSkill, ...] = (
     SeedSkill("Critical Thinking", SOFT),
     SeedSkill("Adaptability", SOFT, ("flexibility",)),
     SeedSkill("Stakeholder Management", SOFT),
+    # ------------------------------------------------- added 2026-09-12, measured
+    #
+    # The skill-extraction evaluation found **24% of the skills a reader names in
+    # a posting had no entry here at all** — a ceiling on recall that no matcher
+    # change can lift. Every entry below was missing from a real posting in
+    # `ml/datasets/skill_extraction/`.
+    #
+    # **Only named things are added.** The same evaluation showed the existing
+    # generic entries (`Security`, `Scalability`, `Deployment`,
+    # `Software Engineering`) are what drive the false positives: a posting saying
+    # "optimize performance, scalability, and security" is describing the work,
+    # and the matcher cannot tell that from a requirement. So terms like
+    # "monitoring", "cloud computing", "data engineering", "artificial
+    # intelligence" and "distributed computing" were also missing and are
+    # deliberately **not** added — they would raise recall and cost more
+    # precision than they are worth.
+    SeedSkill("NoSQL", DATABASE),
+    SeedSkill("Snowflake", DATABASE),
+    SeedSkill("BigQuery", DATABASE, ("google bigquery",)),
+    # Oracle Database already had an entry; the gold label simply said "Oracle".
+    SeedSkill("Azure Synapse", CLOUD, ("synapse analytics",)),
+    SeedSkill("Microsoft Fabric", CLOUD),
+    SeedSkill("Amazon SageMaker", CLOUD, ("sagemaker",)),
+    SeedSkill("Amazon Kinesis", CLOUD, ("kinesis",)),
+    SeedSkill("Azure OpenAI", CLOUD),
+    SeedSkill("AWS CloudFormation", CLOUD, ("cloudformation",)),
+    SeedSkill("Azure DevOps", TOOL, ("vsts",)),
+    SeedSkill("Databricks", TOOL),
+    SeedSkill("Helm", TOOL),
+    SeedSkill("PagerDuty", TOOL),
+    SeedSkill("Prefect", TOOL),
+    SeedSkill("Power Query", TOOL),
+    SeedSkill("DAX", TOOL),
+    SeedSkill("Django REST Framework", FRAMEWORK, ("drf",), parent="Django"),
+    SeedSkill("Material-UI", FRAMEWORK, ("material ui", "mui"), parent="React"),
+    SeedSkill("React Hooks", FRAMEWORK, parent="React"),
+    SeedSkill("LlamaIndex", FRAMEWORK, ("llama index",)),
+    SeedSkill("LangGraph", FRAMEWORK),
+    SeedSkill("LangSmith", TOOL),
+    SeedSkill("Semantic Kernel", FRAMEWORK),
+    SeedSkill("DSPy", FRAMEWORK),
+    SeedSkill("CrewAI", FRAMEWORK, ("crew ai",)),
+    SeedSkill("vLLM", TOOL),
+    SeedSkill("SGLang", TOOL),
+    SeedSkill("TensorRT", TOOL),
+    SeedSkill("TensorRT-LLM", TOOL),
+    SeedSkill("DeepSpeed", TOOL),
+    SeedSkill("Ollama", TOOL),
+    SeedSkill("FAISS", TOOL),
+    SeedSkill("CUDA", TOOL),
+    SeedSkill("NCCL", TOOL),
+    SeedSkill("Anthropic", TOOL, ("anthropic claude",)),
+    SeedSkill("Google Gemini", TOOL, ("gemini",)),
+    SeedSkill("Mistral", TOOL),
+    SeedSkill("Llama", TOOL, ("llama 2", "llama 3")),
+    SeedSkill("Qwen", TOOL),
+    SeedSkill("LoRA", PRACTICE, ("qlora", "low-rank adaptation")),
+    SeedSkill("Quantization", PRACTICE),
+    SeedSkill("Vector Database", DATABASE, ("vector databases", "vector store")),
+    SeedSkill("Semantic Search", PRACTICE),
+    SeedSkill("SOAP", PRACTICE),
+    SeedSkill("WebRTC", PRACTICE),
+    SeedSkill("SIP", PRACTICE, ("session initiation protocol",)),
+    SeedSkill("JSON", PRACTICE),
+    SeedSkill("DevOps", PRACTICE),
+    SeedSkill("MLOps", PRACTICE),
+    SeedSkill("LLMOps", PRACTICE),
+    SeedSkill("Text Generation Inference", TOOL, ("tgi",)),
+    SeedSkill("Blockchain", PRACTICE),
 )
 
 

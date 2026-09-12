@@ -1,6 +1,6 @@
 # Skill extraction evaluation
 
-Generated 2026-09-12T10:28:34.842026+00:00. 30 job postings, 511 hand-written gold labels, against a taxonomy of 267 skills.
+Generated 2026-09-12T10:48:57.785095+00:00. 30 job postings, 511 hand-written gold labels, against a taxonomy of 319 skills.
 
 > Labels are Claude-written and pending human review. A weaker caveat than on the matching dataset: "does this posting name Kubernetes" has an answer a second reader can check against the text, unlike a relevance judgement.
 
@@ -8,8 +8,8 @@ Generated 2026-09-12T10:28:34.842026+00:00. 30 job postings, 511 hand-written go
 
 | | Precision | Recall | F1 |
 |---|---|---|---|
-| **Shipped extractor** | 0.670 | 0.948 | 0.785 |
-| Naive lookup (baseline) | 0.693 | 0.753 | 0.722 |
+| **Shipped extractor** | 0.703 | 0.949 | 0.808 |
+| Naive lookup (baseline) | 0.719 | 0.772 | 0.745 |
 | _ml.md target_ | 0.85 | 0.80 | 0.82 |
 
 Micro-averaged: pooled over every document, so a posting naming forty skills counts for more than one naming four. The macro average is in the JSON.
@@ -26,27 +26,27 @@ This is the same defect Phase 6.5 hit from the other side, where `Communication`
 
 ## The recall ceiling
 
-**122 of 511 gold skills (24%) are not in the taxonomy at all.** No matcher change can find them; only adding entries can. That share caps recall, and it is reported separately so a recall figure is never read as a verdict on the matching code when it is really a verdict on the word list.
+**36 of 511 gold skills (7%) are not in the taxonomy at all.** No matcher change can find them; only adding entries can. That share caps recall, and it is reported separately so a recall figure is never read as a verdict on the matching code when it is really a verdict on the word list.
 
 Most frequently missing:
 
 | Skill | Postings |
 |---|---|
-| NoSQL | 5 |
-| Anthropic | 4 |
-| DevOps | 4 |
-| MLOps | 4 |
 | monitoring | 4 |
-| Azure DevOps | 3 |
-| Databricks | 3 |
-| Django REST Framework | 3 |
-| LlamaIndex | 3 |
-| vector databases | 3 |
-| Azure OpenAI | 2 |
-| CloudFormation | 2 |
 | GPU | 2 |
-| LangGraph | 2 |
-| LangSmith | 2 |
+| artificial intelligence | 2 |
+| async programming | 2 |
+| cloud computing | 2 |
+| data engineering | 2 |
+| data warehousing | 2 |
+| distributed computing | 2 |
+| Big Data | 1 |
+| ISDN | 1 |
+| SRE | 1 |
+| TCP/UDP | 1 |
+| analytical skills | 1 |
+| attention to detail | 1 |
+| data integration | 1 |
 
 ## Where it goes wrong
 
@@ -71,12 +71,12 @@ Most frequently missing:
 | Embeddings | 2 |
 | Prompt Engineering | 2 |
 | REST API | 2 |
+| Amazon SageMaker | 1 |
 | Communication | 1 |
 | Database Design | 1 |
+| FAISS | 1 |
 | Hugging Face | 1 |
 | Keras | 1 |
 | LangChain | 1 |
-| Natural Language Processing | 1 |
-| OpenAI API | 1 |
-| Pinecone | 1 |
+| LangGraph | 1 |
 

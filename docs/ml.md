@@ -88,11 +88,19 @@ classifier's confidence weighting, which stays unmeasured.
 
 **Measured** (`ml/evaluation/results/skill_extraction.md`), 511 hand-written gold labels:
 
-| | Precision | Recall | F1 |
-|---|---|---|---|
-| **Shipped extractor** | 0.670 | **0.948** | 0.785 |
-| Naive lookup (the baseline below) | 0.693 | 0.753 | 0.722 |
-| _Target_ | 0.85 | 0.80 | 0.82 |
+| | Precision | Recall | F1 | Gold skills with no taxonomy entry |
+|---|---|---|---|---|
+| First measurement (267-skill taxonomy) | 0.670 | 0.948 | 0.785 | 122 (24%) |
+| **After the taxonomy gaps were filled** | **0.703** | **0.949** | **0.808** | **36 (7%)** |
+| Naive lookup (the baseline below) | 0.719 | 0.772 | 0.745 | — |
+| _Target_ | 0.85 | 0.80 | 0.82 | — |
+
+**The 52 added entries raised precision, which is not what adding vocabulary
+normally does.** The mechanism: a skill outside the taxonomy could never be found
+*or* scored, so `Databricks` in a posting was invisible to both sides. Adding it
+converts a silent omission into a true positive, lifting hits and predictions
+together. The usual recall-for-precision trade did not apply because nothing
+generic was added — see below.
 
 **Recall clears its target comfortably; precision does not, and precision is the one this document
 says matters more.** Three findings, in order of how much they should change what happens next.
@@ -108,15 +116,19 @@ a RESPONSIBILITIES block, which maps to REQUIRED at 0.80. This is the same defec
 other side, where `Communication` appeared in 45% of postings and flattened the skill dimension;
 rarity weighting treated the symptom and this is the cause.
 
-**2. A quarter of what a reader names is not in the taxonomy at all.** 122 of 511 gold labels (24%)
-have no entry — `NoSQL`, `Anthropic`, `DevOps`, `MLOps`, `Azure DevOps`, `Databricks`,
-`Django REST Framework`, `LlamaIndex`, `vector databases`. That is a hard ceiling on recall that no
-matcher change can lift, and the cheapest available improvement to the whole system: these are
-common, unambiguous, and adding them is data entry rather than modelling.
+**2. A quarter of what a reader names was not in the taxonomy at all — now 7%.** 122 of 511 gold
+labels had no entry: `NoSQL`, `Anthropic`, `MLOps`, `Azure DevOps`, `Databricks`,
+`Django REST Framework`, `LlamaIndex`, `vLLM`, `LoRA`. **52 entries were added on 2026-09-12**, and
+the selection rule came straight from finding 1: *named products, frameworks, libraries and specific
+techniques only*. The generic terms that were also missing — `monitoring`, `cloud computing`,
+`data engineering`, `artificial intelligence`, `distributed computing`, `Big Data` — were
+deliberately left out, because they are the same shape as the entries already driving the false
+positives above. They are most of the 36 still outside, which is the intended end state rather than
+unfinished work.
 
-**3. The baseline is beaten, but not everywhere.** Naive lookup gets *higher* precision (0.693 vs
-0.670) — alias resolution finds more, and more of what it finds is arguable. The shipped matcher
-earns its complexity on recall (0.948 vs 0.753) and F1, which is the right trade given the ceiling
+**3. The baseline is beaten, but not everywhere.** Naive lookup gets *higher* precision (0.719 vs
+0.703) — alias resolution finds more, and more of what it finds is arguable. The shipped matcher
+earns its complexity on recall (0.949 vs 0.772) and F1, which is the right trade given the ceiling
 above, but the honest summary is "wins on recall, loses slightly on precision", not "wins".
 
 Labels are Claude-written and pending human review. A weaker caveat than on the matching dataset —
