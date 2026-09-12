@@ -532,14 +532,42 @@ Query params: `limit`, `cursor`, `min_score`, `exclude_applied` (default `true`)
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/skills/search?q=` | Autocomplete over the taxonomy, alias-aware |
-| `GET` | `/skills/gaps` | Aggregate gaps across target roles |
-| `GET` | `/skills/gaps?job_id=` | Gaps against one specific job |
+| `GET` | `/skills/gaps` | Aggregate gaps across target roles — **built 2026-09-12** |
+| `GET` | `/skills/gaps?job_id=` | Gaps against one specific job — **built** |
 | `GET` | `/skills/demand` | Most in-demand skills for the caller's target roles |
 | `GET` | `/learning/paths` | List |
 | `POST` | `/learning/paths` | Generate for a role or job → `202` |
 | `GET` | `/learning/paths/{id}` | Detail with ordered steps |
 | `PATCH` | `/learning/paths/{id}/steps/{sid}` | Mark a step complete |
 | `DELETE` | `/learning/paths/{id}` | `204` |
+
+> **`GET /skills/gaps` shipped 2026-09-12 (US-5.1).** Returns each skill the target asks for with a
+> `status` (`STRONG` / `PARTIAL` / `MISSING`), a `severity`
+> (`CRITICAL` / `HIGH` / `MEDIUM` / `LOW`), the weighted `frequency` across the target set, and the
+> `job_count` behind it. `target_jobs` is returned alongside, because a report built from four
+> postings is a different claim from one built from ninety and a reader who cannot see the
+> denominator will over-read a small sample.
+>
+> Always 200. `availability` separates the two empty cases that are *not* "you have no gaps":
+> **NO_TARGET** (no target roles set) and **NO_JOBS** (roles set, nothing live matches them).
+> Collapsing them into an empty list would congratulate someone on a completeness nobody measured.
+>
+> **Computed per request; the `skill_gaps` table in database.md is not built.** Same reasoning
+> ADR-006 gives for not caching match scores: a gap depends on the user's skills, which change the
+> moment they edit their profile, and on a corpus that changes daily. A stored row would be wrong
+> more often than right.
+>
+> **Severity follows US-5.1 AC2, not database.md's sketch.** The sketch says
+> `demand_score * requirement weight`, where `demand_score` is the share of *every* active posting
+> wanting a skill. That measures market commonness, not relevance to the person asking — someone
+> targeting ML roles does not need to know 45% of all jobs mention communication. Frequency is
+> therefore measured within the target set, weighted by `SKILL_REQUIREMENT_WEIGHT` (1.0 required /
+> 0.5 preferred), the same weights the ranking formula uses.
+>
+> **Target jobs are found by title match, not semantically.** This feature tells someone what to go
+> and learn, so "these are the jobs I looked at" has to be answerable, and "your title says Data
+> Engineer" is checkable in a way "the embedding thought it was close" is not. The cost is real: a
+> role written "Backend Engineer" misses a posting titled "Software Engineer II, Platform".
 
 ---
 

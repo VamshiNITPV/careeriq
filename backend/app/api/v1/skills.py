@@ -10,6 +10,8 @@ from fastapi import APIRouter, Query
 from app.api.deps import (
     CandidateSkillRepositoryDep,
     CurrentUser,
+    DbSession,
+    ProfileServiceDep,
     ResumeVersionRepositoryDep,
     SkillRepositoryDep,
 )
@@ -28,6 +30,8 @@ from app.schemas.resume import (
     CandidateSkillUpdate,
     SkillRead,
 )
+from app.schemas.skill_gap import SkillGapRead, SkillGapsResponse
+from app.services.skill.gaps import compute_gaps
 
 skills_router = APIRouter(prefix="/skills", tags=["skills"])
 profile_skills_router = APIRouter(prefix="/profile/skills", tags=["profile"])
@@ -219,3 +223,63 @@ async def delete_skill(
     # re-extraction on 2026-09-12. The tombstone is what makes the removal stick.
     await candidate_skills.reject(row)
     return MessageResponse(message="Skill removed.")
+
+
+@skills_router.get(
+    "/gaps",
+    response_model=SkillGapsResponse,
+    summary="What you are missing, against your target roles or one job",
+)
+async def skill_gaps(
+    user: CurrentUser,
+    session: DbSession,
+    profiles: ProfileServiceDep,
+    job_id: Annotated[uuid.UUID | None, Query(description="Gaps against this job alone.")] = None,
+) -> SkillGapsResponse:
+    """Skills the target asks for, and whether the caller has them (US-5.1).
+
+    **Computed per request, never stored.** `database.md` specifies a
+    `skill_gaps` table; it is not built, for the reason ADR-006 gives for not
+    caching match scores — a gap depends on the user's skills and on a corpus
+    that changes daily, so a stored row would be wrong more often than right.
+
+    Always 200. `availability` carries the two ways `items` can be empty that are
+    not "you have no gaps": **NO_TARGET** when no target roles are set, and
+    **NO_JOBS** when roles are set but no live posting matches them. Collapsing
+    those into an empty list would congratulate someone on a completeness they
+    have not been measured for — the same mistake the recommendations endpoint
+    avoids with its own `availability`.
+    """
+    profile = await profiles.ensure(user.id)
+    report = await compute_gaps(
+        session,
+        user_id=user.id,
+        target_roles=list(profile.target_roles or []),
+        job_id=job_id,
+    )
+
+    if job_id is None and not report.target_roles:
+        availability = "NO_TARGET"
+    elif report.target_jobs == 0:
+        availability = "NO_JOBS"
+    else:
+        availability = "READY"
+
+    return SkillGapsResponse(
+        items=[
+            SkillGapRead(
+                skill_id=gap.skill_id,
+                name=gap.name,
+                category=gap.category,
+                status=gap.status,
+                severity=gap.severity,
+                frequency=gap.frequency,
+                job_count=gap.job_count,
+            )
+            for gap in report.gaps
+        ],
+        target_jobs=report.target_jobs,
+        target_roles=report.target_roles,
+        job_id=report.job_id,
+        availability=availability,
+    )
