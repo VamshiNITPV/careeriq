@@ -122,8 +122,23 @@ async def add_skill(
             skills.add(skill)
             await skills.flush()
 
-    if await candidate_skills.get_for_skill(user.id, skill.id) is not None:
-        raise DuplicateResourceError("That skill is already on your profile.")
+    existing_row = await candidate_skills.get_for_skill(user.id, skill.id)
+    if existing_row is not None:
+        if not existing_row.is_rejected:
+            raise DuplicateResourceError("That skill is already on your profile.")
+        # Adding back something previously removed. The tombstone is the only
+        # thing standing in the way, and clearing it here is the only way it
+        # clears — asking the user to remove a skill they cannot see would be
+        # the obvious dead end.
+        existing_row.is_rejected = False
+        existing_row.is_user_verified = True
+        # Provenance is dropped: the user typed this in, so it is no longer
+        # derived from any resume and must not be swept away when one is
+        # deleted. `delete_for_resume` keys on `source_version_id` precisely so
+        # hand-added skills survive.
+        existing_row.source_version_id = None
+        await candidate_skills.flush()
+        return CandidateSkillRead.model_validate(existing_row)
 
     # Ownership is checked before the id is trusted: an unchecked version id
     # would let a caller attach their skill to somebody else's resume.
@@ -199,5 +214,8 @@ async def delete_skill(
     if row is None:
         raise ResourceNotFoundError("Skill")
 
-    await candidate_skills.delete(row)
+    # Marked, not deleted. A deleted row cannot survive the next parse of the
+    # same resume, so the skill reappeared — reported once, then reproduced by a
+    # re-extraction on 2026-09-12. The tombstone is what makes the removal stick.
+    await candidate_skills.reject(row)
     return MessageResponse(message="Skill removed.")

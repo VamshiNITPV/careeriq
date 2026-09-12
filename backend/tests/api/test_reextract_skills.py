@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
 from httpx import AsyncClient
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.job.reextract_skills import reextract_job_skills
@@ -166,3 +168,90 @@ class TestCandidateSkills:
             text("SELECT count(*) FROM candidate_skills WHERE skill_id = :s"), {"s": skill_id}
         )
         assert still_there == 1
+
+
+class TestRejectionSurvives:
+    """The bug this column exists for.
+
+    Removing a skill used to delete the row, which records that the skill is
+    absent but not that anyone decided it should be — so the next parse found
+    the term and put it straight back. Reported early in the project, then
+    reproduced on 2026-09-12 when a taxonomy change triggered a re-extraction.
+    """
+
+    async def test_a_removed_skill_does_not_come_back(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        run_pipeline,
+    ) -> None:
+        await upload_and_parse(client, auth_headers, run_pipeline)
+
+        listed = (await client.get(f"{API}/profile/skills", headers=auth_headers)).json()
+        assert listed, "the fixture resume should yield at least one skill"
+        target = listed[0]
+
+        removed = await client.delete(f"{API}/profile/skills/{target['id']}", headers=auth_headers)
+        assert removed.status_code == 200, removed.text
+
+        # Gone from the profile immediately.
+        after_delete = (await client.get(f"{API}/profile/skills", headers=auth_headers)).json()
+        assert target["id"] not in [row["id"] for row in after_delete]
+
+        # And still gone after the resume is read again, which is the part that
+        # used to fail.
+        await reextract_candidate_skills(db_session)
+        await db_session.commit()
+
+        after_reextract = (await client.get(f"{API}/profile/skills", headers=auth_headers)).json()
+        names = [row["skill"]["name"] for row in after_reextract]
+        assert target["skill"]["name"] not in names
+
+    async def test_adding_it_back_clears_the_rejection(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        run_pipeline,
+    ) -> None:
+        """The only way the tombstone clears.
+
+        Without this the user would be stuck: a skill they removed by accident
+        could never be added back, and the control that would fix it is hidden
+        by the very row that needs changing.
+        """
+        await upload_and_parse(client, auth_headers, run_pipeline)
+        listed = (await client.get(f"{API}/profile/skills", headers=auth_headers)).json()
+        target = listed[0]
+        await client.delete(f"{API}/profile/skills/{target['id']}", headers=auth_headers)
+
+        added = await client.post(
+            f"{API}/profile/skills",
+            headers=auth_headers,
+            json={"skill_id": target["skill"]["id"]},
+        )
+
+        assert added.status_code in (200, 201), added.text
+        back = (await client.get(f"{API}/profile/skills", headers=auth_headers)).json()
+        assert target["skill"]["name"] in [row["skill"]["name"] for row in back]
+
+    async def test_a_row_cannot_be_both_confirmed_and_refused(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        run_pipeline,
+    ) -> None:
+        """They are contradictory claims, and the CHECK makes that unreachable."""
+        await upload_and_parse(client, auth_headers, run_pipeline)
+
+        with pytest.raises(IntegrityError):
+            await db_session.execute(
+                text("UPDATE candidate_skills SET is_user_verified = true, is_rejected = true")
+            )
+            await db_session.flush()
+        await db_session.rollback()

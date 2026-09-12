@@ -127,6 +127,20 @@ class CandidateSkill(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         Boolean, nullable=False, default=False, server_default=text("false")
     )
 
+    # The user removed this skill on purpose, and it must not come back.
+    #
+    # A tombstone rather than a deletion, because a deleted row records that the
+    # skill is absent but not that anyone *decided* it should be — so the next
+    # parse of the same resume found the term again and re-added it. That was
+    # reported as a bug and then reproduced by a re-extraction on 2026-09-12.
+    #
+    # Mutually exclusive with `is_user_verified` by CHECK: confirmed and refused
+    # are contradictory claims about the same row. Cleared only by the user
+    # adding the skill back.
+    is_rejected: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+
     last_used_year: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
 
     skill: Mapped[Skill] = relationship(lazy="joined")
@@ -142,5 +156,9 @@ class CandidateSkill(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         CheckConstraint(
             "years_of_experience IS NULL OR years_of_experience >= 0",
             name="years_non_negative",
+        ),
+        CheckConstraint(
+            "NOT (is_user_verified AND is_rejected)",
+            name="verified_or_rejected_not_both",
         ),
     )

@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import Select, delete, func, or_, select
+from sqlalchemy import Select, and_, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.data.skill_taxonomy import normalize_skill_text
@@ -106,7 +106,10 @@ class CandidateSkillRepository(BaseRepository[CandidateSkill]):
     async def list_for_user(self, user_id: uuid.UUID) -> list[CandidateSkill]:
         stmt = (
             select(CandidateSkill)
-            .where(CandidateSkill.user_id == user_id)
+            # Rejected rows stay in the table as tombstones, so every read of a
+            # *profile* has to exclude them. Returning one would show the user a
+            # skill they removed.
+            .where(CandidateSkill.user_id == user_id, CandidateSkill.is_rejected.is_(False))
             .order_by(CandidateSkill.is_user_verified.desc(), CandidateSkill.created_at)
         )
         return list((await self.session.scalars(stmt)).all())
@@ -161,11 +164,33 @@ class CandidateSkillRepository(BaseRepository[CandidateSkill]):
                     "extraction_confidence": confidence,
                     "source_version_id": source_version_id,
                 },
-                where=CandidateSkill.is_user_verified.is_(False),
+                # Two refusals, not one. `is_user_verified` stops a re-parse
+                # reverting a correction; `is_rejected` stops it undoing a
+                # removal. Both live in SQL rather than in a read-then-decide,
+                # so a concurrent edit cannot slip between.
+                where=and_(
+                    CandidateSkill.is_user_verified.is_(False),
+                    CandidateSkill.is_rejected.is_(False),
+                ),
             )
         )
         result = await self.session.execute(statement)
         return bool(result.rowcount)
+
+    async def reject(self, row: CandidateSkill) -> None:
+        """Record that the user removed this skill, rather than dropping the row.
+
+        A delete says the skill is absent; it does not say anyone decided it
+        should be, so the next parse of the same resume finds the term and puts
+        it straight back. That is the reported bug this exists for.
+
+        `is_user_verified` is cleared at the same time because the two are
+        exclusive — the CHECK enforces it — and a row that was confirmed and is
+        now refused should carry only the newer decision.
+        """
+        row.is_rejected = True
+        row.is_user_verified = False
+        await self.session.flush()
 
     async def names_for_user(self, user_id: uuid.UUID) -> set[str]:
         """Canonical names already on this user's profile.
@@ -177,6 +202,9 @@ class CandidateSkillRepository(BaseRepository[CandidateSkill]):
         stmt = (
             select(Skill.name)
             .join(CandidateSkill, CandidateSkill.skill_id == Skill.id)
+            # Rejected included on purpose, unlike `list_for_user`: this set
+            # filters *suggestions*, and re-offering a skill the user just
+            # removed is the same nag in a different place.
             .where(CandidateSkill.user_id == user_id)
         )
         return set((await self.session.scalars(stmt)).all())

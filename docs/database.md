@@ -580,6 +580,26 @@ ALTER TABLE applications ADD CONSTRAINT ck_applications_applied_has_timestamp
 > DELETE FROM jobs WHERE source = 'PARTNER_API';
 > ```
 
+> **`is_rejected` added 2026-09-12.** Removing a skill from a profile used to delete the row, which
+> records that the skill is absent but not that anyone *decided* it should be — so the next parse of
+> the same resume found the term and re-added it. Reported early ("when I delete the file why those
+> extracted skills will come again"), and reproduced when a taxonomy change triggered a
+> re-extraction and returned four cleared skills to live profiles.
+>
+> The row now stays and carries the decision. `CHECK (NOT (is_user_verified AND is_rejected))` keeps
+> the two exclusive: confirmed and refused are contradictory claims about the same row. Extraction
+> skips rejected rows, profile reads hide them, suggestion filtering *includes* them (re-offering a
+> removed skill is the same nag elsewhere), and adding the skill back by hand is the only thing that
+> clears the flag.
+>
+> **Deleting a resume still hard-deletes its skills**, and the difference is deliberate: removing one
+> skill is a judgement about the skill, while removing the document takes its derived rows with it
+> because they no longer have anything to trace to. Tombstones there would mean re-uploading the
+> same resume produced nothing.
+>
+> No backfill is possible. Rows deleted before this column existed left no trace, so decisions made
+> earlier cannot be recovered.
+
 #### `application_events`
 Immutable audit log (US-7.1 AC2). **Not built** — it arrives with the status lifecycle it
 records, which US-7.0 deliberately omits.
