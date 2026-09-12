@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { to: '/dashboard', label: 'Dashboard' },
   { to: '/resume', label: 'Resume' },
   { to: '/jobs', label: 'Jobs' },
+  { to: '/skill-gaps', label: 'Skills' },
 ] as const
 
 function MenuIcon({ open }: { open: boolean }) {

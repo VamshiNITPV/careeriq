@@ -16,6 +16,7 @@ import { ResetPasswordPage } from '@/pages/ResetPasswordPage'
 import { ResumeDetailPage } from '@/pages/ResumeDetailPage'
 import { ResumePage } from '@/pages/ResumePage'
 import { SavedJobsPage } from '@/pages/SavedJobsPage'
+import { SkillGapsPage } from '@/pages/SkillGapsPage'
 import { VerifyEmailPage } from '@/pages/VerifyEmailPage'
 import { ApiError } from '@/services/apiClient'
 
@@ -78,6 +79,7 @@ export function App() {
                     declaration order for correctness is the trap the
                     comment above already describes. */}
                 <Route path="/saved-jobs" element={<SavedJobsPage />} />
+                <Route path="/skill-gaps" element={<SkillGapsPage />} />
               </Route>
             </Route>
 
