@@ -24,6 +24,7 @@ from app.core.ids import uuid7
 from app.data.skill_taxonomy import normalize_skill_text
 from app.models.skill import CandidateSkill, Skill
 from app.schemas.common import ErrorResponse, MessageResponse
+from app.schemas.learning import LearningPathResponse, LearningStepRead
 from app.schemas.resume import (
     CandidateSkillCreate,
     CandidateSkillRead,
@@ -32,6 +33,7 @@ from app.schemas.resume import (
 )
 from app.schemas.skill_gap import SkillGapRead, SkillGapsResponse
 from app.services.skill.gaps import compute_gaps
+from app.services.skill.learning import build_plan
 
 skills_router = APIRouter(prefix="/skills", tags=["skills"])
 profile_skills_router = APIRouter(prefix="/profile/skills", tags=["profile"])
@@ -281,5 +283,72 @@ async def skill_gaps(
         target_jobs=report.target_jobs,
         target_roles=report.target_roles,
         job_id=report.job_id,
+        availability=availability,
+    )
+
+
+@skills_router.get(
+    "/learning-path",
+    response_model=LearningPathResponse,
+    summary="What to learn, in the order to learn it",
+)
+async def learning_path(
+    user: CurrentUser,
+    session: DbSession,
+    profiles: ProfileServiceDep,
+    job_id: Annotated[uuid.UUID | None, Query(description="Plan for this job alone.")] = None,
+) -> LearningPathResponse:
+    """An ordered study plan built from the caller's gaps (US-5.2).
+
+    **Dependency first, then severity.** A prerequisite is a hard constraint —
+    being told to learn Kubernetes before Docker is not merely suboptimal, it is
+    advice that does not work. Among steps whose prerequisites are already met,
+    the most in-demand comes first.
+
+    **Derived, not stored.** `database.md` specifies `learning_paths` and
+    `learning_path_steps`; neither is built yet, and the reasoning is the same as
+    for `/skills/gaps` — the plan is a function of gaps that move when the user
+    edits their profile and when the corpus changes overnight. What a stored path
+    would genuinely add is *progress*: ticking a step off is a decision, and a
+    decision has to outlive a recomputation. That is a table for completions, and
+    it belongs with the interface that offers the tick rather than being guessed
+    at now.
+
+    Steps cover only skills with curated guidance; `skipped_uncurated` counts the
+    rest. Padding a study plan with "learn X, 12 hours, be able to use X" would
+    make the real steps harder to trust, so the gap is reported instead of
+    invented.
+    """
+    profile = await profiles.ensure(user.id)
+    roles = list(profile.target_roles or [])
+    report = await compute_gaps(session, user_id=user.id, target_roles=roles, job_id=job_id)
+
+    if job_id is None and not report.target_roles:
+        availability = "NO_TARGET"
+    elif report.target_jobs == 0:
+        availability = "NO_JOBS"
+    else:
+        availability = "READY"
+
+    plan = build_plan(report.gaps)
+
+    return LearningPathResponse(
+        steps=[
+            LearningStepRead(
+                position=step.position,
+                skill_id=step.skill_id,
+                name=step.name,
+                severity=step.severity,
+                estimated_hours=step.hours,
+                outcome=step.outcome,
+                after=list(step.after),
+            )
+            for step in plan.steps
+        ],
+        total_hours=plan.total_hours,
+        target_jobs=report.target_jobs,
+        target_roles=report.target_roles,
+        job_id=report.job_id,
+        skipped_uncurated=plan.skipped_uncurated,
         availability=availability,
     )

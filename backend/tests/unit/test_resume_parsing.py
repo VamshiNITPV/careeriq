@@ -412,3 +412,74 @@ class TestTaxonomyData:
             for alias in skill.normalized_aliases:
                 assert alias not in seen, f"'{alias}' claimed by {seen.get(alias)} and {skill.name}"
                 seen[alias] = skill.name
+
+
+class TestLearningCuration:
+    """The curated learning data, checked against the taxonomy it names.
+
+    Both files are hand-maintained and refer to each other by canonical name, so
+    a rename in one silently breaks the other. Four entries were already wrong
+    when this was written — `Kafka` for `Apache Kafka`, `NLP` for
+    `Natural Language Processing` — and nothing would have reported it: a skill
+    whose name does not resolve simply produces no step, so the path would have
+    been quietly shorter than it should be.
+    """
+
+    def test_every_curated_skill_exists_in_the_taxonomy(self) -> None:
+        from app.data.learning import CURATED
+
+        names = {s.name for s in SEED_SKILLS}
+        unknown = sorted(name for name in CURATED if name not in names)
+        assert unknown == [], f"curated skills missing from the taxonomy: {unknown}"
+
+    def test_every_prerequisite_exists_in_the_taxonomy(self) -> None:
+        from app.data.learning import CURATED
+
+        names = {s.name for s in SEED_SKILLS}
+        unknown = sorted(
+            {p for step in CURATED.values() for p in step.prerequisites if p not in names}
+        )
+        assert unknown == [], f"prerequisites missing from the taxonomy: {unknown}"
+
+    def test_every_prerequisite_is_itself_curated(self) -> None:
+        """Otherwise a path could require a step it has no guidance for, and the
+        reader would be told to learn something with no outcome attached."""
+        from app.data.learning import CURATED
+
+        unknown = sorted(
+            {p for step in CURATED.values() for p in step.prerequisites if p not in CURATED}
+        )
+        assert unknown == [], f"prerequisites with no curation of their own: {unknown}"
+
+    def test_the_prerequisite_graph_has_no_cycles(self) -> None:
+        """A cycle makes the ordering impossible, and the generator would either
+        loop or silently drop steps depending on how it was written."""
+        from app.data.learning import CURATED
+
+        state: dict[str, int] = {}
+
+        def visit(name: str, trail: tuple[str, ...]) -> None:
+            if state.get(name) == 2:
+                return
+            assert state.get(name) != 1, f"cycle: {' -> '.join([*trail, name])}"
+            state[name] = 1
+            for prerequisite in CURATED.get(name, None).prerequisites if name in CURATED else ():
+                visit(prerequisite, (*trail, name))
+            state[name] = 2
+
+        for name in CURATED:
+            visit(name, ())
+
+    def test_every_step_states_a_concrete_outcome(self) -> None:
+        """US-5.2 AC2. An empty outcome would render as a step with nothing to
+        check, which is worse than no step at all."""
+        from app.data.learning import CURATED
+
+        assert [name for name, step in CURATED.items() if not step.outcome.strip()] == []
+
+    def test_hours_are_positive_and_plausible(self) -> None:
+        # A rough estimate, but not a nonsensical one: zero would render as a
+        # free step and 500 would be a career rather than a step.
+        from app.data.learning import CURATED
+
+        assert [n for n, s in CURATED.items() if not 1 <= s.hours <= 120] == []

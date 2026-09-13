@@ -535,11 +535,12 @@ Query params: `limit`, `cursor`, `min_score`, `exclude_applied` (default `true`)
 | `GET` | `/skills/gaps` | Aggregate gaps across target roles — **built 2026-09-12** |
 | `GET` | `/skills/gaps?job_id=` | Gaps against one specific job — **built** |
 | `GET` | `/skills/demand` | Most in-demand skills for the caller's target roles |
-| `GET` | `/learning/paths` | List |
-| `POST` | `/learning/paths` | Generate for a role or job → `202` |
-| `GET` | `/learning/paths/{id}` | Detail with ordered steps |
-| `PATCH` | `/learning/paths/{id}/steps/{sid}` | Mark a step complete |
-| `DELETE` | `/learning/paths/{id}` | `204` |
+| `GET` | `/skills/learning-path` | Ordered study plan — **built 2026-09-13** |
+| `GET` | `/learning/paths` | List — *not built, see below* |
+| `POST` | `/learning/paths` | Generate for a role or job → `202` — *not built* |
+| `GET` | `/learning/paths/{id}` | Detail with ordered steps — *not built* |
+| `PATCH` | `/learning/paths/{id}/steps/{sid}` | Mark a step complete — *not built* |
+| `DELETE` | `/learning/paths/{id}` | `204` — *not built* |
 
 > **`GET /skills/gaps` shipped 2026-09-12 (US-5.1).** Returns each skill the target asks for with a
 > `status` (`STRONG` / `PARTIAL` / `MISSING`), a `severity`
@@ -568,6 +569,36 @@ Query params: `limit`, `cursor`, `min_score`, `exclude_applied` (default `true`)
 > and learn, so "these are the jobs I looked at" has to be answerable, and "your title says Data
 > Engineer" is checkable in a way "the embedding thought it was close" is not. The cost is real: a
 > role written "Backend Engineer" misses a posting titled "Software Engineer II, Platform".
+
+> **`GET /skills/learning-path` shipped 2026-09-13 (US-5.2), and it is one endpoint rather than
+> five.** The CRUD set above assumes a stored, addressable path; this returns the plan derived from
+> the caller's current gaps, with `?job_id=` to plan for one posting.
+>
+> **Dependency first, then severity.** A prerequisite is a hard constraint — being told to learn
+> Kubernetes before Docker is not merely suboptimal advice, it is advice that does not work. Within
+> the steps whose prerequisites are already met, the most in-demand comes first. Implemented as a
+> repeated "take the most urgent available step" rather than a severity sort with a fix-up pass,
+> because the fix-up is where the subtle bug lives.
+>
+> **Prerequisites come from a curated list** (`app/data/learning.py`), not from the taxonomy and not
+> from the corpus. `parent_skill_id` is categorisation — TypeScript is a child of JavaScript, but
+> React is not, and you still cannot learn React first. Co-occurrence in adverts is not pedagogy
+> either: postings pair Python with AWS constantly and neither precedes the other. A judgement list
+> is small and arguable, which beats an unfalsifiable inference.
+>
+> **`estimated_hours` is an estimate and is named one.** There is no dataset of how long people take
+> to learn things. The numbers are ordered sensibly against each other, which is what matters for
+> sequencing; absolute accuracy is not claimed and the interface should not imply it.
+>
+> **Only curated skills become steps**, and `skipped_uncurated` counts the rest. Padding a study
+> plan with "learn X, 12 hours, be able to use X" would make the real steps harder to trust, so the
+> omission is reported rather than invented over.
+>
+> **The `learning_paths` tables are not built.** Same reasoning as `/skills/gaps`: the plan is a
+> function of gaps that move when the profile is edited and when the corpus changes overnight. What
+> a stored path would genuinely add is *progress* — ticking a step off is a decision, and a decision
+> has to outlive a recomputation. That is a completions table, and it belongs with the interface
+> that offers the tick.
 
 ---
 
