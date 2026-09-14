@@ -128,8 +128,16 @@ describe('ResumeDetailPage', () => {
 
     await waitFor(() => expect(getVersion).toHaveBeenCalledWith('v7'))
     expect(await screen.findByText('No text could be extracted.')).toBeInTheDocument()
-    // The file still previews — extraction failed, not the upload.
-    expect(screen.getByTitle('Preview of resume.pdf')).toBeInTheDocument()
+    /*
+     * The file still previews — extraction failed, not the upload.
+     *
+     * `findByTitle`, not `getByTitle`. The error message and the file preview
+     * come from two independent fetches, so awaiting the first says nothing
+     * about the second: on a fast machine both have resolved by now, and under
+     * load the preview is still a spinner. This was a synchronous `getByTitle`
+     * and it passed locally for months before failing on the first CI run.
+     */
+    expect(await screen.findByTitle('Preview of resume.pdf')).toBeInTheDocument()
   })
 
   it('survives a version parsed before those fields existed', async () => {
