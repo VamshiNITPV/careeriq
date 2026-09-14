@@ -94,6 +94,39 @@ class Settings(BaseSettings):
     # measured running past 45s and returning nothing — having been billed all
     # the same (2026-09-07, see services/job/rotation.py).
     jobs_api_timeout_seconds: int = Field(default=60, ge=5, le=120)
+
+    # ---- llm (ADR-007) ---------------------------------------------------
+    # none   -> AI endpoints answer 503 and say so
+    # gemini -> a real provider, needs GEMINI_API_KEY
+    # fake   -> scripted replies for a local walkthrough; refused in prod
+    #
+    # "none" by default for the same reason as jobs: there is no harmless
+    # fallback. A stub returning canned resume suggestions would put text in
+    # front of a user that no model wrote, and imply a validation that never
+    # happened.
+    llm_provider: str = "none"
+    gemini_api_key: str = ""
+    # Flash rather than Pro: the free tier's limits are per-model, these tasks
+    # are constrained rewriting rather than reasoning, and latency is in a user's
+    # request path. Overridable without a code change if that turns out wrong.
+    #
+    # Pinned to an exact version rather than a floating `gemini-flash-latest`,
+    # so a result can be traced to the model that produced it -- the same reason
+    # embeddings store `model_name`/`model_version`. An alias that silently moves
+    # turns a quality change into an unreproducible one.
+    #
+    # 2.5-flash was the first choice and is **closed to new API keys**: it still
+    # appears in ListModels but answers 404 with "no longer available to new
+    # users". Found by calling the real API, which no amount of mocked testing
+    # would have surfaced.
+    gemini_model: str = "gemini-3.6-flash"
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
+    llm_timeout_seconds: int = Field(default=60, ge=5, le=180)
+    # Low on purpose. Every current task is constrained rewriting or structured
+    # extraction, where a more creative sampler mainly produces more ways to be
+    # wrong -- and for resume text, invention is the failure the whole feature
+    # exists to prevent (ADR-012).
+    llm_temperature: float = Field(default=0.2, ge=0.0, le=1.0)
     #: Which country the scheduled fetch searches.
     jobs_fetch_country: str = "in"
 
@@ -276,6 +309,18 @@ class Settings(BaseSettings):
             raise ValueError("JOBS_API_KEY is required when JOBS_PROVIDER is 'jsearch'.")
         return self
 
+    @model_validator(mode="after")
+    def _llm_provider_is_usable(self) -> Settings:
+        allowed = {"none", "gemini", "fake"}
+        if self.llm_provider not in allowed:
+            raise ValueError(f"LLM_PROVIDER must be one of {sorted(allowed)}")
+        # Fail at startup rather than at the first user request. A provider
+        # configured without its key looks fine until someone uploads a resume
+        # and waits for a suggestion that was never going to come.
+        if self.llm_provider == "gemini" and not self.gemini_api_key.strip():
+            raise ValueError("GEMINI_API_KEY is required when LLM_PROVIDER is 'gemini'.")
+        return self
+
     def _check_production_hardening(self) -> None:
         """Settings that are merely unwise in development are fatal in production."""
         if not self.is_production:
@@ -301,6 +346,10 @@ class Settings(BaseSettings):
             # Synthetic postings in a live corpus are invented market data that
             # real candidates would be ranked against (ADR-012, ADR-019).
             problems.append("JOBS_PROVIDER must not be 'fake' in production.")
+        if self.llm_provider == "fake":
+            # Scripted replies presented as resume advice are text no model
+            # wrote, implying a validation that never ran (ADR-012).
+            problems.append("LLM_PROVIDER must not be 'fake' in production.")
         if self.frontend_base_url.startswith("http://"):
             problems.append("FRONTEND_BASE_URL must use https in production.")
         if self.storage_provider == "local":
