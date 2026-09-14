@@ -105,6 +105,76 @@ class TestDependencyOrder:
         assert order(plan) == ["Kubernetes"]
 
 
+class TestTickingAStepOff:
+    """What a completion does to the plan.
+
+    Ticking a step is the user saying "I have studied this". That is a different
+    assertion from "this is on my resume", and the plan has to honour the first
+    without waiting for the second.
+    """
+
+    def test_a_studied_prerequisite_unblocks_what_follows(self) -> None:
+        """The central claim of US-5.2's checkbox.
+
+        Docker is ticked but still missing from the profile — nobody updates a
+        resume the moment they finish a tutorial. If a completion did not satisfy
+        the prerequisite, Kubernetes would stay blocked behind a step the reader
+        has already done, leaving them stuck behind their own honesty.
+
+        Redis is here to make the claim measurable. With only Docker and
+        Kubernetes the order is "Docker, Kubernetes" either way — as a
+        prerequisite if the completion counts, and as a finished step sorted to
+        the front if it does not — so the two behaviours are indistinguishable.
+        A third, unrelated, *more* urgent step separates them: Kubernetes can
+        only outrank Redis if it is unblocked on the first pass.
+        """
+        docker = gap("Docker", severity=GapSeverity.LOW, frequency="0.10")
+        kubernetes = gap("Kubernetes", severity=GapSeverity.CRITICAL, frequency="0.90")
+        redis = gap("Redis", severity=GapSeverity.HIGH, frequency="0.50")
+
+        plan = build_plan([kubernetes, redis, docker], completed_skill_ids={docker.skill_id})
+
+        steps = {step.name: step for step in plan.steps}
+        assert steps["Docker"].completed is True
+        assert steps["Kubernetes"].completed is False
+        # Kubernetes beats Redis on severity, which it can only do from the first
+        # pass — i.e. only if the tick satisfied its prerequisite.
+        assert order(plan) == ["Docker", "Kubernetes", "Redis"]
+
+    def test_a_finished_step_stays_in_the_plan(self) -> None:
+        """The list is a route being walked. Dropping the finished parts removes
+        the only evidence of progress there is."""
+        docker = gap("Docker")
+
+        plan = build_plan([docker], completed_skill_ids={docker.skill_id})
+
+        assert order(plan) == ["Docker"]
+        assert plan.steps[0].completed is True
+
+    def test_hours_left_discount_what_is_done_but_the_total_does_not(self) -> None:
+        """Both numbers are reported: "20 of 60 hours left" says something "20
+        hours" alone does not."""
+        docker = gap("Docker")
+        kubernetes = gap("Kubernetes")
+
+        plan = build_plan([kubernetes, docker], completed_skill_ids={docker.skill_id})
+
+        done_hours = next(s.hours for s in plan.steps if s.name == "Docker")
+        assert plan.total_hours == sum(step.hours for step in plan.steps)
+        assert plan.remaining_hours == plan.total_hours - done_hours
+
+    def test_no_completions_is_the_same_plan_as_before(self) -> None:
+        """The argument is optional, and absent it must change nothing — every
+        other test in this file calls `build_plan` without it."""
+        gaps = [
+            gap("Kubernetes", severity=GapSeverity.CRITICAL, frequency="0.90"),
+            gap("Docker", severity=GapSeverity.LOW, frequency="0.10"),
+        ]
+
+        assert order(build_plan(gaps, completed_skill_ids=set())) == order(build_plan(gaps))
+        assert order(build_plan(gaps, completed_skill_ids=None)) == ["Docker", "Kubernetes"]
+
+
 class TestSeverityWithinWhatIsUnblocked:
     def test_the_most_urgent_available_step_comes_first(self) -> None:
         plan = build_plan(

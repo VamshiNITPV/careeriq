@@ -39,7 +39,11 @@ from app.repositories.matching import MatchingRepository
 from app.repositories.recommendation import RecommendationFeedbackRepository
 from app.repositories.refresh_token import RefreshTokenRepository
 from app.repositories.resume import ResumeRepository, ResumeVersionRepository
-from app.repositories.skill import CandidateSkillRepository, SkillRepository
+from app.repositories.skill import (
+    CandidateSkillRepository,
+    LearningCompletionRepository,
+    SkillRepository,
+)
 from app.repositories.user import ProfileRepository, UserRepository
 from app.repositories.verification import VerificationTokenRepository
 from app.services.auth import AuthService
@@ -118,6 +122,10 @@ def get_skill_repository(session: DbSession) -> SkillRepository:
 
 def get_candidate_skill_repository(session: DbSession) -> CandidateSkillRepository:
     return CandidateSkillRepository(session)
+
+
+def get_learning_completion_repository(session: DbSession) -> LearningCompletionRepository:
+    return LearningCompletionRepository(session)
 
 
 def get_application_repository(session: DbSession) -> ApplicationRepository:
@@ -255,6 +263,9 @@ ResumeVersionRepositoryDep = Annotated[
 ]
 CandidateSkillRepositoryDep = Annotated[
     CandidateSkillRepository, Depends(get_candidate_skill_repository)
+]
+LearningCompletionRepositoryDep = Annotated[
+    LearningCompletionRepository, Depends(get_learning_completion_repository)
 ]
 JobServiceDep = Annotated[JobService, Depends(get_job_service)]
 JobSkillRepositoryDep = Annotated[JobSkillRepository, Depends(get_job_skill_repository)]

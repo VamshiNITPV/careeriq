@@ -58,10 +58,21 @@ class PlannedStep:
     severity: str
     hours: int
     outcome: str
+    #: The user has ticked this off.
+    #:
+    #: A completed step stays *in* the plan rather than disappearing. The list is
+    #: a route someone is walking, and silently dropping the parts they have done
+    #: would remove the only evidence of progress they have.
+    completed: bool
     #: Curated prerequisites that are also steps in this path, by name.
     #:
     #: Only the ones being learned here. A prerequisite the reader already holds
     #: is satisfied and saying so would clutter the reason with a non-reason.
+    #:
+    #: A *ticked* prerequisite does still appear, because it is still a step on
+    #: this page — shown, struck through, directly above. Naming it explains the
+    #: ordering rather than stating a non-reason, which is the opposite of the
+    #: case above: there the prerequisite is nowhere to be seen.
     after: tuple[str, ...]
 
 
@@ -71,16 +82,30 @@ class Plan:
     total_hours: int
     #: Gaps with no curated guidance, so the omission is visible.
     skipped_uncurated: int
+    #: Hours left once ticked-off steps are discounted.
+    #:
+    #: Reported next to `total_hours` rather than replacing it: "180 of 677
+    #: hours remaining" says something "180 hours" alone does not.
+    remaining_hours: int
 
 
-def build_plan(gaps: list[SkillGap]) -> Plan:
+def build_plan(gaps: list[SkillGap], *, completed_skill_ids: set[uuid.UUID] | None = None) -> Plan:
     """Order the missing skills so that nothing is asked for before its basis.
 
     Takes the gap list rather than querying, so the ordering is pure and can be
     tested without a database — and so the single-job and target-role paths are
     built by identical code.
+
+    `completed_skill_ids` are steps the user has ticked off. They stay in the
+    plan, marked, and they **satisfy prerequisites**: someone who has studied
+    Docker is ready for Kubernetes whether or not Docker is on their profile
+    yet. Studying a thing and claiming it on a resume are different assertions,
+    and requiring the second before unblocking the next step would leave a reader
+    stuck behind their own honesty.
     """
+    done = completed_skill_ids or set()
     held = {gap.name for gap in gaps if gap.status is GapStatus.STRONG}
+    held |= {gap.name for gap in gaps if gap.skill_id in done}
     # PARTIAL counts as unsatisfied. Having something adjacent to a prerequisite
     # is not having the prerequisite, and assuming otherwise would order a step
     # before its foundation on the strength of a taxonomy sibling.
@@ -92,13 +117,12 @@ def build_plan(gaps: list[SkillGap]) -> Plan:
     by_name = {gap.name: gap for gap in curated}
     remaining = dict(by_name)
 
-    steps: list[PlannedStep] = []
-    position = 1
+    ordered: list[SkillGap] = []
 
     while remaining:
         # Everything whose curated prerequisites are either already held or
         # already placed in this path.
-        placed = {step.name for step in steps}
+        placed = {gap.name for gap in ordered}
         available = [
             gap
             for name, gap in remaining.items()
@@ -121,24 +145,36 @@ def build_plan(gaps: list[SkillGap]) -> Plan:
             available,
             key=lambda g: (-_SEVERITY_RANK.get(g.severity.value, 0), -g.frequency, g.name),
         )
-        curated_step = CURATED[best.name]
-
-        steps.append(
-            PlannedStep(
-                position=position,
-                skill_id=best.skill_id,
-                name=best.name,
-                severity=best.severity.value,
-                hours=curated_step.hours,
-                outcome=curated_step.outcome,
-                after=tuple(p for p in curated_step.prerequisites if p in by_name),
-            )
-        )
-        position += 1
+        ordered.append(best)
         del remaining[best.name]
+
+    # Finished steps first, each group keeping its dependency order.
+    #
+    # Not cosmetic. A completed step satisfies its dependants' prerequisites, so
+    # they become available immediately and a more urgent one can win the pass
+    # that would otherwise have gone to the step it depends on — leaving a plan
+    # reading "1. Kubernetes, 2. Docker (done)". Sorting the done work to the
+    # front keeps every prerequisite above the thing that needs it, and matches
+    # how the plan reads: what you have finished, then what is left.
+    ordered.sort(key=lambda gap: gap.skill_id not in done)
+
+    steps = [
+        PlannedStep(
+            position=index,
+            skill_id=gap.skill_id,
+            name=gap.name,
+            severity=gap.severity.value,
+            hours=CURATED[gap.name].hours,
+            outcome=CURATED[gap.name].outcome,
+            completed=gap.skill_id in done,
+            after=tuple(p for p in CURATED[gap.name].prerequisites if p in by_name),
+        )
+        for index, gap in enumerate(ordered, start=1)
+    ]
 
     return Plan(
         steps=steps,
         total_hours=sum(step.hours for step in steps),
         skipped_uncurated=skipped,
+        remaining_hours=sum(step.hours for step in steps if not step.completed),
     )

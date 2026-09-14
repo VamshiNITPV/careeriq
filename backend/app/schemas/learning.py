@@ -25,11 +25,22 @@ class LearningStepRead(BaseModel):
     outcome: str
     #: Steps in *this* path that must come first, by name.
     after: list[str]
+    #: The reader has ticked this off.
+    #:
+    #: A finished step stays in the plan rather than vanishing: the list is a
+    #: route being walked, and dropping the finished parts would remove the only
+    #: evidence of progress there is.
+    completed: bool = False
 
 
 class LearningPathResponse(BaseModel):
     steps: list[LearningStepRead]
     total_hours: int
+    #: Hours left once finished steps are discounted.
+    #:
+    #: Alongside `total_hours`, not instead of it. "180 of 677 hours remaining"
+    #: says something that "180 hours" alone does not.
+    remaining_hours: int = 0
     target_jobs: int
     target_roles: list[str]
     job_id: uuid.UUID | None = None
@@ -42,3 +53,14 @@ class LearningPathResponse(BaseModel):
     #:
     #: NO_TARGET / NO_JOBS / READY.
     availability: str = "READY"
+
+
+class StepCompletionUpdate(BaseModel):
+    """Body of the tick-off toggle.
+
+    A boolean rather than two verbs, so the request states the desired end state
+    and repeating it changes nothing — the same shape the save-a-job toggle uses,
+    for the same reason: this is a checkbox someone taps twice on a phone.
+    """
+
+    completed: bool

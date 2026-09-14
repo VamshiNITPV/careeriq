@@ -168,9 +168,28 @@ export function SkillGapsPage() {
             {result.target_roles.join(', ')}.
           </p>
 
+          {/* Both sections are named, so they are landmarks a screen reader can
+              jump between rather than two anonymous boxes. Which list a skill is
+              in is the whole point of the page. */}
           {missing.length > 0 && (
-            <section className="rounded-xl border border-slate-200 bg-white p-4 sm:p-6">
-              <h2 className="text-base font-semibold text-slate-900">Learn these next</h2>
+            <section
+              aria-labelledby="gaps-missing"
+              className="rounded-xl border border-slate-200 bg-white p-4 sm:p-6"
+            >
+              <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                <h2 id="gaps-missing" className="text-base font-semibold text-slate-900">
+                  Learn these next
+                </h2>
+                {/* The obvious next question from this list is "in what order?",
+                    and the answer is a page away. Linked from here rather than
+                    added to the nav: it means nothing until you have gaps. */}
+                <Link
+                  to="/learning-path"
+                  className="text-sm font-medium text-indigo-600 hover:underline"
+                >
+                  Put these in order
+                </Link>
+              </div>
               <p className="mt-1 text-sm text-slate-600">
                 Ordered by how many of your target jobs ask for them.
               </p>
@@ -183,8 +202,13 @@ export function SkillGapsPage() {
           )}
 
           {covered.length > 0 && (
-            <section className="rounded-xl border border-slate-200 bg-white p-4 sm:p-6">
-              <h2 className="text-base font-semibold text-slate-900">Already covered</h2>
+            <section
+              aria-labelledby="gaps-covered"
+              className="rounded-xl border border-slate-200 bg-white p-4 sm:p-6"
+            >
+              <h2 id="gaps-covered" className="text-base font-semibold text-slate-900">
+                Already covered
+              </h2>
               <p className="mt-1 text-sm text-slate-600">
                 Skills your target roles ask for that are on your profile. &ldquo;Related&rdquo;
                 means you have something adjacent rather than the skill itself.

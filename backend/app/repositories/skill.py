@@ -8,8 +8,9 @@ from decimal import Decimal
 from sqlalchemy import Select, and_, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+from app.core.ids import uuid7
 from app.data.skill_taxonomy import normalize_skill_text
-from app.models.skill import CandidateSkill, Skill
+from app.models.skill import CandidateSkill, LearningStepCompletion, Skill
 from app.repositories.base import BaseRepository
 
 
@@ -76,9 +77,7 @@ class SkillRepository(BaseRepository[Skill]):
         takes `name -> forms` and nothing else, and widening that shape would
         push this distinction into every caller that only wants to match text.
         """
-        return set(
-            (await self.session.scalars(select(Skill.name).where(Skill.is_generic))).all()
-        )
+        return set((await self.session.scalars(select(Skill.name).where(Skill.is_generic))).all())
 
     async def upsert_many(self, rows: list[dict[str, object]]) -> int:
         """Insert seed skills, refreshing `aliases` and `category` on existing ones.
@@ -281,3 +280,58 @@ class CandidateSkillRepository(BaseRepository[CandidateSkill]):
                 .where(CandidateSkill.user_id == user_id)
             )
         ) or 0
+
+
+class LearningCompletionRepository(BaseRepository[LearningStepCompletion]):
+    """Which learning steps a user has ticked off.
+
+    Keyed on the skill rather than on a step id, because the plan is rebuilt on
+    every request and a step id would belong to one rendering of it. The claim
+    being stored is "I have studied Docker", which stays true whichever plan it
+    appears in.
+    """
+
+    model = LearningStepCompletion
+
+    async def skill_ids_for(self, user_id: uuid.UUID) -> set[uuid.UUID]:
+        """Just the ids, which is all the plan builder needs to mark steps."""
+        return set(
+            (
+                await self.session.scalars(
+                    select(LearningStepCompletion.skill_id).where(
+                        LearningStepCompletion.user_id == user_id
+                    )
+                )
+            ).all()
+        )
+
+    async def set_completed(
+        self, *, user_id: uuid.UUID, skill_id: uuid.UUID, completed: bool
+    ) -> bool:
+        """Tick or untick one step. Returns the state it ended in.
+
+        Idempotent in both directions, enforced by the unique index rather than
+        by reading first and deciding — the same mechanism the save-a-job toggle
+        uses, and for the same reason: this is a checkbox someone can tap twice
+        on a phone, and a second tap must not become a visible error.
+
+        `ON CONFLICT DO NOTHING` rather than `DO UPDATE`: re-ticking an already
+        finished step should not move `completed_at`. The date records when the
+        user said they finished, and a stray tap is not new information.
+        """
+        if not completed:
+            await self.session.execute(
+                delete(LearningStepCompletion).where(
+                    LearningStepCompletion.user_id == user_id,
+                    LearningStepCompletion.skill_id == skill_id,
+                )
+            )
+            return False
+
+        statement = (
+            pg_insert(LearningStepCompletion)
+            .values(id=uuid7(), user_id=user_id, skill_id=skill_id)
+            .on_conflict_do_nothing(index_elements=["user_id", "skill_id"])
+        )
+        await self.session.execute(statement)
+        return True

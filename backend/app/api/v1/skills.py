@@ -11,6 +11,7 @@ from app.api.deps import (
     CandidateSkillRepositoryDep,
     CurrentUser,
     DbSession,
+    LearningCompletionRepositoryDep,
     ProfileServiceDep,
     ResumeVersionRepositoryDep,
     SkillRepositoryDep,
@@ -24,7 +25,11 @@ from app.core.ids import uuid7
 from app.data.skill_taxonomy import normalize_skill_text
 from app.models.skill import CandidateSkill, Skill
 from app.schemas.common import ErrorResponse, MessageResponse
-from app.schemas.learning import LearningPathResponse, LearningStepRead
+from app.schemas.learning import (
+    LearningPathResponse,
+    LearningStepRead,
+    StepCompletionUpdate,
+)
 from app.schemas.resume import (
     CandidateSkillCreate,
     CandidateSkillRead,
@@ -296,6 +301,7 @@ async def learning_path(
     user: CurrentUser,
     session: DbSession,
     profiles: ProfileServiceDep,
+    completions: LearningCompletionRepositoryDep,
     job_id: Annotated[uuid.UUID | None, Query(description="Plan for this job alone.")] = None,
 ) -> LearningPathResponse:
     """An ordered study plan built from the caller's gaps (US-5.2).
@@ -330,7 +336,7 @@ async def learning_path(
     else:
         availability = "READY"
 
-    plan = build_plan(report.gaps)
+    plan = build_plan(report.gaps, completed_skill_ids=await completions.skill_ids_for(user.id))
 
     return LearningPathResponse(
         steps=[
@@ -342,13 +348,52 @@ async def learning_path(
                 estimated_hours=step.hours,
                 outcome=step.outcome,
                 after=list(step.after),
+                completed=step.completed,
             )
             for step in plan.steps
         ],
         total_hours=plan.total_hours,
+        remaining_hours=plan.remaining_hours,
         target_jobs=report.target_jobs,
         target_roles=report.target_roles,
         job_id=report.job_id,
         skipped_uncurated=plan.skipped_uncurated,
         availability=availability,
     )
+
+
+@skills_router.put(
+    "/learning-path/steps/{skill_id}",
+    response_model=MessageResponse,
+    summary="Tick a learning step off, or put it back",
+)
+async def set_step_completed(
+    skill_id: uuid.UUID,
+    payload: StepCompletionUpdate,
+    user: CurrentUser,
+    skills: SkillRepositoryDep,
+    completions: LearningCompletionRepositoryDep,
+) -> MessageResponse:
+    """Record that the caller has studied a skill — or that they have not.
+
+    **PUT with a boolean, not two verbs.** The body states the desired end state,
+    so repeating the request changes nothing; this is a checkbox someone taps
+    twice on a phone, and a second tap must not become a visible error. The same
+    shape, and the same reasoning, as the save-a-job toggle.
+
+    **Studying a skill is not claiming it.** This never touches the profile: a
+    tick says "I have worked through this", and putting it on someone's resume on
+    that basis would be the interface asserting something they did not. It does
+    unblock dependent steps in the plan, because being ready for Kubernetes
+    depends on having learnt Docker rather than on having listed it.
+
+    404 for an unknown skill before anything is written, so progress cannot
+    accumulate against ids that were never real.
+    """
+    if await skills.get(skill_id) is None:
+        raise ResourceNotFoundError("Skill")
+
+    completed = await completions.set_completed(
+        user_id=user.id, skill_id=skill_id, completed=payload.completed
+    )
+    return MessageResponse(message="Marked as done." if completed else "Marked as not done yet.")

@@ -16,6 +16,7 @@ import { ResetPasswordPage } from '@/pages/ResetPasswordPage'
 import { ResumeDetailPage } from '@/pages/ResumeDetailPage'
 import { ResumePage } from '@/pages/ResumePage'
 import { SavedJobsPage } from '@/pages/SavedJobsPage'
+import { LearningPathPage } from '@/pages/LearningPathPage'
 import { SkillGapsPage } from '@/pages/SkillGapsPage'
 import { VerifyEmailPage } from '@/pages/VerifyEmailPage'
 import { ApiError } from '@/services/apiClient'
@@ -80,6 +81,7 @@ export function App() {
                     comment above already describes. */}
                 <Route path="/saved-jobs" element={<SavedJobsPage />} />
                 <Route path="/skill-gaps" element={<SkillGapsPage />} />
+                <Route path="/learning-path" element={<LearningPathPage />} />
               </Route>
             </Route>
 

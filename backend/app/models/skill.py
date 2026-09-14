@@ -9,11 +9,13 @@ between ids rather than between strings.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    DateTime,
     ForeignKey,
     Index,
     Numeric,
@@ -175,4 +177,40 @@ class CandidateSkill(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             "NOT (is_user_verified AND is_rejected)",
             name="verified_or_rejected_not_both",
         ),
+    )
+
+
+class LearningStepCompletion(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """A skill the user says they have studied.
+
+    Progress, kept apart from the plan itself. The plan is derived on every
+    request because it depends on gaps that move; a tick is a decision the user
+    made and has to outlive that recomputation, or finishing Docker on Tuesday
+    would be undone by Wednesday's job fetch.
+
+    Keyed on the *skill*, not on a generated step id. A step id belongs to one
+    rendering of one plan; the claim being recorded is "I have studied Docker",
+    which stays true whichever plan it turns up in.
+
+    Deliberately **not** the same thing as having the skill on your profile.
+    Studying something and claiming it on a resume are different assertions, and
+    collapsing them would put a skill on someone's profile because they ticked a
+    checkbox in a study plan.
+    """
+
+    __tablename__ = "learning_step_completions"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    skill_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("skills.id", ondelete="RESTRICT"), nullable=False
+    )
+    completed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    __table_args__ = (
+        Index("ux_learning_step_completions", "user_id", "skill_id", unique=True),
+        Index("ix_learning_step_completions_skill", "skill_id"),
     )

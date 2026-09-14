@@ -53,13 +53,19 @@ describe('SkillGapsPage', () => {
 
     renderPage()
 
-    const learn = (await screen.findByRole('heading', { name: 'Learn these next' }))
-      .parentElement!
+    /*
+     * Queried by region rather than by walking up from the heading. The earlier
+     * `.parentElement` version broke the moment a link was added beside the
+     * heading — it was pinning the shape of the markup, not the behaviour, and
+     * the behaviour here is only which list each skill lands in.
+     */
+    const learn = await screen.findByRole('region', { name: 'Learn these next' })
     expect(within(learn).getByText('Apache Spark')).toBeInTheDocument()
     expect(within(learn).queryByText('Python')).not.toBeInTheDocument()
 
-    const covered = screen.getByRole('heading', { name: 'Already covered' }).parentElement!
+    const covered = screen.getByRole('region', { name: 'Already covered' })
     expect(within(covered).getByText('Python')).toBeInTheDocument()
+    expect(within(covered).queryByText('Apache Spark')).not.toBeInTheDocument()
   })
 
   it('shows how many jobs the report was built from', async () => {
