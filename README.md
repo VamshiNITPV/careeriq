@@ -1,5 +1,7 @@
 # CareerIQ — AI Career Intelligence & Job Optimization Platform
 
+[![CI](https://github.com/VamshiNITPV/careeriq/actions/workflows/ci.yml/badge.svg)](https://github.com/VamshiNITPV/careeriq/actions/workflows/ci.yml)
+
 A full-stack AI/ML platform that builds a structured career profile from a resume, ingests and
 parses job descriptions, ranks jobs by personalized fit using hybrid semantic + rule-based scoring,
 identifies skill gaps, suggests grounded resume improvements, tracks application outcomes, and

@@ -31,7 +31,11 @@ import pathlib
 import sys
 from datetime import UTC, datetime
 
+# `/app` is where the backend lives inside the container; the repo layout is
+# what CI has. Both are added rather than either assumed, so the same command
+# works in Docker and on a bare runner.
 sys.path.insert(0, "/app")
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "backend"))
 
 from app.data.skill_taxonomy import SEED_SKILLS  # noqa: E402
 from app.services.resume.fabrication import validate_suggestion  # noqa: E402

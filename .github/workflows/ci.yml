@@ -1,0 +1,190 @@
+# CareerIQ CI.
+#
+# Runs the same checks the project runs locally, on a machine that has none of
+# the local state: no Docker volumes, no seeded database, no .env. That is the
+# point. A suite that only passes on the machine that wrote it is evidence about
+# that machine.
+#
+# Three jobs, deliberately separate rather than one script. A frontend type error
+# and a backend test failure are different problems for different fixes, and a
+# single red job hides whichever failed second.
+#
+# Postgres is pgvector's image, not plain postgres:16 — the schema uses `vector`
+# columns and HNSW indexes (ADR-002), so a stock image fails at the first
+# migration. `careeriq_test` is created here because the local stack creates it
+# from an init script mounted into the container, which Actions services do not
+# run; the extensions come from the first Alembic migration either way.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # So a red main can be re-checked without an empty commit.
+  workflow_dispatch:
+
+# A second push to the same branch cancels the first: the older run is answering
+# a question nobody is asking any more.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: backend (lint + tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: careeriq
+          POSTGRES_PASSWORD: careeriq_ci_password
+          POSTGRES_DB: careeriq
+          # Matches the local stack, so index ordering is identical. Collation
+          # differences change sort order, which changes what a LIMIT returns.
+          POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U careeriq -d careeriq"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://careeriq:careeriq_ci_password@localhost:5432/careeriq
+      REDIS_URL: redis://localhost:6379/0
+      # Not a secret: it signs tokens for a database that exists for 20 minutes.
+      # It is here at all because config.py refuses to start without one at least
+      # 32 characters long, which is the check working as intended.
+      JWT_SECRET_KEY: ci-only-not-a-secret-0123456789abcdefghijklmnop
+      # The suite sets EMBEDDING_PROVIDER=fake itself (conftest.py). Left alone
+      # here so that if it ever stops doing so, the tests fail rather than
+      # quietly reaching for a model that is not installed.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        # requirements-ml.txt is deliberately absent: it is torch and
+        # sentence-transformers, gigabytes of wheels for a suite that uses
+        # FakeEmbeddingProvider. architecture.md's risk table also wants ML
+        # packages kept off the API's import path, and installing them here
+        # would let an accidental import pass CI and fail in production.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Create the test database
+        # The local stack gets this from an init script mounted into the
+        # postgres container; Actions service containers do not run those.
+        env:
+          PGPASSWORD: careeriq_ci_password
+        run: |
+          psql -h localhost -U careeriq -d careeriq \
+            -c "CREATE DATABASE careeriq_test OWNER careeriq"
+
+      - name: Lint
+        working-directory: backend
+        run: ruff check app tests
+
+      - name: Tests
+        working-directory: backend
+        run: pytest -q
+
+  fabrication-eval:
+    name: fabrication validator (safety)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    # Its own job, and not because it is slow — it takes seconds. It is the one
+    # check whose failure means something reached a user's resume that should
+    # not have, and burying it inside the backend job would report that as "some
+    # tests failed" (ADR-012, ml.md 6.3).
+    #
+    # No database and no services: the validator is pure by design, which is
+    # exactly what makes this cheap enough to run on every push.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Measure fabrication recall
+        # Exits non-zero only on a miss the design claims to cover. The three
+        # documented limits stay visible in the printed number without turning
+        # every run red.
+        env:
+          PYTHONPATH: ${{ github.workspace }}/backend:${{ github.workspace }}/ml
+        run: python -m evaluation.run_fabrication_eval
+
+  frontend:
+    name: frontend (typecheck + lint + tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # `npm ci` not `npm install`: it installs the lockfile exactly and fails
+      # if package.json has drifted from it, which is the thing worth catching.
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: frontend
+        run: npm run typecheck
+
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Tests
+        working-directory: frontend
+        run: npx vitest run
+
+      # The production build is its own failure mode. Vite's dev server tolerates
+      # things `vite build` does not, so a suite passing under Vitest says
+      # nothing about whether the app can actually be deployed.
+      - name: Build
+        working-directory: frontend
+        run: npm run build
