@@ -650,6 +650,37 @@ For each optimization suggestion:
 **Target: 100% fabrication-detection recall.** This is the one metric with no tolerance for misses —
 a fabricated credential reaching a user's resume is career damage, not a bug report.
 
+**Measured 2026-09-14** over 50 cases (30 fabrications, 20 honest rewrites), full write-up in
+`ml/evaluation/results/fabrication.md`:
+
+| | Result | Target |
+|---|---|---|
+| Fabrication recall, excluding known limits | **1.000** over 27 cases | 1.000 |
+| Fabrication recall, all cases | 0.900 | 1.000 |
+| Honest rewrites passed | 1.000 (20/20) | — |
+
+Caught across every evasion tried: inflated metrics as digits, as words, as scaled units and as
+figures derived but never stated; unit swaps (a headcount of "three" does not license "3% growth");
+credentials spelled out and as acronyms; employers mid-sentence, possessive and sentence-initial;
+skills adjacent to real ones; and moved dates.
+
+**Three misses, all documented rather than excluded:**
+
+1. **Scope inflation introducing no new entity** — "Managed the analytics function" from a resume
+   saying "Built daily sales reports". Every word is already in the source; the invention is in the
+   relation between them, which an entity-level check cannot see. This is the gap ADR-012 accepts by
+   construction: closing it means judging whether meaning changed, which needs the model that
+   ADR-012 keeps out of the safety path. **The mitigation is upstream — constrain generation so a
+   suggestion cannot restructure a claim.**
+2. As above, for "Owned the entire billing platform architecture".
+3. **A lowercase proper noun outside the taxonomy** — "…at flipkart…". Capitalisation is the only
+   signal the proper-noun rule has, and an employer is not a taxonomy entry.
+
+> The dataset's first lowercase case used *stripe* and was caught — but by the skill check, because
+> Stripe *is* a taxonomy entry and the matcher is case-insensitive. It passed for a reason other than
+> the one it was testing. A second case isolates the real gap. Worth remembering as a general hazard:
+> an adversarial case can look covered while the mechanism it targets goes untested.
+
 ### 6.4 Cost & quota controls
 - Redis caching of AI responses keyed by prompt hash, 24 h TTL (ADR-008). Identical inputs never
   cost twice.
@@ -754,4 +785,4 @@ gets constructed to flatter what was already built.
 | Q3 | Are the six weights right? They are a starting hypothesis, to be tuned against the labelled set. | Phase 6 |
 | Q4 | Can one Gemini call score all five interview dimensions reliably, or does it need separate calls? | Phase 9 |
 | Q5 | Is 0.95 the right near-duplicate threshold? Tune on the labelled set. | Phase 5 |
-| Q6 | Does the fabrication validator's entity extraction have adequate recall on unusual formatting? | Phase 7 — this must not fail |
+| Q6 | ~~Does the fabrication validator's entity extraction have adequate recall on unusual formatting?~~ **Answered 2026-09-14: yes on formatting — words, scaled units, possessives, punctuation and sentence position are all handled (1.000 over 27 cases). The residual gaps are not formatting: scope inflation using only existing words, and a lowercase proper noun outside the taxonomy. See §6.3.** | Phase 7 — closed |

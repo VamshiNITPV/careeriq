@@ -1,0 +1,37 @@
+{
+  "generated_at": "2026-09-14T06:49:44.235466+00:00",
+  "cases": 50,
+  "fabrications": 30,
+  "honest": 20,
+  "fabrication_recall": 0.9,
+  "fabrication_recall_excluding_known_limits": 1.0,
+  "honest_pass_rate": 1.0,
+  "rejection_precision": 1.0,
+  "missed": [
+    {
+      "invented": "Managed the analytics function",
+      "suggestion": "Managed the analytics function for Reliance Retail.",
+      "tags": [
+        "scope",
+        "known-limit"
+      ]
+    },
+    {
+      "invented": "Owned the entire billing platform",
+      "suggestion": "Owned the entire billing platform architecture.",
+      "tags": [
+        "scope",
+        "known-limit"
+      ]
+    },
+    {
+      "invented": "flipkart",
+      "suggestion": "Built reporting pipelines at flipkart for two years.",
+      "tags": [
+        "organization",
+        "known-limit"
+      ]
+    }
+  ],
+  "over_rejected": []
+}
