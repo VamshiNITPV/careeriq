@@ -65,10 +65,18 @@ def reply(*suggestions: dict) -> str:
     return json.dumps({"suggestions": list(suggestions)})
 
 
+# `original` is copied from RESUME_TEXT exactly, because that is what the real
+# contract requires. The earlier fixture said "Worked on the payments backend."
+# while the resume says "...backend, handling 12,000 transactions per day" —
+# a suggestion that could never have been applied, and the anchoring check is
+# what exposed it.
 HONEST = {
     "section": "experience",
-    "original": "Worked on the payments backend.",
-    "suggested": "Built and maintained payment processing services.",
+    "original": "Worked on the payments backend, handling 12,000 transactions per day.",
+    "suggested": (
+        "Built and maintained payment processing services handling 12,000 "
+        "transactions per day."
+    ),
     "rationale": "The job is about payment systems.",
     "grounded_in": ["Worked on the payments backend."],
 }
@@ -223,6 +231,57 @@ class TestTheValidatorIsWiredIn:
         assert analysis.dropped_malformed == 1
 
 
+class TestAnchoring:
+    """A suggestion has to point at text the resume actually contains."""
+
+    async def test_a_paraphrased_original_is_dropped_before_anyone_sees_it(
+        self, db_session: AsyncSession, user_id: uuid.UUID, seeded_skills: int
+    ) -> None:
+        """What the first real run did.
+
+        The model merged two bullets into a sentence that appears nowhere in the
+        resume and called it the original. Shown, it lets someone review three
+        rewrites, accept all of them, and only then be told none could be
+        applied — so it is dropped at analysis time instead.
+        """
+        analysis = await an_analysis(db_session, user_id)
+        invented = {
+            **HONEST,
+            "original": "Deployed the application seamlessly on Vercel, ensuring reliability.",
+            "suggested": "Deployed on Vercel with high reliability.",
+        }
+        provider = FakeLLMProvider([reply(invented)])
+
+        result = await run_analysis(analysis.id, session=db_session, provider=provider)
+
+        assert result.kept == 0
+        assert await stored(db_session, analysis.id) == []
+
+    async def test_a_line_wrapped_by_extraction_still_anchors(
+        self, db_session: AsyncSession, user_id: uuid.UUID, seeded_skills: int
+    ) -> None:
+        """The other half. Extracted PDF text wraps mid-sentence, and rejecting
+        those would leave the feature unable to suggest anything at all."""
+        # Built from character codes: an escaped newline does not survive
+        # being written through a shell heredoc, and a literal one here
+        # would end the string.
+        nl = chr(10)
+        wrapped = (
+            f"Experience{nl}- Worked on the payments{nl}     backend, handling traffic.{nl}"
+        )
+        analysis = await an_analysis(db_session, user_id, raw_text=wrapped)
+        suggestion = {
+            **HONEST,
+            "original": "Worked on the payments backend, handling traffic.",
+            "suggested": "Built payment services handling traffic.",
+        }
+        provider = FakeLLMProvider([reply(suggestion)])
+
+        result = await run_analysis(analysis.id, session=db_session, provider=provider)
+
+        assert result.kept == 1
+
+
 class TestWhatItSendsTheModel:
     async def test_the_resume_goes_in_as_untrusted_context(
         self, db_session: AsyncSession, user_id: uuid.UUID, seeded_skills: int
@@ -250,7 +309,7 @@ class TestWhatItSendsTheModel:
         )
         await db_session.refresh(analysis)
 
-        assert analysis.prompt_version == "resume_optimization@1"
+        assert analysis.prompt_version == "resume_optimization@2"
         assert analysis.model == "fake-9"
 
 

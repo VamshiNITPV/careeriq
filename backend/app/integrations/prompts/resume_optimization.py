@@ -34,7 +34,13 @@ from app.integrations.llm.base import Prompt
 
 NAME = "resume_optimization"
 #: Bump on any edit to the text below.
-VERSION = "1"
+#:
+#: 2 (2026-09-15): the first real run produced three suggestions whose
+#: `original` had been paraphrased rather than copied -- two resume bullets
+#: merged into one sentence that appeared nowhere in the document. None could be
+#: anchored, so none could be applied. The rule below is now stated as its own
+#: numbered constraint rather than a clause in the output format.
+VERSION = "2"
 
 _SYSTEM = """
 You are a resume editor. You rewrite a candidate's existing bullet points so they
@@ -57,6 +63,16 @@ Absolute rules:
    will be asked about it in an interview.
 5. You may rephrase, reorder, use stronger verbs, move an existing detail
    forward, and drop filler. That is the whole permitted set of operations.
+6. **"original" must be copied from the resume word for word.** Find the exact
+   sentence or bullet you are rewriting and reproduce it exactly, including its
+   wording and punctuation. Do not tidy it, do not shorten it, and do not merge
+   two bullets into one. If you cannot reproduce a line exactly, do not suggest
+   a change to it.
+
+   This is not a formatting preference. Your "original" is matched against the
+   resume to find what to replace, so a paraphrased one matches nothing and the
+   suggestion is discarded before anyone sees it. Only "suggested" is yours to
+   write.
 
 The candidate is a real person. Anything you invent, they will have to defend in
 an interview, having never claimed it.

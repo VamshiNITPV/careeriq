@@ -19,15 +19,21 @@ Stored as a real object with `text/plain` rather than pointing at the original
 file. A version whose stored file does not match its own text would hand someone
 the untailored PDF while the screen showed the tailored words.
 
-## Replacement is literal and exact
+## Replacement is word-exact, whitespace-tolerant
 
-Each accepted suggestion replaces its `original` string with its `suggested`
-string, once. No fuzzy matching: `original` was copied from the resume by the
-model and checked by the parser, so an inexact match means the text has moved on
-and the safe answer is to skip it rather than guess where it belongs.
+Each accepted suggestion replaces its `original` once. Whitespace is flexible
+because extracted PDF text wraps mid-sentence -- `"efficiently
+        deployed
+on Vercel"` is the same sentence the model writes back on one line -- and a
+literal comparison would reject every one of them.
 
-A suggestion whose `original` is no longer found is reported rather than silently
-dropped, because the user chose it and deserves to know it did not land.
+**Words are not flexible.** This is not fuzzy matching: "close enough" would mean
+editing a sentence the user never chose to change. A suggestion that cannot be
+anchored is skipped and reported, never approximated.
+
+By the time a suggestion reaches here it has already been anchored once, when
+the analysis stored it. This is the second check rather than the first, because
+the resume could in principle change in between.
 """
 
 from __future__ import annotations
@@ -45,6 +51,7 @@ from app.integrations.storage import ObjectStorage
 from app.models.enums import ProcessingStatus, SuggestionDecision
 from app.models.optimization import OptimizationAnalysis, OptimizationSuggestion
 from app.models.resume import ResumeVersion
+from app.services.resume.anchoring import replace_span
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,10 +108,17 @@ async def apply_accepted(
     for row in rows:
         if row.id not in accepted_ids:
             rejected.append(row)
-        elif row.original not in text:
+            continue
+
+        # Whitespace-tolerant, word-exact. Extracted PDF text wraps mid-sentence,
+        # so a literal `in` check fails on lines that are plainly the same --
+        # which made every suggestion unappliable the first time this ran for
+        # real. It is still not fuzzy: every word must be present, in order.
+        updated = replace_span(text, row.original, row.suggested)
+        if updated is None:
             not_found.append(row)
         else:
-            text = text.replace(row.original, row.suggested, 1)
+            text = updated
             applied.append(row)
 
     if not applied:

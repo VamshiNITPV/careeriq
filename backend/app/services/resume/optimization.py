@@ -57,6 +57,7 @@ from app.models.optimization import OptimizationAnalysis, OptimizationSuggestion
 from app.repositories.job import JobRepository
 from app.repositories.resume import ResumeVersionRepository
 from app.repositories.skill import SkillRepository
+from app.services.resume.anchoring import find_span
 from app.services.resume.fabrication import validate_suggestion
 from app.services.resume.skill_extraction import build_matcher
 
@@ -228,7 +229,22 @@ async def _run(
 
     kept = 0
     rejected = 0
+    unanchored = 0
     for raw in parsed.suggestions:
+        # Checked here rather than at apply time. A suggestion whose `original`
+        # is not in the resume cannot be applied, and showing it anyway lets
+        # someone read three rewrites, accept all of them, and only then be told
+        # none could be used -- which is exactly what happened the first time
+        # this ran for real. Models paraphrase the line they were told to copy.
+        if find_span(resume_text, raw.original) is None:
+            unanchored += 1
+            log.info(
+                "optimization: suggestion not anchored to the resume",
+                analysis_id=str(analysis_id),
+                original=raw.original[:120],
+            )
+            continue
+
         result = validate_suggestion(
             suggested=raw.suggested,
             # The whole resume, not the span being rewritten.
@@ -263,7 +279,11 @@ async def _run(
 
     analysis.status = AnalysisStatus.COMPLETE
     analysis.rejected_by_validator = rejected
-    analysis.dropped_malformed = parsed.dropped
+    # Counted with the malformed ones: both are the model failing to honour the
+    # response contract, as opposed to inventing a fact about the candidate.
+    # Keeping them apart from `rejected_by_validator` is the distinction that
+    # matters -- a wrong shape and a wrong claim need different fixes.
+    analysis.dropped_malformed = parsed.dropped + unanchored
     analysis.completed_at = datetime.now(UTC)
     await session.commit()
 
@@ -272,11 +292,11 @@ async def _run(
         analysis_id=str(analysis_id),
         kept=kept,
         rejected_by_validator=rejected,
-        dropped_malformed=parsed.dropped,
+        dropped_malformed=parsed.dropped + unanchored,
     )
     return AnalysisResult(
         status=AnalysisStatus.COMPLETE,
         kept=kept,
         rejected_by_validator=rejected,
-        dropped_malformed=parsed.dropped,
+        dropped_malformed=parsed.dropped + unanchored,
     )
