@@ -185,35 +185,60 @@ jobs:
         # red build was otherwise just the word "failure" — which is not enough
         # to fix anything, and is exactly the position this job left us in the
         # first time it went red.
-        run: npx vitest run --reporter=default --reporter=json --outputFile=vitest-report.json
+        shell: bash
+        run: |
+          set -o pipefail
+          echo "cpus=$(nproc)  mem=$(free -m | awk '/^Mem:/{print $2}')MB"
+          npx vitest run --reporter=default --reporter=json \
+            --outputFile=vitest-report.json 2>&1 | tee vitest.log
 
-      - name: Report which tests failed
+      - name: Report why it failed
         if: failure()
         working-directory: frontend
-        # Emitted as workflow annotations rather than plain output: annotations
-        # are readable through the public check-runs API, so the failure travels
-        # out of the log that cannot be read.
+        shell: bash
+        # Two sources, in order of usefulness. The JSON report is only written
+        # once vitest finishes, so a crash produces no report at all and the
+        # reason lives only in the output — which is exactly the case this hit.
+        #
+        # Emitted as annotations rather than plain output because annotations
+        # are readable through the public check-runs API, so a failure travels
+        # out of a log that needs admin rights to open.
         run: |
-          node -e '
-            const fs = require("fs");
-            let report;
-            try {
-              report = JSON.parse(fs.readFileSync("vitest-report.json", "utf8"));
-            } catch {
-              console.log("::error::vitest produced no JSON report — it died before running tests");
-              process.exit(0);
-            }
-            for (const file of report.testResults || []) {
-              for (const test of file.assertionResults || []) {
-                if (test.status !== "failed") continue;
-                const detail = (test.failureMessages || [])
-                  .join("\n")
-                  .slice(0, 1200)
-                  .replace(/\r?\n/g, "%0A");
-                console.log(`::error file=${file.name}::${test.fullName}%0A${detail}`);
+          if [ -f vitest.log ]; then
+            echo "::group::vitest output (tail)"
+            tail -n 80 vitest.log
+            echo "::endgroup::"
+            TAIL=$(tail -n 30 vitest.log | sed 's/::/: :/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error::vitest output tail%0A${TAIL}"
+          else
+            echo "::error::no vitest.log — the step died before vitest started"
+          fi
+
+          if [ -f vitest-report.json ]; then
+            node -e '
+              const fs = require("fs");
+              const NL = String.fromCharCode(10);
+              const CR = String.fromCharCode(13);
+              const report = JSON.parse(fs.readFileSync("vitest-report.json", "utf8"));
+              for (const file of report.testResults || []) {
+                for (const test of file.assertionResults || []) {
+                  if (test.status !== "failed") continue;
+                  // Newlines built from character codes, not escapes: this
+                  // script is nested inside YAML inside shell, and a
+                  // backslash escape does not survive all three intact.
+                  const detail = (test.failureMessages || [])
+                    .join(NL)
+                    .slice(0, 1200)
+                    .split(CR).join("")
+                    .split(NL).join("%0A");
+                  console.log("::error file=" + file.name + "::"
+                    + test.fullName + "%0A" + detail);
+                }
               }
-            }
-          '
+            '
+          else
+            echo "::error::vitest wrote no JSON report — it crashed rather than failing a test"
+          fi
 
       # The production build is its own failure mode. Vite's dev server tolerates
       # things `vite build` does not, so a suite passing under Vitest says
