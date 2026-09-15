@@ -36,6 +36,16 @@ bcrypt>=4.2
 pdfplumber>=0.11
 python-docx>=1.1
 
+# --- document generation ---
+# A production dependency since US-6.1: tailoring a resume now produces a real
+# PDF, so the API writes documents as well as reading them. It was previously
+# dev-only, for test fixtures.
+#
+# The built-in fonts are latin-1, which cannot represent a bullet -- every "*"
+# in a resume would render as "?". app/assets/fonts/DejaVuSans.ttf is vendored
+# and registered for that reason.
+fpdf2>=2.8
+
 # --- email ---
 # Async SMTP. stdlib smtplib is blocking and would stall the event loop for the
 # duration of every send (ADR-004).

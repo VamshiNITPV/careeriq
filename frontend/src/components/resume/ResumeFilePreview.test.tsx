@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { StrictMode } from 'react'
 import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import { resumeService } from '@/services/resumeService'
@@ -20,6 +21,28 @@ const DOCX = {
   mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   filename: 'resume.docx',
   fileSizeBytes: 2048,
+}
+const TEXT = {
+  versionId: 'v3',
+  mimeType: 'text/plain',
+  filename: 'priya-tailored.txt',
+  fileSizeBytes: 3695,
+  rawText: `Priya Raman
+Built payment services.`,
+}
+
+/**
+ * jsdom's Blob has no `.text()`, so the content is read the long way round.
+ * Asserting only on size would pass for the wrong bytes, and the whole point of
+ * this check is that the .txt carries the same words as the document.
+ */
+function readBlob(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(reader.error)
+    reader.readAsText(blob)
+  })
 }
 
 describe('ResumeFilePreview', () => {
@@ -114,5 +137,64 @@ describe('ResumeFilePreview', () => {
     expect(await screen.findByText(/couldn't show this file/i)).toBeInTheDocument()
     expect(screen.queryByTitle(/^Preview of/)).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
+  })
+
+  describe('a plain-text version', () => {
+    it('does not claim to be a Word document', async () => {
+      /*
+       * It used to. Anything that was not a PDF fell into the Word branch, so a
+       * user who tailored a resume was sent to a .txt version and told to "open
+       * it in Word" — which is what they saw when they asked where the changes
+       * had gone.
+       */
+      render(<ResumeFilePreview {...TEXT} />)
+
+      expect(screen.queryByText(/Word documents/)).not.toBeInTheDocument()
+    })
+
+    it('shows the text rather than describing it', async () => {
+      // The content is already on the page. A panel explaining that it cannot
+      // be displayed would be both wrong and unhelpful.
+      render(<ResumeFilePreview {...TEXT} />)
+
+      expect(screen.getByText(/Built payment services\./)).toBeInTheDocument()
+    })
+
+    it('never fetches the bytes to display them', async () => {
+      // The text is in hand. Pulling the file down to render what is already
+      // there is pure waste, the same reasoning the Word branch uses.
+      const fetched = vi.spyOn(resumeService, 'downloadFile')
+
+      render(<ResumeFilePreview {...TEXT} />)
+
+      expect(fetched).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('the .txt download', () => {
+    it('offers the same words the stored document was built from', async () => {
+      /*
+       * Built from `rawText` rather than fetched, so the two formats agree by
+       * construction. A second request could in principle return something
+       * else.
+       */
+      const user = userEvent.setup()
+      render(<ResumeFilePreview {...PDF} rawText={`Line one
+Line two`} />)
+
+      await user.click(screen.getByRole('button', { name: 'Download .txt' }))
+
+      const blob = create.mock.calls.at(-1)?.[0] as Blob
+      expect(await readBlob(blob)).toBe(`Line one
+Line two`)
+      expect(blob.type).toContain('text/plain')
+    })
+
+    it('is absent when there is no text to give', async () => {
+      // A button that downloads an empty file is worse than no button.
+      render(<ResumeFilePreview {...PDF} rawText={null} />)
+
+      expect(screen.queryByRole('button', { name: 'Download .txt' })).not.toBeInTheDocument()
+    })
   })
 })

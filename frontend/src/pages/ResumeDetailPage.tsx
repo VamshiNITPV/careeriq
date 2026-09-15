@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { ResumeFilePreview } from '@/components/resume/ResumeFilePreview'
+import { VersionDownload } from '@/components/resume/VersionDownload'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 import { buttonClass } from '@/components/ui/buttonStyles'
@@ -596,6 +597,15 @@ export function ResumeDetailPage() {
                       {entry.original_filename} · {formatFileSize(entry.file_size_bytes)} ·{' '}
                       {formatDateTime(entry.created_at)}
                     </span>
+                    {/* Downloadable from the row itself. The service has always
+                        taken a version id, but the only Download button lived on
+                        whichever version was open — so getting an older file
+                        meant navigating to it first, and nothing on the page said
+                        so. */}
+                    <VersionDownload
+                      versionId={entry.id}
+                      filename={entry.original_filename}
+                    />
                   </li>
                 ))}
               </ul>

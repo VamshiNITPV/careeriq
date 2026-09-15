@@ -525,6 +525,13 @@ damage, not a bug.
 tradeoff: a false negative costs a suggestion, a false positive costs the user their credibility in
 an interview.
 
+**Amendment (2026-09-15).** Accepted suggestions are written into a **generated** PDF, not into the
+user's uploaded file. Three properties follow, and each has a test: the upload is never modified;
+the tailored document is a clean rendering rather than a facsimile of their design, because
+re-typesetting a layout from its own extracted text produces something subtly wrong; and
+`resumes.current_version_id` does not move, so wording proposed for one application never silently
+re-bases every match and skill on itself.
+
 ---
 
 ### ADR-013 — Adaptive interview as a state machine, not a prompt loop

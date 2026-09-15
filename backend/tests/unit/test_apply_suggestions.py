@@ -11,9 +11,11 @@ identical from outside.
 from __future__ import annotations
 
 import hashlib
+import io
 import uuid
 from pathlib import Path
 
+import pdfplumber
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -193,15 +195,20 @@ class TestNothingIsWrittenUnlessEverythingCan:
 
 
 class TestASuccessfulApply:
-    async def test_it_writes_the_new_text_to_storage(
+    async def test_it_stores_a_pdf_whose_text_matches_the_version(
         self,
         db_session: AsyncSession,
         user_id: uuid.UUID,
         store: LocalObjectStorage,
     ) -> None:
-        """The stored object has to match the version's own text. A version
-        whose file disagrees with its text hands someone the untailored document
-        while the screen shows the tailored words."""
+        """The stored file has to say what the version says.
+
+        A version whose file disagrees with its own text hands someone the
+        untailored document while the screen shows the tailored words. Checked
+        by extracting the PDF rather than comparing bytes, because the file is
+        now a rendering of the text rather than the text itself -- and the
+        extraction is also what an applicant tracking system does.
+        """
         analysis, version, rows = await a_setup(db_session, user_id)
 
         result = await apply_accepted(
@@ -212,9 +219,17 @@ class TestASuccessfulApply:
             storage=store,
         )
 
-        stored = (await store.get(result.version.storage_key)).decode("utf-8")
-        assert stored == result.version.raw_text
-        assert rows[0].suggested in stored
+        blob = await store.get(result.version.storage_key)
+        assert blob.startswith(b"%PDF-")
+        assert result.version.mime_type == "application/pdf"
+        assert result.version.original_filename.endswith("-tailored.pdf")
+
+        with pdfplumber.open(io.BytesIO(blob)) as document:
+            joined = chr(10)
+            extracted = joined.join(
+                page.extract_text() or "" for page in document.pages
+            )
+        assert rows[0].suggested in " ".join(extracted.split())
 
     async def test_an_accepted_suggestion_that_did_not_land_is_counted(
         self,
@@ -241,6 +256,38 @@ class TestASuccessfulApply:
         # Still accepted: recording a rejection would misrepresent the decision.
         assert rows[1].decision is SuggestionDecision.ACCEPTED
         assert rows[1].applied_version_id is None
+
+    async def test_it_does_not_make_the_tailored_version_current(
+        self,
+        db_session: AsyncSession,
+        user_id: uuid.UUID,
+        store: LocalObjectStorage,
+    ) -> None:
+        """`resumes.current_version_id` is what the matcher, the skill extractor
+        and the embeddings read.
+
+        A tailored version is wording the user proposed for one job, not a new
+        statement of who they are, so pointing the profile at it would quietly
+        re-base every match on text written for a single application. Only the
+        upload service and the parse pipeline set it, and this pins that
+        `apply_accepted` stays out of that business.
+        """
+        analysis, version, rows = await a_setup(db_session, user_id)
+        resume = await db_session.get(Resume, version.resume_id)
+        await db_session.refresh(resume)  # type: ignore[arg-type]
+        before = resume.current_version_id  # type: ignore[union-attr]
+
+        result = await apply_accepted(
+            db_session,
+            analysis=analysis,
+            source=version,
+            accepted_ids={rows[0].id},
+            storage=store,
+        )
+
+        await db_session.refresh(resume)  # type: ignore[arg-type]
+        assert resume.current_version_id == before  # type: ignore[union-attr]
+        assert resume.current_version_id != result.version.id  # type: ignore[union-attr]
 
     async def test_the_source_version_keeps_its_own_text(
         self,

@@ -210,7 +210,7 @@ Immutable snapshots. Required by US-2.5 and US-7.2 AC2 (analytics by resume vers
 | `mime_type` | `TEXT` | Determined by magic bytes |
 | `file_size_bytes` | `INTEGER` | CHECK ≤ 5242880 |
 | `content_hash` | `TEXT` | SHA-256 — skips reprocessing identical re-uploads |
-| `raw_text` | `TEXT` | Full extracted text |
+| `raw_text` | `TEXT` | Full extracted text. For a **tailored** version this is the text of record — the stored PDF is rendered *from* it, and the `.txt` download is built from it, so both formats are the same words by construction |
 | `parsed_sections` | `JSONB` | Detected sections with text spans |
 | `parsed_entities` | `JSONB` | Raw NLP output with confidences and source spans (US-2.3 AC2) |
 | `processing_status` | `processing_status` | NOT NULL, DEFAULT `'PENDING'` |
@@ -511,6 +511,15 @@ Computed per user against a target — a specific job, or an aggregate over thei
 ---
 
 ### 3.6b Resume optimization
+
+> **A tailored version stores a generated PDF** (`application/pdf`,
+> `*-tailored.pdf`), produced by `services/resume/pdf.py` from the accepted
+> wording. It is a clean single-column document, never a reproduction of the
+> uploaded design — that would mean re-typesetting a layout we only ever saw as
+> extracted text. The uploaded file is untouched and remains its own version;
+> applying never moves `resumes.current_version_id`, so the matcher, the skill
+> extractor and the embeddings keep reading the resume the user actually wrote.
+
 
 Added 2026-09-15 with US-6.1. Not in the original design; specified here after the
 fact because the tables exist.

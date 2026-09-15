@@ -7,17 +7,21 @@ its extracted text and its parse output exactly as they were, which is what make
 "undo" mean putting the old version back rather than hoping an edit was
 reversible.
 
-## The new version is a text document, and says so
+## The new version is a generated document, not a copy of theirs
 
-We cannot rewrite the user's PDF -- reflowing a designed document around edited
-sentences is a different and much larger problem, and a bad attempt produces a
-file they would be embarrassed to send. So the new version is plain text: the
-tailored wording, ready to paste into whatever they actually build the document
-in.
+The tailored wording is rendered as a **new PDF** (`services/resume/pdf.py`).
+Deliberately a clean single-column document rather than a reproduction of the
+uploaded design: their original has fonts, columns and spacing we only ever saw
+as extracted text, and re-typesetting a layout from its own output produces
+something subtly wrong.
 
-Stored as a real object with `text/plain` rather than pointing at the original
-file. A version whose stored file does not match its own text would hand someone
-the untailored PDF while the screen showed the tailored words.
+It gets its own stored object rather than pointing at the original file. A
+version whose stored file does not match its own text would hand someone the
+untailored document while the screen showed the tailored words.
+
+`raw_text` carries the exact tailored text and is the version's text of record
+-- it is what the `.txt` download and the on-page preview are built from, so
+both formats are the same words by construction rather than by coincidence.
 
 ## Replacement is word-exact, whitespace-tolerant
 
@@ -47,11 +51,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ids import uuid7
-from app.integrations.storage import ObjectStorage
+from app.integrations.storage import ObjectStorage, build_storage_key
 from app.models.enums import ProcessingStatus, SuggestionDecision
 from app.models.optimization import OptimizationAnalysis, OptimizationSuggestion
 from app.models.resume import ResumeVersion
 from app.services.resume.anchoring import replace_span
+from app.services.resume.pdf import build_resume_pdf
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +66,14 @@ class ApplyResult:
     rejected: int
     #: Accepted suggestions whose original text was not found.
     not_found: int
+
+
+#: Matches the `file_size_within_limit` CHECK on resume_versions.
+_MAX_FILE_BYTES = 5 * 1024 * 1024
+
+
+class DocumentTooLargeError(ValueError):
+    """The rendered PDF exceeds what a resume version may hold."""
 
 
 class NothingToApplyError(ValueError):
@@ -127,7 +140,17 @@ async def apply_accepted(
         )
 
     now = datetime.now(UTC)
-    body = text.encode("utf-8")
+    stem = source.original_filename.rsplit(".", 1)[0]
+    body = build_resume_pdf(text, title=f"{stem} (tailored)")
+
+    # The column has a CHECK for this. Without the guard it surfaces as an
+    # IntegrityError at flush -- a database error for what is a plain domain
+    # fact about the document being too large.
+    if len(body) > _MAX_FILE_BYTES:
+        raise DocumentTooLargeError(
+            "The tailored resume came out larger than we can store."
+        )
+
     next_number = (
         await session.scalar(
             select(func.coalesce(func.max(ResumeVersion.version_number), 0) + 1).where(
@@ -136,17 +159,19 @@ async def apply_accepted(
         )
     ) or 1
 
-    stem = source.original_filename.rsplit(".", 1)[0]
-    key = f"resumes/{source.resume_id}/{uuid7()}.txt"
-    await storage.put(key, body, content_type="text/plain")
+    # `build_storage_key`, not a hand-rolled path. Uploads partition by user;
+    # this used to partition by resume, putting tailored files in a sibling
+    # namespace that a per-user prefix delete would walk straight past.
+    key = build_storage_key(user_id=str(analysis.user_id), extension=".pdf")
+    await storage.put(key, body, content_type="application/pdf")
 
     version = ResumeVersion(
         id=uuid7(),
         resume_id=source.resume_id,
         version_number=next_number,
         storage_key=key,
-        original_filename=f"{stem}-tailored.txt",
-        mime_type="text/plain",
+        original_filename=f"{stem}-tailored.pdf",
+        mime_type="application/pdf",
         file_size_bytes=len(body),
         content_hash=hashlib.sha256(body).hexdigest(),
         raw_text=text,
