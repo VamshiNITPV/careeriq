@@ -224,6 +224,25 @@ describe('OptimizePage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/today's limit/)
   })
 
+  it('offers a way back to the job after a failure', async () => {
+    /*
+     * The reason is stored on the row, so reloading shows the same failure
+     * forever. Without a way out the reader is stranded on a page that can
+     * never改 change, having to work out for themselves that a new analysis has
+     * to be started from the job.
+     */
+    vi.spyOn(optimizationService, 'read').mockResolvedValue(
+      analysis({ status: 'FAILED', suggestions: [], error: 'Something went wrong.' }),
+    )
+
+    renderPage()
+
+    expect(await screen.findByRole('link', { name: 'Go back to the job' })).toHaveAttribute(
+      'href',
+      '/jobs/j1',
+    )
+  })
+
   it('keeps the suggestions on screen when saving fails', async () => {
     // Losing the list would lose the review, and the reader would have to make
     // every decision again.

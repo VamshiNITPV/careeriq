@@ -227,7 +227,20 @@ export function OptimizePage() {
           </Link>
         </section>
       ) : result.status === 'FAILED' ? (
-        <Alert tone="error">{result.error ?? 'This analysis could not be completed.'}</Alert>
+        <div className="space-y-3">
+          <Alert tone="error">{result.error ?? 'This analysis could not be completed.'}</Alert>
+          {/* A way out. The reason is stored on the row, so reloading this page
+              shows the same failure forever — the only thing that helps is
+              starting a new analysis, and without this link the reader has to
+              work out for themselves that they must navigate back to the job. */}
+          <p className="text-sm text-slate-600">
+            This result is from the attempt that failed and won&apos;t change.{' '}
+            <Link to={`/jobs/${result.job_id}`} className="font-medium text-indigo-600 underline">
+              Go back to the job
+            </Link>{' '}
+            to try again.
+          </p>
+        </div>
       ) : timedOut ? (
         <div className="space-y-3">
           <Alert tone="warning">
