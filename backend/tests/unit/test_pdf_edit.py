@@ -164,3 +164,116 @@ class TestRefusing:
 
         assert result.applied == 0
         assert "Priya Raman" in text_of(result.pdf)
+
+
+def baselines_of(pdf_bytes: bytes, needle: str) -> list[float]:
+    """The pen positions the given text was drawn from."""
+    page = pymupdf.open(stream=pdf_bytes, filetype="pdf")[0]
+    first = needle.split()[0]
+    found = []
+    for block in page.get_text("dict")["blocks"]:
+        if block.get("type"):
+            continue
+        for line in block["lines"]:
+            for span in line["spans"]:
+                if first in span.get("text", ""):
+                    found.append(round(float(span["origin"][1]), 2))
+    return found
+
+
+class TestItSitsOnTheOriginalBaseline:
+    """The reported bug: replaced lines had visibly different spacing.
+
+    `insert_textbox` fills a rectangle from the top using PyMuPDF's own leading,
+    so the text landed near the old line rather than on it. These pin the
+    replacement to the document's own pen positions.
+    """
+
+    def test_a_single_line_keeps_its_baseline(self) -> None:
+        before = baselines_of(a_pdf(), LATENCY)
+        assert before, "fixture did not contain the line"
+
+        result = edit_pdf_in_place(a_pdf(), [(LATENCY, LATENCY_REWRITE)])
+
+        after = baselines_of(result.pdf, LATENCY_REWRITE)
+        assert after == pytest.approx(before, abs=0.5)
+
+    def test_spacing_between_neighbours_is_unchanged(self) -> None:
+        """The thing a reader actually sees. An absolute baseline can be right
+        while the gap to the line above is wrong."""
+        gap_before = baselines_of(a_pdf(), LATENCY)[0] - baselines_of(a_pdf(), PAYMENTS)[0]
+
+        result = edit_pdf_in_place(a_pdf(), [(LATENCY, LATENCY_REWRITE)])
+
+        gap_after = (
+            baselines_of(result.pdf, LATENCY_REWRITE)[0]
+            - baselines_of(result.pdf, PAYMENTS)[0]
+        )
+        assert gap_after == pytest.approx(gap_before, abs=0.5)
+
+
+class TestThingsThatWouldCorruptThePage:
+    def test_a_sentence_appearing_twice_is_refused(self) -> None:
+        """Every match is redacted but only one is redrawn, so the other copy
+        would simply vanish from the resume. Silent deletion of the user's own
+        text is the worst outcome this module has."""
+        repeated = "Managed the release process end to end."
+        source = f"Priya Raman{chr(10)}{repeated}{chr(10)}Skills{chr(10)}{repeated}{chr(10)}"
+
+        result = edit_pdf_in_place(build_resume_pdf(source), [(repeated, "Ran releases.")])
+
+        assert result.applied == 0
+        assert "appears more than once" in result.skipped[0][1]
+        # Both copies still there.
+        assert text_of(result.pdf).count("Managed the release process") == 2
+
+    def test_a_rewrite_with_undrawable_characters_is_refused(self) -> None:
+        """The stock faces are Latin-1. Left alone these render as `?` in
+        somebody's resume."""
+        result = edit_pdf_in_place(a_pdf(), [(LATENCY, "Cut latency 中文 under load.")])
+
+        assert result.applied == 0
+        assert "cannot show" in result.skipped[0][1]
+
+    def test_typographic_characters_are_folded_rather_than_refused(self) -> None:
+        """An em dash is not a reason to lose a suggestion -- a hyphen says the
+        same thing and the face can draw it."""
+        result = edit_pdf_in_place(
+            a_pdf(), [(LATENCY, "Cut latency — under “peak” load.")]
+        )
+
+        assert result.applied == 1
+        extracted = text_of(result.pdf)
+        assert "?" not in extracted
+        assert "under" in extracted
+
+    def test_two_changes_on_one_line_keep_only_the_first(self) -> None:
+        """Both would be drawn from their own start with their own wrapping, and
+        overlap into unreadable text."""
+        source = f"Priya Raman{chr(10)}Alpha beta gamma. Delta epsilon zeta.{chr(10)}"
+
+        result = edit_pdf_in_place(
+            build_resume_pdf(source),
+            [("Alpha beta gamma.", "Alpha one."), ("Delta epsilon zeta.", "Delta two.")],
+        )
+
+        assert result.applied == 1
+        assert any("already applies to that line" in why for _, why in result.skipped)
+
+    def test_line_art_survives_the_edit(self) -> None:
+        """Redaction's defaults strip line art that merely *touches* the
+        rectangle, which would take the rule under a section heading with it and
+        leave the page broken for reasons unrelated to the sentence."""
+        document = pymupdf.open(stream=a_pdf(), filetype="pdf")
+        page = document[0]
+        rect = page.search_for(LATENCY)[0]
+        page.draw_line((rect.x0, rect.y1 + 1), (rect.x1, rect.y1 + 1))
+        with_rule = document.tobytes()
+        before = len(pymupdf.open(stream=with_rule, filetype="pdf")[0].get_drawings())
+
+        result = edit_pdf_in_place(with_rule, [(LATENCY, LATENCY_REWRITE)])
+
+        after = len(pymupdf.open(stream=result.pdf, filetype="pdf")[0].get_drawings())
+        assert result.applied == 1
+        assert after == before
+

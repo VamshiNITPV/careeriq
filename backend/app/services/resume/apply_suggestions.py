@@ -198,6 +198,10 @@ async def apply_accepted(
         # claiming it.
         processing_status=ProcessingStatus.COMPLETE,
         processed_at=now,
+        # Not an upload. This is what keeps it out of "the newest thing the user
+        # gave us" -- the version the page opens by default, and the one
+        # Re-extract would otherwise re-parse into their profile.
+        is_generated=True,
     )
     session.add(version)
     await session.flush()

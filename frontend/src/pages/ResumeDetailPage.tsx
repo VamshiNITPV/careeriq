@@ -80,8 +80,9 @@ function Section({
  * v2 / v3" makes the reader open each to find out which is which.
  */
 function versionLabel(entry: ResumeVersionSummary): string {
-  const tailored = entry.original_filename.includes('-tailored')
-  const kind = tailored ? 'tailored' : 'original upload'
+  // The flag, not the filename. "-tailored" is a suffix built from the user's
+  // own upload name, so it would mislabel a file they happened to call that.
+  const kind = entry.is_generated ? 'tailored' : 'original upload'
   return `v${entry.version_number} — ${kind} · ${entry.original_filename}`
 }
 

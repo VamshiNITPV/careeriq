@@ -16,6 +16,8 @@ export interface ResumeVersionSummary {
   original_filename: string
   mime_type: string
   file_size_bytes: number
+  /** Produced by tailoring rather than uploaded. */
+  is_generated: boolean
   processing_status: ProcessingStatus
   processing_error: string | null
   processed_at: string | null

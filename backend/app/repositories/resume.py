@@ -180,7 +180,7 @@ class ResumeVersionRepository(BaseRepository[ResumeVersion]):
     async def latest_for_resumes(
         self, resume_ids: Sequence[uuid.UUID]
     ) -> dict[uuid.UUID, LatestVersion]:
-        """Newest version per resume, in one query.
+        """Newest **uploaded** version per resume, in one query.
 
         DISTINCT ON is PostgreSQL-specific and deliberate: the alternatives are
         a window function in a subquery or one SELECT per resume, and the
@@ -190,6 +190,14 @@ class ResumeVersionRepository(BaseRepository[ResumeVersion]):
         Ordered by version_number rather than created_at — the sequence number
         is the unique, monotonic thing, and two uploads in the same millisecond
         would make a timestamp ordering non-deterministic.
+
+        **Generated versions are excluded.** This field's contract is "the most
+        recent upload, successful or not — the version to re-parse", and
+        tailoring broke it by minting versions the user never uploaded. Three
+        things read this and all three went wrong together: the resume page
+        opened the tailored copy, the list's status pill described it, and
+        Re-extract would have re-parsed it — deriving profile skills from
+        wording written for one job application.
         """
         if not resume_ids:
             return {}
@@ -202,7 +210,10 @@ class ResumeVersionRepository(BaseRepository[ResumeVersion]):
                 ResumeVersion.processing_status,
                 ResumeVersion.processing_error,
             )
-            .where(ResumeVersion.resume_id.in_(resume_ids))
+            .where(
+                ResumeVersion.resume_id.in_(resume_ids),
+                ResumeVersion.is_generated.is_(False),
+            )
             .distinct(ResumeVersion.resume_id)
             .order_by(ResumeVersion.resume_id, ResumeVersion.version_number.desc())
         )

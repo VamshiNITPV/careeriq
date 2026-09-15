@@ -145,6 +145,22 @@ class ResumeVersion(Base, UUIDPrimaryKeyMixin, CreatedAtMixin):
     processing_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    #: This file was produced by tailoring, not uploaded by the user.
+    #:
+    #: Needed because "the newest version" and "the newest thing the user gave
+    #: us" stopped being the same row when tailoring started minting versions.
+    #: Everything that means the second -- which version to show by default,
+    #: which to re-parse, which status the list describes -- was reading the
+    #: first, so after tailoring it pointed at a generated file.
+    #:
+    #: A column rather than inferring it from the filename. The only other
+    #: signal is that a tailored file ends in "-tailored.pdf", which is a string
+    #: built from the user's own upload name and would be wrong the moment
+    #: somebody uploads a file called that.
+    is_generated: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+
     resume: Mapped[Resume] = relationship(
         back_populates="versions", lazy="joined", foreign_keys=[resume_id]
     )

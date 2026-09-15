@@ -24,6 +24,11 @@ class ResumeVersionSummary(BaseModel):
     processing_error: str | None
     processed_at: datetime | None
     created_at: datetime
+    #: Produced by tailoring rather than uploaded.
+    #:
+    #: Sent so the client can label a version without matching "-tailored" in a
+    #: filename built from the user's own upload name.
+    is_generated: bool
 
     # Deliberately absent: storage_key and content_hash. The key is an internal
     # address, and exposing it invites clients to construct their own.

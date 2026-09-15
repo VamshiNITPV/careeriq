@@ -87,13 +87,20 @@ def _latest_of(resume: Resume) -> LatestVersion | None:
     """Latest version from an already-loaded relationship.
 
     Resume.versions is ordered desc(version_number), so the newest is first.
-    Used by the detail endpoints in preference to a second query, which also
-    means the summary fields cannot contradict the `versions` array shipped
-    alongside them.
+    Used by the detail endpoints in preference to a second query.
+
+    **Generated versions are skipped**, matching `latest_for_resumes`. The field
+    means "the most recent upload", and tailoring mints versions the user never
+    uploaded. The two derivations must agree — a test pins that, because nothing
+    else would notice them drifting apart.
+
+    A consequence worth stating: this may now name a different row from
+    `versions[0]` in the same response. That is the point, not an inconsistency.
     """
-    if not resume.versions:
+    uploaded = [entry for entry in resume.versions if not entry.is_generated]
+    if not uploaded:
         return None
-    newest = resume.versions[0]
+    newest = uploaded[0]
     return LatestVersion(
         id=newest.id,
         version_number=newest.version_number,

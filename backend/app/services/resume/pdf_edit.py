@@ -4,37 +4,70 @@
 thing: takes the PDF they designed and swaps the accepted sentences in place, so
 what comes back still looks like their resume.
 
+## Draw on the document's own baselines
+
+A PDF line has a baseline -- the pen position its glyphs were drawn from. The
+first version of this placed replacements with `insert_textbox`, which fills a
+rectangle from the top down using PyMuPDF's own leading, so the new text landed
+near the old line rather than on it, and a two-line replacement used PyMuPDF's
+spacing instead of the document's. Visible immediately as a step in the line
+spacing.
+
+Every replacement line is now drawn at the baseline the original line used,
+read from the span's `origin`. The spacing is the document's by construction,
+because it *is* the document's -- nothing here computes a layout, so nothing
+here can disagree with one.
+
 ## Measure first, then redact
 
-A PDF has fixed geometry. Removing a sentence and writing a longer one back into
-the same box can overflow it, and PyMuPDF's answer to "it did not fit" is to
-draw nothing at all -- leaving a bullet point with empty space after it, which
-is how the first attempt at this produced a resume with a hole in it.
+Removing a sentence and writing a longer one back can overflow the space, and
+PyMuPDF's answer to "it did not fit" is to draw nothing at all -- leaving a
+bullet with a hole where a sentence used to be. Everything is measured against
+the real line geometry **before** anything is redacted, and a replacement that
+cannot be made is refused rather than half-applied.
 
-So every replacement is measured against its box **before** anything is redacted,
-and a replacement that cannot be made is refused rather than half-applied. The
-caller is told which ones failed and falls back to the generated document.
+Refusing is cheap: `apply_suggestions` falls back to the generated document,
+which always carries the same words. Corrupting a line the user never chose to
+change is not cheap, so every doubtful case refuses.
 
-## What this cannot do
+## What it refuses, and why each one would corrupt the page
 
-**Reflow.** If the rewrite is shorter, the space the old text occupied stays
-blank; if it is longer, it shrinks to fit rather than pushing the rest of the
-page down. Text below never moves, because moving it would mean re-laying out a
-document we did not author.
+- **The sentence appears more than once.** `search_for` returns every match, and
+  redacting all of them while drawing into one deletes a copy of the user's text
+  outright.
+- **Other text shares the sentence's last line.** Redaction removes any glyph
+  touching the rectangle, so a neighbour can be eaten by a sub-point overlap --
+  and a longer replacement is then drawn straight over whatever survived.
+- **Two accepted sentences share a line.** Each is drawn from its own start with
+  its own wrapping, so they overlap.
+- **A rotated page.** The relationship between extracted coordinates and drawing
+  coordinates stops being the identity, and getting it subtly wrong produces
+  garbled output rather than an error.
+- **Characters the face cannot draw.** See below.
 
-**Match the font exactly.** Embedded fonts in a real resume are *subsets* -- the
-LaTeX file this was built against carries `DGBDFT+CMR10`, containing only the
-glyphs that document already uses. New words routinely need glyphs that are not
-in there, so replacements are drawn in a stock face chosen to match the
-original's style. Close, and visibly not identical under inspection.
+## What it cannot do
 
-Both are stated plainly to the user rather than hidden, because a resume that
-looks subtly wrong is worse than one that is honestly different.
+**Reflow.** A shorter rewrite leaves the line it no longer fills blank; a longer
+one shrinks slightly rather than pushing the page down. Text below never moves,
+because moving it means re-laying out a document we did not author.
+
+**Match the font exactly.** Embedded fonts are *subsets* -- a LaTeX resume
+carries `DGBDFT+CMR10`, holding only the glyphs that document already uses -- so
+new words must be drawn in a stock face chosen to match the original's style,
+weight and colour. Close, and visibly not identical under inspection.
+
+**Draw outside Latin-1.** The stock faces are Latin-1. Typographic characters a
+model reaches for -- em dashes, curly quotes, ellipses -- are folded to their
+ASCII equivalents, and anything still outside Latin-1 refuses rather than
+rendering as `?` in someone's resume.
+
+**Keep justification.** A justified paragraph stretches word spacing to reach
+both margins; a replacement is drawn with natural spacing and is therefore
+ragged on the right inside it. Known, not currently corrected.
 """
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 
 import pymupdf
@@ -45,22 +78,48 @@ import pymupdf
 #: the same document, which is the only reason to be editing in place at all.
 _MIN_FONT_SIZE = 8.0
 
-#: Slack given to the box so `insert_textbox` accepts text that fits.
-#:
-#: It reserves line height plus leading, so a box matching the old text exactly
-#: is a few points short and refuses replacements that plainly fit. Harmless
-#: because line count is checked separately: text is drawn from the top down, so
-#: a taller box never moves anything.
-_EXTRA_HEIGHT = 8.0
-
-#: Stock faces. The original's own font cannot be reused -- see the docstring.
-_SERIF = "tiro"
-_SANS = "helv"
+#: Stock faces, by style. The original's own font cannot be reused -- see the
+#: module docstring. Keyed (serif, bold, italic).
+_FACES = {
+    (True, False, False): "tiro",
+    (True, True, False): "tibo",
+    (True, False, True): "tiit",
+    (True, True, True): "tibi",
+    (False, False, False): "helv",
+    (False, True, False): "hebo",
+    (False, False, True): "heit",
+    (False, True, True): "hebi",
+}
 
 #: Substrings that mark an embedded font as serif. `CM` is Computer Modern,
-#: which is what every LaTeX resume uses and what the first real document here
-#: turned out to be.
+#: which is what every LaTeX resume uses.
 _SERIF_HINTS = ("CM", "Times", "Serif", "Roman", "Georgia", "Garamond", "Minion")
+
+#: Span flag bits PyMuPDF sets for weight and slant.
+_FLAG_ITALIC = 1 << 1
+_FLAG_BOLD = 1 << 4
+
+#: Typographic characters folded to what a Latin-1 face can draw.
+#:
+#: A model reaches for these constantly. Left alone they render as `?` in a
+#: resume, which is worse than the plain equivalent.
+_FOLD = {
+    0x2014: "-",
+    0x2013: "-",
+    0x2018: "'",
+    0x2019: "'",
+    0x201C: '"',
+    0x201D: '"',
+    0x2026: "...",
+    0x00A0: " ",
+    0x2022: "•",  # bullet: Latin-1 has none, but it is in the fold table
+}
+
+#: Tolerance for "is this glyph past the end of the match", in points.
+#:
+#: A rectangle's right edge and the next glyph's left edge routinely differ by a
+#: fraction, so an exact comparison reports neighbours that are not there.
+_EDGE_TOLERANCE = 1.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,115 +133,185 @@ class EditResult:
 class NotEditableError(ValueError):
     """The document cannot be edited in place at all.
 
-    Distinct from "one sentence did not fit": this means the file is not a PDF
-    we can work with, and the caller should render a fresh document instead.
+    Distinct from "one sentence did not fit": this means the file is unusable
+    for editing, and the caller should render a fresh document instead.
     """
 
 
-def _face_for(page: pymupdf.Page, rect: pymupdf.Rect) -> tuple[str, float]:
-    """The stock face and size closest to whatever sits in `rect`.
-
-    Falls back to serif at 10pt, which is what a resume is unless it says
-    otherwise.
-    """
-    for block in page.get_text("dict")["blocks"]:
-        if block.get("type"):
-            continue
-        for line in block["lines"]:
-            for span in line["spans"]:
-                if not pymupdf.Rect(span["bbox"]).intersects(rect):
-                    continue
-                name = span.get("font", "")
-                serif = any(hint.lower() in name.lower() for hint in _SERIF_HINTS)
-                return (_SERIF if serif else _SANS), float(span.get("size", 10.0))
-    return _SERIF, 10.0
+@dataclass(frozen=True, slots=True)
+class _Style:
+    font: str
+    size: float
+    colour: tuple[float, float, float]
 
 
-def _writable_box(page: pymupdf.Page, rects: list[pymupdf.Rect]) -> pymupdf.Rect:
-    """The area a replacement may occupy.
+@dataclass(frozen=True, slots=True)
+class _Slot:
+    """One line of the original text, and exactly where it sat."""
 
-    The union of the matched rectangles is the *old text's* outline, which is
-    the wrong shape to measure against: a rewrite one word wider gets refused
-    even when it is shorter overall, because the stock face has different
-    metrics from the embedded one. What is actually available is the paragraph's
-    column, so the box takes its horizontal extent from the containing block.
+    x: float
+    #: The pen position the glyphs were drawn from. Drawing here is what makes
+    #: the spacing the document's own.
+    baseline: float
+    right: float
 
-    Vertically it grows downward into the gap before the next line, and no
-    further. `insert_textbox` reserves a full line height plus leading, so a box
-    sized to the old text's outline is a couple of points short of holding even
-    smaller replacement text -- which refused edits that would have fitted
-    comfortably. Stopping at the next line's top is what keeps that from
-    becoming an overlap.
-    """
-    box = rects[0]
-    for rect in rects[1:]:
-        box = box | rect
+    @property
+    def width(self) -> float:
+        return self.right - self.x
 
-    for block in page.get_text("dict")["blocks"]:
+
+def _fold(text: str) -> str:
+    """Fold typographic characters to what a Latin-1 face can draw."""
+    return text.translate(_FOLD)
+
+
+def _drawable(text: str) -> bool:
+    try:
+        text.encode("latin-1")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+def _lines_of(page_dict: dict) -> list[dict]:
+    return [
+        line
+        for block in page_dict["blocks"]
+        if not block.get("type")
+        for line in block["lines"]
+    ]
+
+
+def _style_of(span: dict) -> _Style:
+    name = span.get("font", "")
+    flags = int(span.get("flags", 0))
+    serif = any(hint.lower() in name.lower() for hint in _SERIF_HINTS)
+    face = _FACES[(serif, bool(flags & _FLAG_BOLD), bool(flags & _FLAG_ITALIC))]
+    return _Style(
+        font=face,
+        size=float(span.get("size", 10.0)),
+        # Read rather than defaulted to black: a bolded blue heading redrawn in
+        # plain black is wrong even on a perfect baseline.
+        colour=pymupdf.sRGB_to_pdf(int(span.get("color", 0))),
+    )
+
+
+def _block_right(page_dict: dict, rect: pymupdf.Rect) -> float:
+    """The paragraph's right edge, so a replacement may use the whole column."""
+    for block in page_dict["blocks"]:
         if block.get("type"):
             continue
         outline = pymupdf.Rect(block["bbox"])
-        if outline.contains(rects[0]):
-            # Right edge from the block, left edge from the text itself. Taking
-            # both from the block starts the replacement where the bullet glyph
-            # sits and paints over it -- every edited line lost its bullet and
-            # its indent, which is instantly visible in a list.
-            box = pymupdf.Rect(rects[0].x0, box.y0, outline.x1, box.y1)
-            break
-
-    # The next line below, wherever it is. Nothing may be drawn past it.
-    ceiling = page.rect.y1
-    for block in page.get_text("dict")["blocks"]:
-        if block.get("type"):
-            continue
-        for line in block["lines"]:
-            top = pymupdf.Rect(line["bbox"]).y0
-            if top >= box.y1 - 0.5:
-                ceiling = min(ceiling, top)
-
-    # Room for `insert_textbox` to accept the text at all. Safe because the
-    # caller has already established the replacement needs no more lines than
-    # the original -- so nothing is ever *drawn* below where the old text ended,
-    # however tall the box is told it may be.
-    box.y1 = max(box.y1 + _EXTRA_HEIGHT, min(ceiling, box.y1) + _EXTRA_HEIGHT)
-    return box
+        if outline.contains(rect):
+            return float(outline.x1)
+    return float(rect.x1)
 
 
-def _fit_size(
-    box: pymupdf.Rect, lines_available: int, text: str, font: str, size: float
-) -> float | None:
-    """Largest size at or below `size` whose text needs no more lines than the
-    original occupied, or None.
+def _text_after(line: dict, rect: pymupdf.Rect) -> bool:
+    """Is there text on this line past where the match ends?"""
+    for span in line["spans"]:
+        box = pymupdf.Rect(span["bbox"])
+        if (
+            span.get("text", "").strip()
+            and box.x1 > rect.x1 + _EDGE_TOLERANCE
+            and box.x0 >= rect.x1 - _EDGE_TOLERANCE
+        ):
+            return True
+    return False
 
-    Line count is the thing that matters, not the box. Text is drawn from the
-    top of the box down, so a taller box does not move the first line -- what
-    pushes into the row beneath is a replacement that *wraps* further than the
-    text it replaced. Measuring lines directly says exactly that, where asking
-    `insert_textbox` whether it fits conflates it with the box being a couple of
-    points short of its own leading.
+
+def _plan_lines(
+    page_dict: dict, rects: list[pymupdf.Rect]
+) -> tuple[list[_Slot], _Style] | None:
+    """Where each matched line sat and how it was styled, or None to refuse."""
+    lines = _lines_of(page_dict)
+    slots: list[_Slot] = []
+    style: _Style | None = None
+
+    for index, rect in enumerate(rects):
+        owner = next(
+            (line for line in lines if pymupdf.Rect(line["bbox"]).intersects(rect)), None
+        )
+        if owner is None or not owner["spans"]:
+            return None
+
+        # Only the *last* line can have text after the match; an earlier one ends
+        # because the sentence wrapped.
+        if index == len(rects) - 1 and _text_after(owner, rect):
+            return None
+
+        span = min(
+            owner["spans"],
+            key=lambda candidate: abs(pymupdf.Rect(candidate["bbox"]).x0 - rect.x0),
+        )
+        if style is None:
+            style = _style_of(span)
+
+        slots.append(
+            _Slot(
+                x=float(rect.x0),
+                baseline=float(span["origin"][1]),
+                right=_block_right(page_dict, rect),
+            )
+        )
+
+    return (slots, style) if style is not None else None
+
+
+def _wrap(text: str, slots: list[_Slot], font: str, size: float) -> list[str] | None:
+    """Greedy word wrap across the available lines, or None if it will not go.
+
+    Each line has its own width: the first may start mid-way along, where the
+    sentence began, while continuation lines start at their own indent.
     """
-    usable = box.width
-    if usable <= 0:
+    words = text.split()
+    if not words:
         return None
 
-    trial = size
+    out: list[str] = []
+    index = 0
+    for slot in slots:
+        if slot.width <= 0:
+            return None
+
+        current = ""
+        while index < len(words):
+            candidate = f"{current} {words[index]}".strip()
+            if pymupdf.get_text_length(candidate, fontname=font, fontsize=size) > slot.width:
+                break
+            current = candidate
+            index += 1
+
+        if not current and index < len(words):
+            # One word too wide for the line it must start on. Without this the
+            # loop cannot advance.
+            return None
+        out.append(current)
+
+    # Anything left needs a line that does not exist. Refusing is the point: the
+    # alternative is drawing over the row beneath.
+    return None if index < len(words) else out
+
+
+def _fit(text: str, slots: list[_Slot], style: _Style) -> tuple[list[str], float] | None:
+    trial = style.size
     while trial >= _MIN_FONT_SIZE:
-        width = pymupdf.get_text_length(text, fontname=font, fontsize=trial)
-        # A tenth of slack: the real wrap happens at word boundaries, so a line
-        # rarely uses its full width and this estimate runs slightly optimistic.
-        needed = math.ceil(width / (usable * 0.9))
-        if max(1, needed) <= lines_available:
-            return trial
+        wrapped = _wrap(text, slots, style.font, trial)
+        if wrapped is not None:
+            return wrapped, trial
         trial -= 0.5
     return None
 
 
-def edit_pdf_in_place(pdf_bytes: bytes, replacements: list[tuple[str, str]]) -> EditResult:
-    """Swap each `(original, suggested)` pair inside `pdf_bytes`.
+def _occurrences(page: pymupdf.Page, needle: str) -> int:
+    """How many times the sentence appears, ignoring how lines wrap."""
+    flat = " ".join(page.get_text().split())
+    target = " ".join(needle.split())
+    return 0 if not target else flat.count(target)
 
-    Returns the edited document plus what could not be done. Raises
-    `NotEditableError` only when the file itself is unusable.
-    """
+
+def edit_pdf_in_place(pdf_bytes: bytes, replacements: list[tuple[str, str]]) -> EditResult:
+    """Swap each `(original, suggested)` pair inside `pdf_bytes`."""
     try:
         document = pymupdf.open(stream=pdf_bytes, filetype="pdf")
     except Exception as exc:  # pragma: no cover - depends on the stored bytes
@@ -190,13 +319,30 @@ def edit_pdf_in_place(pdf_bytes: bytes, replacements: list[tuple[str, str]]) -> 
 
     if document.page_count == 0:
         raise NotEditableError("This PDF has no pages.")
+    if any(page.rotation for page in document):
+        # Extracted and drawing coordinates stop agreeing, and being subtly
+        # wrong here produces garbled text rather than a clean failure.
+        raise NotEditableError("Rotated pages cannot be edited in place.")
 
-    # Planned across the whole document first. Redacting as we go would mean a
-    # later failure leaves earlier sentences already removed.
-    planned: list[tuple[pymupdf.Page, list[pymupdf.Rect], pymupdf.Rect, str, str, float]] = []
+    # One extraction per page, reused. It is also the only copy of the geometry
+    # that survives: `apply_redactions` rewrites the content stream, so every
+    # measurement must happen before the first redaction.
+    page_dicts = {page.number: page.get_text("dict") for page in document}
+
+    planned: list[tuple[pymupdf.Page, list[pymupdf.Rect], list[_Slot], list[str], _Style, float]]
+    planned = []
     skipped: list[tuple[str, str]] = []
+    # Lines already claimed, as (page number, rounded baseline).
+    claimed: set[tuple[int, int]] = set()
 
     for original, suggested in replacements:
+        folded = _fold(suggested)
+        if not _drawable(folded):
+            skipped.append(
+                (original, "the rewrite uses characters this document's font cannot show")
+            )
+            continue
+
         located = False
         for page in document:
             rects = page.search_for(original)
@@ -204,34 +350,69 @@ def edit_pdf_in_place(pdf_bytes: bytes, replacements: list[tuple[str, str]]) -> 
                 continue
             located = True
 
-            box = _writable_box(page, rects)
-            font, size = _face_for(page, rects[0])
-            fitted = _fit_size(box, len(rects), suggested, font, size)
+            if _occurrences(page, original) > 1:
+                # Every match is redacted but only one is redrawn, so the others
+                # would simply vanish from the resume.
+                skipped.append((original, "that wording appears more than once in the document"))
+                break
+
+            geometry = _plan_lines(page_dicts[page.number], rects)
+            if geometry is None:
+                skipped.append(
+                    (original, "other text shares those lines, so replacing it would damage them")
+                )
+                break
+
+            slots, style = geometry
+            keys = {(page.number, round(slot.baseline)) for slot in slots}
+            if keys & claimed:
+                # Two replacements on one line are drawn from their own starts
+                # with their own wrapping, and overlap.
+                skipped.append((original, "another change already applies to that line"))
+                break
+
+            fitted = _fit(folded, slots, style)
             if fitted is None:
                 skipped.append((original, "the rewrite is too long for the space it would replace"))
-            else:
-                planned.append((page, rects, box, suggested, font, fitted))
+                break
+
+            wrapped, size = fitted
+            claimed |= keys
+            planned.append((page, rects, slots, wrapped, style, size))
             break
 
         if not located:
             # Usually because the sentence spans a column or page break, where
-            # the extracted text reads continuously but the page geometry does
-            # not.
+            # the extracted text reads continuously but the geometry does not.
             skipped.append((original, "that wording could not be located in the document"))
 
     for page, rects, _, _, _, _ in planned:
         for rect in rects:
             page.add_redact_annot(rect)
 
-    # Once per page, not once per rect: applying redactions rewrites the page's
-    # content stream, and doing that repeatedly invalidates the rectangles still
-    # queued against it.
     for page in {entry[0] for entry in planned}:
-        page.apply_redactions()
+        # Text only. The defaults also strip line art and images that merely
+        # *touch* the rectangle, which would take the rule under a section
+        # heading with them and leave the page looking broken in a way that has
+        # nothing to do with the sentence being replaced.
+        page.apply_redactions(
+            images=pymupdf.PDF_REDACT_IMAGE_NONE,
+            graphics=pymupdf.PDF_REDACT_LINE_ART_NONE,
+        )
 
-    for page, _, box, suggested, font, size in planned:
-        page.insert_textbox(box, suggested, fontsize=size, fontname=font, align=0)
+    for page, _, slots, wrapped, style, size in planned:
+        for slot, line in zip(slots, wrapped, strict=False):
+            if not line:
+                continue
+            # One call per line, at the original pen position. Passing the lines
+            # together would reintroduce PyMuPDF's own leading -- the bug this
+            # module was rewritten to remove.
+            page.insert_text(
+                (slot.x, slot.baseline),
+                line,
+                fontname=style.font,
+                fontsize=size,
+                color=style.colour,
+            )
 
-    return EditResult(
-        pdf=document.tobytes(), applied=len(planned), skipped=tuple(skipped)
-    )
+    return EditResult(pdf=document.tobytes(), applied=len(planned), skipped=tuple(skipped))

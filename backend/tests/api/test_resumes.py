@@ -1389,3 +1389,100 @@ class TestEntityExtraction:
 
         remaining = list((await db_session.scalars(select(WorkExperience))).all())
         assert [row.title for row in remaining] == ["Typed By Hand"]
+
+
+class TestLatestMeansTheNewestUpload:
+    """`latest_version_id` promises "the most recent upload, successful or not".
+
+    Tailoring broke that by minting versions the user never uploaded, and three
+    things read the field: which version the resume page opens, which status the
+    list reports, and which version Re-extract re-parses.
+    """
+
+    async def test_a_tailored_version_does_not_become_the_latest(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        auth_headers: dict[str, str],
+        run_pipeline,
+        seeded_skills: int,
+    ) -> None:
+        created = await client.post(f"{API}/resumes", headers=auth_headers, files=pdf_upload())
+        resume_id = created.json()["resume_id"]
+        uploaded = created.json()["version_id"]
+        await run_pipeline(uuid.UUID(uploaded))
+
+        source = await db_session.get(ResumeVersion, uuid.UUID(uploaded))
+        db_session.add(
+            ResumeVersion(
+                id=uuid.uuid4(),
+                resume_id=uuid.UUID(resume_id),
+                version_number=source.version_number + 1,  # type: ignore[union-attr]
+                storage_key=f"test/{uuid.uuid4()}.pdf",
+                original_filename="resume-tailored.pdf",
+                mime_type="application/pdf",
+                file_size_bytes=2048,
+                content_hash="b" * 64,
+                raw_text="tailored wording",
+                processing_status=ProcessingStatus.COMPLETE,
+                is_generated=True,
+            )
+        )
+        await db_session.commit()
+
+        detail = (await client.get(f"{API}/resumes/{resume_id}", headers=auth_headers)).json()
+        listed = (await client.get(f"{API}/resumes", headers=auth_headers)).json()
+        row = next(entry for entry in listed if entry["id"] == resume_id)
+
+        assert detail["latest_version_id"] == uploaded
+        # Two different queries derive this; nothing else would notice them
+        # drifting apart.
+        assert row["latest_version_id"] == uploaded
+        # The tailored version is still there, just not "the latest".
+        assert len(detail["versions"]) == 2
+
+    async def test_a_tailored_version_cannot_mask_a_failed_upload(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        auth_headers: dict[str, str],
+        run_pipeline,
+        seeded_skills: int,
+    ) -> None:
+        """The damaging case.
+
+        A tailored version is inserted COMPLETE with no error. If it counted as
+        the latest, the list row would stop reporting a broken upload entirely —
+        no red text, no "couldn't be read" pill — and the user would have no
+        indication anywhere that their resume never parsed.
+        """
+        created = await client.post(f"{API}/resumes", headers=auth_headers, files=pdf_upload())
+        resume_id = created.json()["resume_id"]
+        failed_id = uuid.UUID(created.json()["version_id"])
+
+        failed = await db_session.get(ResumeVersion, failed_id)
+        failed.processing_status = ProcessingStatus.FAILED  # type: ignore[union-attr]
+        failed.processing_error = "We couldn't read this file."  # type: ignore[union-attr]
+        db_session.add(
+            ResumeVersion(
+                id=uuid.uuid4(),
+                resume_id=uuid.UUID(resume_id),
+                version_number=failed.version_number + 1,  # type: ignore[union-attr]
+                storage_key=f"test/{uuid.uuid4()}.pdf",
+                original_filename="resume-tailored.pdf",
+                mime_type="application/pdf",
+                file_size_bytes=2048,
+                content_hash="c" * 64,
+                raw_text="tailored wording",
+                processing_status=ProcessingStatus.COMPLETE,
+                is_generated=True,
+            )
+        )
+        await db_session.commit()
+
+        listed = (await client.get(f"{API}/resumes", headers=auth_headers)).json()
+        row = next(entry for entry in listed if entry["id"] == resume_id)
+
+        assert row["latest_version_status"] == "FAILED"
+        assert row["latest_version_error"] == "We couldn't read this file."
+        assert row["latest_version_id"] == str(failed_id)

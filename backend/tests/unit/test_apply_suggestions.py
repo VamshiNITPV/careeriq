@@ -349,6 +349,31 @@ class TestASuccessfulApply:
         assert result.kept_layout is False
         assert (await store.get(result.version.storage_key)).startswith(b"%PDF-")
 
+    async def test_the_tailored_version_is_marked_generated(
+        self,
+        db_session: AsyncSession,
+        user_id: uuid.UUID,
+        store: LocalObjectStorage,
+    ) -> None:
+        """What keeps it out of "the newest thing the user gave us".
+
+        Three separate things read that: which version the page opens, which
+        status the list reports, and which version Re-extract re-parses. The
+        last would derive profile skills from wording written for one job.
+        """
+        analysis, version, rows = await a_setup(db_session, user_id)
+
+        result = await apply_accepted(
+            db_session,
+            analysis=analysis,
+            source=version,
+            accepted_ids={rows[0].id},
+            storage=store,
+        )
+
+        assert result.version.is_generated is True
+        assert version.is_generated is False
+
     async def test_the_source_version_keeps_its_own_text(
         self,
         db_session: AsyncSession,

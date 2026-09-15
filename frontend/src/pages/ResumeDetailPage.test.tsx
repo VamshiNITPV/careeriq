@@ -16,6 +16,7 @@ const VERSION: ResumeVersionDetail = {
   mime_type: 'application/pdf',
   file_size_bytes: 1024,
   processing_status: 'COMPLETE',
+  is_generated: false,
   processing_error: null,
   processed_at: '2026-09-04T09:00:00Z',
   created_at: '2026-09-04T08:59:00Z',
@@ -56,6 +57,7 @@ function detailFixture(overrides: Partial<ResumeDetail> = {}): ResumeDetail {
         mime_type: 'application/pdf',
         file_size_bytes: 1024,
         processing_status: 'COMPLETE',
+        is_generated: false,
         processing_error: null,
         processed_at: '2026-09-04T09:00:00Z',
         created_at: '2026-09-04T08:59:00Z',
@@ -118,6 +120,7 @@ describe('ResumeDetailPage', () => {
     const getVersion = vi.spyOn(resumeService, 'getVersion').mockResolvedValue({
       ...VERSION,
       processing_status: 'FAILED',
+      is_generated: false,
       processing_error: 'No text could be extracted.',
     })
     vi.spyOn(resumeService, 'get').mockResolvedValue(
@@ -369,6 +372,7 @@ describe('ResumeDetailPage', () => {
           mime_type: 'application/pdf',
           file_size_bytes: 1024,
           processing_status: 'COMPLETE',
+          is_generated: false,
           processing_error: null,
           processed_at: '2026-09-04T09:00:00Z',
           created_at: '2026-09-04T08:59:00Z',
@@ -376,10 +380,14 @@ describe('ResumeDetailPage', () => {
         {
           id: 'v8',
           version_number: 2,
-          original_filename: 'resume-tailored.pdf',
+          // Deliberately NOT named "-tailored". The label must come from the
+          // flag; the filename is built from the user's own upload name and
+          // would mislabel a file they happened to call that.
+          original_filename: 'my-cv.pdf',
           mime_type: 'application/pdf',
           file_size_bytes: 2048,
           processing_status: 'COMPLETE',
+          is_generated: true,
           processing_error: null,
           processed_at: '2026-09-15T09:00:00Z',
           created_at: '2026-09-15T08:59:00Z',
@@ -423,9 +431,7 @@ describe('ResumeDetailPage', () => {
       renderPage()
 
       expect(await screen.findByRole('button', { name: 'Download resume.pdf' })).toBeInTheDocument()
-      expect(
-        screen.getByRole('button', { name: 'Download resume-tailored.pdf' }),
-      ).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Download my-cv.pdf' })).toBeInTheDocument()
     })
   })
 })
