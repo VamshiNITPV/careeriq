@@ -134,9 +134,7 @@ def parse_suggestions(reply: str) -> ParseResult:
         grounded = entry.get("grounded_in")
         sources: tuple[str, ...] = ()
         if isinstance(grounded, list):
-            sources = tuple(
-                cleaned for raw in grounded if (cleaned := _clean(raw)) is not None
-            )
+            sources = tuple(cleaned for raw in grounded if (cleaned := _clean(raw)) is not None)
 
         kept.append(
             RawSuggestion(

@@ -20,6 +20,7 @@ from app.models.base import (
 from app.models.career import Certification, EducationRecord, Project, WorkExperience
 from app.models.embedding import CandidateEmbedding, JobEmbedding
 from app.models.enums import (
+    AnalysisStatus,
     ApplicationStatus,
     AuthProvider,
     EducationLevel,
@@ -32,12 +33,14 @@ from app.models.enums import (
     RecommendationFeedback,
     SalaryPeriod,
     SkillRequirement,
+    SuggestionDecision,
     UserRole,
     VerificationPurpose,
     WorkMode,
 )
 from app.models.job import Company, Job, JobSkill
 from app.models.job_fetch import JobFetchRun
+from app.models.optimization import OptimizationAnalysis, OptimizationSuggestion
 from app.models.profile import Profile
 from app.models.recommendation import RecommendationFeedbackRow
 from app.models.resume import Resume, ResumeVersion
@@ -56,6 +59,7 @@ _pg_ischema_names.setdefault("vector", _Vector)
 
 
 __all__ = [
+    "AnalysisStatus",
     "Application",
     "ApplicationStatus",
     "AuthProvider",
@@ -75,6 +79,8 @@ __all__ = [
     "JobSkill",
     "JobSource",
     "JobStatus",
+    "OptimizationAnalysis",
+    "OptimizationSuggestion",
     "ProcessingStatus",
     "ProficiencyLevel",
     "Profile",
@@ -88,6 +94,7 @@ __all__ = [
     "Skill",
     "SkillRequirement",
     "SoftDeleteMixin",
+    "SuggestionDecision",
     "TimestampMixin",
     "UUIDPrimaryKeyMixin",
     "User",

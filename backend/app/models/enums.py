@@ -41,8 +41,11 @@ class VerificationPurpose(StrEnum):
     storage. Splitting them would duplicate the issue/consume/expire logic.
     """
 
-    # noqa: the linter flags any assignment to a name containing "password" as
-    # a hardcoded credential. These are enum labels, not secrets.
+    # S105 flags any assignment to a name containing "password" as a hardcoded
+    # credential. These are enum labels, not secrets.
+    #
+    # Worded to avoid opening with the directive word itself: ruff read the
+    # previous phrasing as a malformed `noqa` and warned on every run.
     PASSWORD_RESET = "PASSWORD_RESET"  # noqa: S105
     EMAIL_VERIFICATION = "EMAIL_VERIFICATION"
 
@@ -227,3 +230,40 @@ class ApplicationStatus(StrEnum):
 
     SAVED = "SAVED"
     APPLIED = "APPLIED"
+
+
+class AnalysisStatus(StrEnum):
+    """Where one resume-optimization run has got to (US-6.1).
+
+    `POST /optimize/analyze` answers 202 and the work happens outside the
+    request, so the row exists before there is anything in it. Without a status
+    the caller cannot tell "still thinking" from "finished with nothing to say",
+    and those need different screens.
+
+    FAILED always carries a reason, for the same reason `ProcessingStatus` does:
+    a run that stops with no explanation is unusable to the user and to whoever
+    debugs it.
+    """
+
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    COMPLETE = "COMPLETE"
+    FAILED = "FAILED"
+
+
+class SuggestionDecision(StrEnum):
+    """What the user did with one suggestion (US-6.1 AC1).
+
+    PENDING rather than a nullable column: "not looked at yet" is a real state
+    the review screen has to render, and a null would make it indistinguishable
+    from data that failed to load.
+
+    REJECTED is kept rather than deleted. A rejected suggestion is evidence the
+    user was shown it and said no, which is the difference between a suggestion
+    that was never made and one that was declined -- and re-offering something
+    already refused is the surest way to make the feature annoying.
+    """
+
+    PENDING = "PENDING"
+    ACCEPTED = "ACCEPTED"
+    REJECTED = "REJECTED"

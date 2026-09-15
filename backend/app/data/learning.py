@@ -178,8 +178,7 @@ CURATED: dict[str, LearningStep] = {
         prerequisites=("Docker",),
         hours=45,
         outcome=(
-            "Deploy a service with a readiness probe and roll out a new version "
-            "without downtime."
+            "Deploy a service with a readiness probe and roll out a new version without downtime."
         ),
     ),
     "CI/CD": LearningStep(

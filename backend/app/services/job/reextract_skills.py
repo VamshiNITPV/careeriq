@@ -73,15 +73,11 @@ async def reextract_job_skills(session: AsyncSession) -> ReextractResult:
         )
     ) or 0
 
-    jobs = (
-        await session.scalars(select(Job).where(Job.status == JobStatus.ACTIVE))
-    ).all()
+    jobs = (await session.scalars(select(Job).where(Job.status == JobStatus.ACTIVE))).all()
 
     counts: dict[uuid.UUID, int] = dict(
         (
-            await session.execute(
-                select(JobSkill.job_id, func.count()).group_by(JobSkill.job_id)
-            )
+            await session.execute(select(JobSkill.job_id, func.count()).group_by(JobSkill.job_id))
         ).all()  # type: ignore[arg-type]
     )
 

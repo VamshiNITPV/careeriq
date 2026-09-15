@@ -145,9 +145,7 @@ def normalize_title(title: str) -> str:
 #: U+00A0. The `[ 	]+` collapse below does not match it, so that text reached
 #: the hash, the embedding and the section parser with spacing that only
 #: *looks* like spacing to a reader.
-_SPACE_LIKE = dict.fromkeys(
-    [0x00A0, *range(0x2000, 0x200B), 0x202F, 0x205F, 0x3000], " "
-)
+_SPACE_LIKE = dict.fromkeys([0x00A0, *range(0x2000, 0x200B), 0x202F, 0x205F, 0x3000], " ")
 
 
 def clean_description(text: str) -> str:

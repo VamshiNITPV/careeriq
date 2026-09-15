@@ -408,9 +408,9 @@ def score_experience(
 ) -> DimensionScore:
     """The asymmetric curve from ml.md section 4.1.
 
-        in range   -> 1.0
-        below min  -> max(0, 1 - (min - actual) / min)
-        above max  -> max(0.7, 1 - 0.05 * (actual - max))
+    in range   -> 1.0
+    below min  -> max(0, 1 - (min - actual) / min)
+    above max  -> max(0.7, 1 - 0.05 * (actual - max))
     """
     if min_years is None and max_years is None:
         return _stated(ONE, "This role doesn't state an experience requirement.")
@@ -626,8 +626,7 @@ def score_location(
     # beyond the place names that already failed to match.
     return _unknown(
         DimensionStatus.NEEDS_DATA,
-        "We can't tell how this role's location compares with yours, "
-        "so this counts as neutral.",
+        "We can't tell how this role's location compares with yours, so this counts as neutral.",
     )
 
 
@@ -691,8 +690,7 @@ def score_salary(
     if candidate_minimum is None:
         return _unknown(
             DimensionStatus.NEEDS_PROFILE,
-            "You haven't set a minimum salary, so this counts as neutral. "
-            "Add one to your profile.",
+            "You haven't set a minimum salary, so this counts as neutral. Add one to your profile.",
         )
 
     if job_currency is None or candidate_currency is None:
