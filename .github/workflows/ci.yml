@@ -180,7 +180,40 @@ jobs:
 
       - name: Tests
         working-directory: frontend
-        run: npx vitest run
+        # The JSON report exists so a failure can be read without access to the
+        # run logs. Downloading those needs admin rights on the repository, so a
+        # red build was otherwise just the word "failure" — which is not enough
+        # to fix anything, and is exactly the position this job left us in the
+        # first time it went red.
+        run: npx vitest run --reporter=default --reporter=json --outputFile=vitest-report.json
+
+      - name: Report which tests failed
+        if: failure()
+        working-directory: frontend
+        # Emitted as workflow annotations rather than plain output: annotations
+        # are readable through the public check-runs API, so the failure travels
+        # out of the log that cannot be read.
+        run: |
+          node -e '
+            const fs = require("fs");
+            let report;
+            try {
+              report = JSON.parse(fs.readFileSync("vitest-report.json", "utf8"));
+            } catch {
+              console.log("::error::vitest produced no JSON report — it died before running tests");
+              process.exit(0);
+            }
+            for (const file of report.testResults || []) {
+              for (const test of file.assertionResults || []) {
+                if (test.status !== "failed") continue;
+                const detail = (test.failureMessages || [])
+                  .join("\n")
+                  .slice(0, 1200)
+                  .replace(/\r?\n/g, "%0A");
+                console.log(`::error file=${file.name}::${test.fullName}%0A${detail}`);
+              }
+            }
+          '
 
       # The production build is its own failure mode. Vite's dev server tolerates
       # things `vite build` does not, so a suite passing under Vitest says
