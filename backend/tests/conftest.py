@@ -52,6 +52,19 @@ os.environ["EMBEDDING_PROVIDER"] = "fake"
 # fail in milliseconds with "not in cache" rather than pull 420 MB into CI.
 os.environ["HF_HUB_OFFLINE"] = "1"
 
+# The suite must never call a language model either, and this is not
+# theoretical: a service test that passed `provider=None` -- which means "use
+# whatever is configured" -- reached the real Gemini API and came back with a
+# 503 from Google. On a developer machine with a key in .env, every such test is
+# a live network call spending quota and returning something different each run.
+#
+# "none" rather than "fake" on purpose. A fake provider would answer, so a test
+# that forgot to inject one would pass while exercising a code path no user ever
+# takes. With nothing configured, `get_llm_provider()` returns None and the
+# forgetful test fails loudly instead.
+os.environ["LLM_PROVIDER"] = "none"
+os.environ["GEMINI_API_KEY"] = ""
+
 import pytest  # noqa: E402
 from alembic import command  # noqa: E402
 from alembic.config import Config  # noqa: E402

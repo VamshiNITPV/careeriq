@@ -77,6 +77,9 @@ CREATE TYPE skill_requirement  AS ENUM ('REQUIRED','PREFERRED');
 CREATE TYPE gap_severity       AS ENUM ('CRITICAL','HIGH','MEDIUM','LOW');
 -- As built: only SAVED and APPLIED. The rest arrive with the funnel (see 3.7).
 CREATE TYPE application_status AS ENUM ('SAVED','APPLIED');
+-- Added 2026-09-15 with US-6.1 (see 3.6b).
+CREATE TYPE analysis_status     AS ENUM ('PENDING','RUNNING','COMPLETE','FAILED');
+CREATE TYPE suggestion_decision AS ENUM ('PENDING','ACCEPTED','REJECTED');
 CREATE TYPE interview_status   AS ENUM ('CREATED','IN_PROGRESS','COMPLETED','ABANDONED');
 CREATE TYPE question_difficulty AS ENUM ('EASY','MEDIUM','HARD','EXPERT');
 CREATE TYPE notification_type  AS ENUM ('RESUME_PROCESSED','NEW_MATCHES','APPLICATION_REMINDER','INTERVIEW_READY','SYSTEM');
@@ -504,6 +507,73 @@ Computed per user against a target — a specific job, or an aggregate over thei
 `title`, `description`, `estimated_weeks`, `outcome`, `resources JSONB`,
 `depends_on_step_id` (FK → self — encodes Docker-before-Kubernetes, US-5.2 AC1),
 `is_completed`, `completed_at`.
+
+---
+
+### 3.6b Resume optimization
+
+Added 2026-09-15 with US-6.1. Not in the original design; specified here after the
+fact because the tables exist.
+
+#### `optimization_analyses`
+One run of "tailor this resume version to this job".
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `UUID` | PK |
+| `user_id` | `UUID` | FK CASCADE, NOT NULL |
+| `resume_version_id` | `UUID` | FK → `resume_versions.id` **RESTRICT**, NOT NULL |
+| `job_id` | `UUID` | FK → `jobs.id` **RESTRICT**, NOT NULL |
+| `status` | `analysis_status` | `PENDING` / `RUNNING` / `COMPLETE` / `FAILED` |
+| `error` | `TEXT` | NULL. Required when `FAILED` (CHECK) |
+| `rejected_by_validator` | `INTEGER` | Suggestions the fabrication validator discarded |
+| `dropped_malformed` | `INTEGER` | Entries the parser could not read |
+| `prompt_version` | `TEXT` | e.g. `resume_optimization@1` |
+| `model` | `TEXT` | As the provider reported it, not as configured |
+| `prompt_tokens` / `completion_tokens` | `INTEGER` | NULL when the provider does not say |
+| `completed_at` | `TIMESTAMPTZ` | NULL until it finishes |
+
+**RESTRICT on both foreign keys is deliberate.** The resume version is the ground
+truth every suggestion was validated against. Deleting it would leave rows
+claiming to be grounded in a document that no longer exists, destroying the audit
+trail ADR-012 exists to provide.
+
+**Two rejection counts, not one.** A model inventing a fact and a model returning
+the wrong shape are different problems with different fixes; summing them would
+hide which one happened.
+
+#### `optimization_suggestions`
+One proposed rewrite that **survived validation**. Suggestions the validator
+rejected are counted on the analysis and never stored — a row that must never be
+displayed is a row waiting to be displayed by mistake.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `UUID` | PK |
+| `analysis_id` | `UUID` | FK CASCADE, NOT NULL |
+| `position` | `INTEGER` | Presentation order, contiguous over what was kept |
+| `section` | `TEXT` | e.g. `experience`. Free text: it comes from a model |
+| `original` | `TEXT` | The resume text being replaced, copied exactly |
+| `suggested` | `TEXT` | CHECK `original <> suggested` |
+| `rationale` | `TEXT` | One sentence, referring to the job |
+| `grounded_in` | `JSONB` | Source spans the model cited — evidence, never proof |
+| `decision` | `suggestion_decision` | `PENDING` / `ACCEPTED` / `REJECTED` |
+| `decided_at` | `TIMESTAMPTZ` | Required unless `PENDING` (CHECK) |
+| `applied_version_id` | `UUID` | FK → `resume_versions.id` SET NULL. Only when `ACCEPTED` (CHECK) |
+| `validation` | `JSONB` | What the validator found, kept even though it passed |
+
+No `updated_at`: the text is what the model said and never changes. The decision
+does, and carries its own timestamp, so "when was this suggested" and "when was it
+acted on" stay separate facts.
+
+**Why these are stored when `skill_gaps` and learning paths are derived.** A plan
+is a view of data that moves. A suggestion is a specific thing a model said at a
+specific time, and the accept/reject is a decision about that exact wording —
+regenerating produces different words and leaves the decision pointing at nothing.
+
+**Rejected suggestions are kept.** A rejection is evidence the user was shown
+something and declined it, which is not the same as never having been offered it,
+and it stops the feature re-proposing what was already refused.
 
 ---
 
