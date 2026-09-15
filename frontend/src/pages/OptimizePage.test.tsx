@@ -110,6 +110,7 @@ describe('OptimizePage', () => {
       .spyOn(optimizationService, 'apply')
       .mockResolvedValue({
         resume_version_id: 'v2',
+        resume_id: 'r1',
         version_number: 2,
         applied: 1,
         rejected: 1,
@@ -158,6 +159,7 @@ describe('OptimizePage', () => {
     vi.spyOn(optimizationService, 'read').mockResolvedValue(analysis())
     vi.spyOn(optimizationService, 'apply').mockResolvedValue({
       resume_version_id: 'v2',
+      resume_id: 'r1',
       version_number: 2,
       applied: 1,
       rejected: 0,
@@ -169,6 +171,12 @@ describe('OptimizePage', () => {
     await user.click(screen.getByRole('button', { name: /Save as a new version/ }))
 
     expect(await screen.findByText(/original resume is unchanged/i)).toBeInTheDocument()
+    // Straight at the new version. "Created version 2" with nowhere to go
+    // leaves the reader hunting through a list for what they just made.
+    expect(screen.getByRole('link', { name: /See version 2/ })).toHaveAttribute(
+      'href',
+      '/resume/r1?v=v2',
+    )
   })
 
   it('reports how many were withheld for inventing something', async () => {

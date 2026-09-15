@@ -222,6 +222,7 @@ async def apply(
 
     return ApplyResponse(
         resume_version_id=result.version.id,
+        resume_id=result.version.resume_id,
         version_number=result.version.version_number,
         applied=result.applied,
         rejected=result.rejected,

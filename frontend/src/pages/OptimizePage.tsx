@@ -4,7 +4,7 @@ import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 import { optimizationService } from '@/services/optimizationService'
-import type { AnalysisResponse, Suggestion } from '@/types/optimization'
+import type { AnalysisResponse, ApplyResult, Suggestion } from '@/types/optimization'
 import { cn } from '@/utils/cn'
 
 /**
@@ -131,7 +131,7 @@ export function OptimizePage() {
   const [choices, setChoices] = useState<Record<string, 'accepted' | 'rejected'>>({})
   const [applying, setApplying] = useState(false)
   const [applyError, setApplyError] = useState<string | null>(null)
-  const [applied, setApplied] = useState<string | null>(null)
+  const [applied, setApplied] = useState<ApplyResult | null>(null)
   const startedAt = useRef(Date.now())
   const [timedOut, setTimedOut] = useState(false)
 
@@ -175,7 +175,7 @@ export function OptimizePage() {
     optimizationService.apply(analysisId, acceptedIds).then(
       (response) => {
         setApplying(false)
-        setApplied(response.message)
+        setApplied(response)
       },
       (error: unknown) => {
         setApplying(false)
@@ -213,17 +213,20 @@ export function OptimizePage() {
         </div>
       ) : result === null ? null : applied ? (
         <section className="rounded-xl border border-slate-200 bg-white p-6">
-          <p className="text-sm font-medium text-slate-900">{applied}</p>
+          <p className="text-sm font-medium text-slate-900">{applied.message}</p>
           <p className="mt-1 text-sm text-slate-600">
             {/* Named explicitly, because a "new version" that silently replaced
                 the old one would be a different and much worse promise. */}
             Your original resume is unchanged — this is a new version alongside it.
           </p>
+          {/* Straight at the new version, not the resume list. "Created
+              version 3" with nowhere to go makes the reader hunt for what they
+              just made. */}
           <Link
-            to="/resume"
+            to={`/resume/${applied.resume_id}?v=${applied.resume_version_id}`}
             className="mt-4 inline-block text-sm font-medium text-indigo-600 underline"
           >
-            Back to your resumes
+            See version {applied.version_number}
           </Link>
         </section>
       ) : result.status === 'FAILED' ? (

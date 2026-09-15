@@ -44,6 +44,8 @@ export interface AnalyzeStarted {
 
 export interface ApplyResult {
   resume_version_id: string
+  /** Carried so the success screen can link straight at the new version. */
+  resume_id: string
   version_number: number
   applied: number
   rejected: number

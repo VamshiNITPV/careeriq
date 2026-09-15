@@ -75,6 +75,12 @@ class DecideRequest(BaseModel):
 class ApplyResponse(BaseModel):
     #: The **new** version. The source version is never mutated (US-6.1 AC3).
     resume_version_id: uuid.UUID
+    #: The resume it belongs to.
+    #:
+    #: Carried so the client can link straight at the new version. Without it
+    #: "created version 3" is an announcement with nowhere to go, and the reader
+    #: has to find it themselves in a list.
+    resume_id: uuid.UUID
     version_number: int
     applied: int
     rejected: int
