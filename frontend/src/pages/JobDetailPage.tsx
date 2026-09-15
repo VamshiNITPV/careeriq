@@ -3,6 +3,7 @@ import { Link, useLocation, useParams } from 'react-router-dom'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 import { ForgetAppliedConfirmation, JobSaveControls } from '@/components/JobSaveControls'
+import { TailorResumeAction } from '@/components/TailorResumeAction'
 import { MatchBreakdown } from '@/components/jobs/MatchBreakdown'
 import { SimilarJobs } from '@/components/jobs/SimilarJobs'
 import { buttonClass } from '@/components/ui/buttonStyles'
@@ -424,6 +425,11 @@ function JobDetailView({
         <BulletList title="Responsibilities" items={job.responsibilities} />
         <BulletList title="Requirements" items={job.requirements} />
         <BulletList title="Benefits" items={job.benefits} />
+
+        {/* Above "Ready to apply?" deliberately: tailoring is worth doing
+            *before* clicking through to an application, and a section below the
+            apply button is one most readers never reach. */}
+        <TailorResumeAction jobId={job.id} />
 
         {applyLink !== null ? (
           <section className="border-t border-slate-200 pt-6">
