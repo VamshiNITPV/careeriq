@@ -46,6 +46,17 @@ python-docx>=1.1
 # and registered for that reason.
 fpdf2>=2.8
 
+# Edits the user's own PDF in place, so a tailored resume keeps the layout they
+# designed rather than arriving as a plain rendering of its text.
+#
+# **This makes the project AGPL-3.0** (see LICENSE). PyMuPDF is dual-licensed
+# AGPL-3.0 or commercial, and there is no permissive library that can replace
+# text inside a PDF -- pypdf and pdfplumber read only, and pikepdf works at a
+# level where this would mean hand-editing content streams. A deliberate trade,
+# taken because the source is public anyway; going closed-source later means
+# removing this or buying Artifex's licence.
+pymupdf>=1.24
+
 # --- email ---
 # Async SMTP. stdlib smtplib is blocking and would stall the event loop for the
 # duration of every send (ADR-004).

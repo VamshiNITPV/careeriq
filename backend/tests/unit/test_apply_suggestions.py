@@ -289,6 +289,66 @@ class TestASuccessfulApply:
         assert resume.current_version_id == before  # type: ignore[union-attr]
         assert resume.current_version_id != result.version.id  # type: ignore[union-attr]
 
+    async def test_it_edits_the_original_pdf_when_it_can(
+        self,
+        db_session: AsyncSession,
+        user_id: uuid.UUID,
+        store: LocalObjectStorage,
+    ) -> None:
+        """The layout path, not the fallback.
+
+        Without this the fallback could quietly win every time and the feature
+        would look like it worked while producing a plain document every run.
+        """
+        from app.services.resume.pdf import build_resume_pdf
+
+        analysis, version, rows = await a_setup(db_session, user_id)
+        # A real PDF behind the source version, which is what the editor needs.
+        await store.put(
+            version.storage_key, build_resume_pdf(RESUME_TEXT), content_type="application/pdf"
+        )
+
+        result = await apply_accepted(
+            db_session,
+            analysis=analysis,
+            source=version,
+            accepted_ids={rows[0].id},
+            storage=store,
+        )
+
+        assert result.kept_layout is True
+        blob = await store.get(result.version.storage_key)
+        with pdfplumber.open(io.BytesIO(blob)) as document:
+            extracted = " ".join(
+                " ".join((page.extract_text() or "").split()) for page in document.pages
+            )
+        assert rows[0].suggested in extracted
+        assert rows[0].original not in extracted
+
+    async def test_it_falls_back_when_the_source_is_not_a_pdf(
+        self,
+        db_session: AsyncSession,
+        user_id: uuid.UUID,
+        store: LocalObjectStorage,
+    ) -> None:
+        """A clean document is a better answer than no document. The user still
+        gets their wording; what they lose is the layout, and `kept_layout`
+        says so rather than leaving them to notice."""
+        analysis, version, rows = await a_setup(db_session, user_id)
+        version.mime_type = "text/plain"
+        await db_session.flush()
+
+        result = await apply_accepted(
+            db_session,
+            analysis=analysis,
+            source=version,
+            accepted_ids={rows[0].id},
+            storage=store,
+        )
+
+        assert result.kept_layout is False
+        assert (await store.get(result.version.storage_key)).startswith(b"%PDF-")
+
     async def test_the_source_version_keeps_its_own_text(
         self,
         db_session: AsyncSession,

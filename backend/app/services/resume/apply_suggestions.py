@@ -51,12 +51,16 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ids import uuid7
+from app.core.logging import get_logger
 from app.integrations.storage import ObjectStorage, build_storage_key
 from app.models.enums import ProcessingStatus, SuggestionDecision
 from app.models.optimization import OptimizationAnalysis, OptimizationSuggestion
 from app.models.resume import ResumeVersion
 from app.services.resume.anchoring import replace_span
 from app.services.resume.pdf import build_resume_pdf
+from app.services.resume.pdf_edit import NotEditableError, edit_pdf_in_place
+
+log = get_logger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +70,13 @@ class ApplyResult:
     rejected: int
     #: Accepted suggestions whose original text was not found.
     not_found: int
+    #: True when the new file is the user's own document with the sentences
+    #: swapped in, rather than a fresh rendering of the text.
+    #:
+    #: Reported because the two are visibly different things to receive, and
+    #: which one arrived is not something the reader should have to work out by
+    #: opening it.
+    kept_layout: bool = False
 
 
 #: Matches the `file_size_within_limit` CHECK on resume_versions.
@@ -141,7 +152,13 @@ async def apply_accepted(
 
     now = datetime.now(UTC)
     stem = source.original_filename.rsplit(".", 1)[0]
-    body = build_resume_pdf(text, title=f"{stem} (tailored)")
+
+    # Preferred: edit the document they designed, so what comes back still looks
+    # like their resume. Falls back to a clean rendering when the source is not
+    # a PDF, or when the edits cannot be placed without damaging the layout --
+    # `edit_pdf_in_place` refuses rather than half-applying, and a plain
+    # document is a better answer than a broken one.
+    body, kept_layout = await _render(storage, source, text, stem, applied)
 
     # The column has a CHECK for this. Without the guard it surfaces as an
     # IntegrityError at flush -- a database error for what is a plain domain
@@ -204,4 +221,44 @@ async def apply_accepted(
         applied=len(applied),
         rejected=len(rejected),
         not_found=len(not_found),
+        kept_layout=kept_layout,
     )
+
+
+async def _render(
+    storage: ObjectStorage,
+    source: ResumeVersion,
+    text: str,
+    stem: str,
+    applied: list[OptimizationSuggestion],
+) -> tuple[bytes, bool]:
+    """The tailored document, and whether it kept the original layout."""
+    clean = build_resume_pdf(text, title=f"{stem} (tailored)")
+
+    if source.mime_type != "application/pdf":
+        return clean, False
+
+    try:
+        original = await storage.get(source.storage_key)
+        edited = edit_pdf_in_place(original, [(row.original, row.suggested) for row in applied])
+    except NotEditableError as exc:
+        log.info("apply: falling back to a generated document", reason=str(exc))
+        return clean, False
+    except Exception as exc:
+        # Never let this path fail the apply. The clean document is always
+        # available and always correct; keeping the layout is the bonus.
+        log.warning("apply: in-place edit failed", error=f"{type(exc).__name__}: {exc}")
+        return clean, False
+
+    if edited.applied != len(applied):
+        # Some sentence could not be placed. Shipping a document missing half
+        # the accepted changes would misrepresent what the user chose, so the
+        # complete rendering wins.
+        log.info(
+            "apply: layout edit incomplete, using a generated document",
+            wanted=len(applied),
+            placed=edited.applied,
+        )
+        return clean, False
+
+    return edited.pdf, True

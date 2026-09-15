@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
-import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ResumeFilePreview } from '@/components/resume/ResumeFilePreview'
+import { Select } from '@/components/ui/Select'
+import type { ResumeVersionSummary } from '@/types/resume'
 import { VersionDownload } from '@/components/resume/VersionDownload'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
@@ -70,9 +72,23 @@ function Section({
   )
 }
 
+/**
+ * How one version reads in the picker.
+ *
+ * The number alone does not say what a version *is*. After tailoring, a resume
+ * holds the file the user uploaded and one generated copy per job, and "v1 /
+ * v2 / v3" makes the reader open each to find out which is which.
+ */
+function versionLabel(entry: ResumeVersionSummary): string {
+  const tailored = entry.original_filename.includes('-tailored')
+  const kind = tailored ? 'tailored' : 'original upload'
+  return `v${entry.version_number} — ${kind} · ${entry.original_filename}`
+}
+
 export function ResumeDetailPage() {
   const { resumeId } = useParams<{ resumeId: string }>()
   const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
 
   const [detail, setDetail] = useState<ResumeDetail | null>(null)
   const [version, setVersion] = useState<ResumeVersionDetail | null>(null)
@@ -453,11 +469,30 @@ export function ResumeDetailPage() {
             </Alert>
           )}
 
+          {/* A picker, not only a list further down. Which version you are
+              looking at is the first thing to establish here, because "your
+              resume" is now several documents: the file you uploaded, and a
+              tailored copy for every job you ran it against. */}
+          {detail.versions.length > 1 && (
+            <div className="max-w-md">
+              <Select
+                label="Which version"
+                value={version.id}
+                onChange={(event) => navigate(`/resume/${detail.id}?v=${event.target.value}`)}
+                options={detail.versions.map((entry) => ({
+                  value: entry.id,
+                  label: versionLabel(entry),
+                }))}
+              />
+            </div>
+          )}
+
           <ResumeFilePreview
             versionId={version.id}
             mimeType={version.mime_type}
             filename={version.original_filename}
             fileSizeBytes={version.file_size_bytes}
+            rawText={version.raw_text}
           />
 
           <Section

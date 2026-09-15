@@ -358,4 +358,74 @@ describe('ResumeDetailPage', () => {
     expect(await screen.findByTitle('Preview of resume.pdf')).toBeInTheDocument()
     expect(screen.getByText(/Couldn't load what this resume added/)).toBeInTheDocument()
   })
+
+  describe('choosing a version', () => {
+    const TWO = detailFixture({
+      versions: [
+        {
+          id: 'v7',
+          version_number: 1,
+          original_filename: 'resume.pdf',
+          mime_type: 'application/pdf',
+          file_size_bytes: 1024,
+          processing_status: 'COMPLETE',
+          processing_error: null,
+          processed_at: '2026-09-04T09:00:00Z',
+          created_at: '2026-09-04T08:59:00Z',
+        },
+        {
+          id: 'v8',
+          version_number: 2,
+          original_filename: 'resume-tailored.pdf',
+          mime_type: 'application/pdf',
+          file_size_bytes: 2048,
+          processing_status: 'COMPLETE',
+          processing_error: null,
+          processed_at: '2026-09-15T09:00:00Z',
+          created_at: '2026-09-15T08:59:00Z',
+        },
+      ],
+    })
+
+    it('says which version is the original and which is tailored', async () => {
+      /*
+       * "v1 / v2" alone makes the reader open each one to find out which is
+       * which — and after tailoring against several jobs there are more than
+       * two.
+       */
+      vi.spyOn(resumeService, 'get').mockResolvedValue(TWO)
+      vi.spyOn(resumeService, 'getVersion').mockResolvedValue(VERSION)
+
+      renderPage()
+
+      const picker = await screen.findByLabelText('Which version')
+      expect(picker).toHaveTextContent(/original upload/)
+      expect(picker).toHaveTextContent(/tailored/)
+    })
+
+    it('is absent when there is only one version', async () => {
+      // A picker with one option is a control that cannot do anything.
+      vi.spyOn(resumeService, 'get').mockResolvedValue(detailFixture())
+      vi.spyOn(resumeService, 'getVersion').mockResolvedValue(VERSION)
+
+      renderPage()
+      await screen.findByTitle('Preview of resume.pdf')
+
+      expect(screen.queryByLabelText('Which version')).not.toBeInTheDocument()
+    })
+
+    it('offers a download for every version, not just the open one', async () => {
+      // The service always took a version id; the only button was bound to
+      // whichever version happened to be showing.
+      vi.spyOn(resumeService, 'get').mockResolvedValue(TWO)
+      vi.spyOn(resumeService, 'getVersion').mockResolvedValue(VERSION)
+
+      renderPage()
+
+      expect(await screen.findByRole('button', { name: 'Download resume.pdf' })).toBeInTheDocument()
+      expect(
+        screen.getByRole('button', { name: 'Download resume-tailored.pdf' }),
+      ).toBeInTheDocument()
+    })
+  })
 })
