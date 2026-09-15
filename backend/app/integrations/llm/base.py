@@ -174,6 +174,20 @@ class LLMQuotaError(LLMError):
     """
 
 
+class LLMUnavailableError(LLMError):
+    """The provider is temporarily overloaded -- a 503, not a defect.
+
+    Separate from `LLMError` because the right response differs. A malformed
+    response is a bug to investigate; this is a queue that will clear, and the
+    user should be told to try again rather than sent looking for a problem on
+    their side. Google's own wording is "spikes in demand are usually
+    temporary".
+
+    Separate from `LLMQuotaError` too: quota is exhausted for a period and a
+    retry is pointless, while this often succeeds seconds later.
+    """
+
+
 class LLMSafetyError(LLMError):
     """The provider refused to answer on its own safety grounds.
 

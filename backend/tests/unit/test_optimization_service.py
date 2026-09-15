@@ -21,7 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ids import uuid7
-from app.integrations.llm import LLMError, LLMQuotaError
+from app.integrations.llm import LLMError, LLMQuotaError, LLMUnavailableError
 from app.integrations.llm.fake import FakeLLMProvider
 from app.models.enums import AnalysisStatus, JobSource, JobStatus
 from app.models.job import Job
@@ -274,6 +274,46 @@ class TestFailing:
         assert result.status is AnalysisStatus.FAILED
         assert analysis.status is AnalysisStatus.FAILED
         assert "later" in (analysis.error or "")
+
+    async def test_a_busy_provider_is_retried_once_and_then_succeeds(
+        self, db_session: AsyncSession, user_id: uuid.UUID, seeded_skills: int
+    ) -> None:
+        """A 503 cleared within seconds when this happened for real. Telling the
+        user to click again is asking them to do by hand what one short wait
+        does for them."""
+        analysis = await an_analysis(db_session, user_id)
+        provider = FakeLLMProvider([reply(HONEST)])
+        calls = {"n": 0}
+        original = provider.complete
+
+        async def busy_once(prompt):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise LLMUnavailableError("overloaded", provider="fake")
+            return await original(prompt)
+
+        provider.complete = busy_once  # type: ignore[method-assign]
+
+        result = await run_analysis(analysis.id, session=db_session, provider=provider)
+
+        assert calls["n"] == 2
+        assert result.status is AnalysisStatus.COMPLETE
+
+    async def test_a_provider_busy_twice_says_so_plainly(
+        self, db_session: AsyncSession, user_id: uuid.UUID, seeded_skills: int
+    ) -> None:
+        """Exactly one retry. Two would be a way of hammering through a real
+        outage, and the message has to say what is actually happening rather
+        than implying a fault on the user's side."""
+        analysis = await an_analysis(db_session, user_id)
+        provider = FakeLLMProvider(error=LLMUnavailableError("overloaded", provider="fake"))
+
+        result = await run_analysis(analysis.id, session=db_session, provider=provider)
+        await db_session.refresh(analysis)
+
+        assert result.status is AnalysisStatus.FAILED
+        assert "busy" in (analysis.error or "")
+        assert len(provider.calls) == 2
 
     async def test_a_provider_failure_is_recorded_not_raised(
         self, db_session: AsyncSession, user_id: uuid.UUID, seeded_skills: int

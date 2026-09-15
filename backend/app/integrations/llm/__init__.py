@@ -12,6 +12,7 @@ from app.integrations.llm.base import (
     LLMQuotaError,
     LLMResponse,
     LLMSafetyError,
+    LLMUnavailableError,
     Prompt,
     sanitise_untrusted,
 )
@@ -28,6 +29,7 @@ __all__ = [
     "LLMQuotaError",
     "LLMResponse",
     "LLMSafetyError",
+    "LLMUnavailableError",
     "Prompt",
     "get_llm_provider",
     "sanitise_untrusted",

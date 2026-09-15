@@ -20,6 +20,7 @@ from app.integrations.llm.base import (
     LLMError,
     LLMQuotaError,
     LLMSafetyError,
+    LLMUnavailableError,
     Prompt,
     sanitise_untrusted,
 )
@@ -250,6 +251,19 @@ class TestTheGeminiAdapter:
             await provider.complete(a_prompt())
 
         assert caught.value.retry_after == 30
+
+    async def test_a_503_is_an_availability_error_not_a_defect(self) -> None:
+        """Google's own wording is "spikes in demand are usually temporary".
+
+        Reported separately so the user is told to try again rather than sent
+        looking for a fault on their side -- and separately from quota, because
+        a 503 often succeeds seconds later while an exhausted quota does not.
+        """
+        body = {"error": {"message": "This model is currently experiencing high demand."}}
+        provider = gemini(lambda request: httpx.Response(503, json=body))
+
+        with pytest.raises(LLMUnavailableError, match="high demand"):
+            await provider.complete(a_prompt())
 
     async def test_a_blocked_prompt_is_a_safety_error(self) -> None:
         provider = gemini(

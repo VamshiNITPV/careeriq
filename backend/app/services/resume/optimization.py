@@ -31,6 +31,7 @@ reject the candidate for using their own words from two lines up.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -40,7 +41,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_session_factory
 from app.core.ids import uuid7
 from app.core.logging import get_logger
-from app.integrations.llm import LLMError, LLMProvider, LLMQuotaError, get_llm_provider
+from app.integrations.llm import (
+    LLMError,
+    LLMProvider,
+    LLMQuotaError,
+    LLMResponse,
+    LLMUnavailableError,
+    get_llm_provider,
+)
+from app.integrations.llm.base import Prompt
 from app.integrations.prompts import resume_optimization
 from app.integrations.prompts.parsing import ResponseFormatError, parse_suggestions
 from app.models.enums import AnalysisStatus
@@ -60,6 +69,9 @@ log = get_logger(__name__)
 #: sending it spends quota on a request that will not produce a useful answer.
 _MAX_RESUME_CHARS = 20_000
 _MAX_JOB_CHARS = 12_000
+
+#: Pause before the single retry on a busy provider.
+_RETRY_DELAY_SECONDS = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +100,30 @@ async def run_analysis(
 
     async with get_session_factory()() as own_session:
         return await _run(own_session, analysis_id, provider)
+
+
+async def _complete_with_one_retry(
+    provider: LLMProvider, prompt: Prompt, analysis_id: uuid.UUID
+) -> LLMResponse:
+    """One call, and one retry if the provider says it is merely busy.
+
+    The adapter deliberately does not retry, and that stays true for every other
+    failure: on a free tier a retry spends a scarce call to re-ask a question
+    that just failed. A 503 is the exception the rule does not cover. Google
+    marks it temporary in its own words -- "spikes in demand are usually
+    temporary" -- and it cleared within seconds when it happened here, so the
+    alternative is telling the user to do by hand what one short wait does for
+    them.
+
+    Exactly one retry, and only on 503. Two would start to look like a way of
+    hammering through a real outage.
+    """
+    try:
+        return await provider.complete(prompt)
+    except LLMUnavailableError:
+        log.info("optimization: provider busy, retrying once", analysis_id=str(analysis_id))
+        await asyncio.sleep(_RETRY_DELAY_SECONDS)
+        return await provider.complete(prompt)
 
 
 async def _fail(
@@ -145,7 +181,14 @@ async def _run(
     await session.commit()
 
     try:
-        response = await provider.complete(prompt)
+        response = await _complete_with_one_retry(provider, prompt, analysis_id)
+    except LLMUnavailableError:
+        return await _fail(
+            session,
+            analysis,
+            "The AI service is busy right now. This usually clears within a "
+            "minute -- please try again.",
+        )
     except LLMQuotaError:
         # Separated from any other failure because the user can act on it: wait
         # and try again. "Something went wrong" would invite a retry that is

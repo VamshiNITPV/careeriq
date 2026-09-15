@@ -27,6 +27,7 @@ from app.integrations.llm.base import (
     LLMQuotaError,
     LLMResponse,
     LLMSafetyError,
+    LLMUnavailableError,
     Prompt,
 )
 
@@ -104,6 +105,16 @@ class GeminiProvider:
                 provider=self.name,
                 status_code=429,
                 retry_after=int(retry_after) if retry_after and retry_after.isdigit() else None,
+            )
+
+        # 503 is Google saying "busy, come back" rather than anything being
+        # wrong with the request. Reported as its own type so the user is told
+        # to retry instead of being sent looking for a fault on their side.
+        if response.status_code == 503:
+            raise LLMUnavailableError(
+                f"Gemini is overloaded: {_error_detail(response)}",
+                provider=self.name,
+                status_code=503,
             )
 
         if response.status_code >= 400:
