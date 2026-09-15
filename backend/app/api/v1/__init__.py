@@ -13,6 +13,7 @@ from app.api.v1 import (
     career,
     health,
     jobs,
+    optimize,
     profile,
     recommendations,
     resumes,
@@ -42,5 +43,6 @@ api_router.include_router(skills.profile_skills_router)
 api_router.include_router(applications.router)
 api_router.include_router(career.router)
 api_router.include_router(recommendations.router)
+api_router.include_router(optimize.router)
 
 __all__ = ["api_router"]

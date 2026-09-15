@@ -74,6 +74,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine  # noqa: E4
 from sqlalchemy.pool import NullPool  # noqa: E402
 
 from app.api.deps import (  # noqa: E402
+    get_analysis_runner,
     get_embeddings_provider,
     get_jobs_provider,
     get_notification_service,
@@ -286,6 +287,17 @@ async def client(
         return None
 
     app.dependency_overrides[get_pipeline_runner] = lambda: no_background_pipeline
+
+    # Same reasoning for the optimization analysis. Tests that care about what
+    # the analysis produces call `run_analysis` directly with their own session
+    # and a scripted provider; the endpoint tests care only that the request is
+    # accepted, and a real background task here dies on the global engine with a
+    # MissingGreenlet that looks like a database bug rather than a missing
+    # override.
+    async def no_background_analysis(_analysis_id: uuid.UUID) -> None:
+        return None
+
+    app.dependency_overrides[get_analysis_runner] = lambda: no_background_analysis
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http_client:
         yield http_client

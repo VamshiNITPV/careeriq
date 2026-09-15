@@ -51,6 +51,7 @@ from app.services.job.service import JobService
 from app.services.matching.service import MatchingService
 from app.services.notifications import NotificationService
 from app.services.profile import ProfileService
+from app.services.resume.optimization import run_analysis
 from app.services.resume.pipeline import process_resume_version
 from app.services.resume.service import ResumeService
 
@@ -256,7 +257,24 @@ def get_pipeline_runner() -> Callable[[uuid.UUID], Awaitable[None]]:
     return run_resume_pipeline
 
 
+async def run_optimization_analysis(analysis_id: uuid.UUID) -> None:
+    """Background entry point for one resume-optimization run.
+
+    A dependency for the same reason `run_resume_pipeline` is: without an
+    override, every analyze test schedules a real task on the global engine,
+    which cannot see the test's uncommitted rows and dies there — far from the
+    test that caused it, and in a greenlet whose failure looks like a database
+    error rather than a missing override.
+    """
+    await run_analysis(analysis_id)
+
+
+def get_analysis_runner() -> Callable[[uuid.UUID], Awaitable[None]]:
+    return run_optimization_analysis
+
+
 PipelineRunnerDep = Annotated[Callable[[uuid.UUID], Awaitable[None]], Depends(get_pipeline_runner)]
+AnalysisRunnerDep = Annotated[Callable[[uuid.UUID], Awaitable[None]], Depends(get_analysis_runner)]
 SkillRepositoryDep = Annotated[SkillRepository, Depends(get_skill_repository)]
 ResumeVersionRepositoryDep = Annotated[
     ResumeVersionRepository, Depends(get_resume_version_repository)
