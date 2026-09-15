@@ -10,6 +10,7 @@ import { JobDetailPage } from '@/pages/JobDetailPage'
 import { JobsPage } from '@/pages/JobsPage'
 import { LoginPage } from '@/pages/LoginPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
+import { OptimizePage } from '@/pages/OptimizePage'
 import { ProfilePage } from '@/pages/ProfilePage'
 import { RegisterPage } from '@/pages/RegisterPage'
 import { ResetPasswordPage } from '@/pages/ResetPasswordPage'
@@ -82,6 +83,10 @@ export function App() {
                 <Route path="/saved-jobs" element={<SavedJobsPage />} />
                 <Route path="/skill-gaps" element={<SkillGapsPage />} />
                 <Route path="/learning-path" element={<LearningPathPage />} />
+                {/* Keyed by analysis id so a review is a real address: it can
+                    be reloaded, bookmarked, and returned to after the tab is
+                    closed mid-review. */}
+                <Route path="/optimize/:analysisId" element={<OptimizePage />} />
               </Route>
             </Route>
 
