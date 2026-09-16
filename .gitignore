@@ -37,6 +37,10 @@ pnpm-debug.log*
 .env
 .env.*
 !.env.example
+# Templates carry no secrets and have to reach a clone — .env.* above would
+# otherwise swallow .env.production.example, which is the one file somebody
+# deploying this actually needs.
+!.env.*.example
 *.pem
 *.key
 service-account*.json

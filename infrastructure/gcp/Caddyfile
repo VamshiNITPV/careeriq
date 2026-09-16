@@ -1,0 +1,55 @@
+# The only way into the deployed stack.
+#
+# Caddy rather than nginx for one reason: it obtains and renews the TLS
+# certificate itself. The repo's frontend/nginx.conf would need certbot beside
+# it, and it has no /api proxy — the app calls `/api/v1` on its own origin
+# (apiClient.ts: `const API_BASE = '/api/v1'`, with no build-time override), so
+# that config alone answers every API call with index.html.
+#
+# Same-origin is therefore not a preference here. It is what the frontend
+# requires, and serving both from one hostname is what provides it.
+
+{$SITE_ADDRESS} {
+	encode zstd gzip
+
+	# The API first. Ordering matters: the SPA fallback below would otherwise
+	# swallow /api/* and return index.html with a 200, which reads to the client
+	# as a successful response containing HTML where JSON was expected.
+	handle /api/* {
+		reverse_proxy backend:8000
+	}
+
+	handle {
+		root * /srv
+
+		# Hashed filenames, so they can never be stale. Matches the intent of
+		# frontend/nginx.conf's own asset rule.
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+
+		# index.html is not hashed. Cached, it would keep serving a build that
+		# points at asset files a deploy has already replaced.
+		@index path /index.html /
+		header @index Cache-Control "no-store"
+
+		# A client-routed app: every unknown path is a route, not a 404.
+		try_files {path} /index.html
+		file_server
+	}
+
+	# Mirrors the headers frontend/nginx.conf already sets, so the two do not
+	# disagree about the app's security posture depending on how it is served.
+	header {
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# Caddy advertises itself by default. A version number is free
+		# reconnaissance.
+		-Server
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

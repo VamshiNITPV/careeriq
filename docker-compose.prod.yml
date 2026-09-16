@@ -1,0 +1,106 @@
+# CareerIQ — the deployed stack.
+#
+# One Always Free e2-micro runs all of this. Not what ADR-011 designed (Cloud
+# Run + Cloud SQL), and the amendment there records why: Cloud SQL has no free
+# tier, Memorystore is worse, and Cloud Run reaching a database on a free VM
+# needs paid VPC egress. The constraint is NFR-11's $0.
+#
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# Read `.env.production` rather than `.env`, so a developer machine cannot start
+# this by accident with development settings.
+#
+# Deliberately absent:
+#   redis    — nothing in backend/app imports it. Not one line.
+#   mailpit  — a real SMTP provider is configured instead.
+#   embedder — the ml image is ~2GB and needs ~2GB of RAM; the VM has 1GB. The
+#              demo's vectors are seeded, so nothing needs to compute them.
+
+name: careeriq-prod
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-careeriq}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-careeriq}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # No ports. The database is reachable only from this compose network —
+    # a Postgres on a public IP is found by scanners within hours.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-careeriq} -d ${POSTGRES_DB:-careeriq}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    # 1GB of RAM shared three ways. Left unset, Postgres will happily plan as
+    # though it owns the machine.
+    shm_size: 128mb
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - max_connections=30
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: production
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-careeriq}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-careeriq}
+    # No ports either. Caddy is the only way in, which is what makes the TLS
+    # termination unavoidable rather than merely recommended.
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Builds the static bundle into a volume and exits. Not a long-running
+  # service: the frontend is files, and Caddy serves them.
+  #
+  # The repo's own `frontend` production stage is nginx, and its nginx.conf has
+  # no /api proxy — the app calls `/api/v1` on its own origin, so that image
+  # alone would answer every API call with index.html.
+  frontend-build:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: build
+    command: sh -c "rm -rf /out/* && cp -r /app/dist/. /out/"
+    volumes:
+      - static:/out
+    restart: "no"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # Caddy gets a real certificate for this name. An sslip.io hostname
+      # resolves to the IP embedded in it, so HTTPS needs no domain purchase —
+      # and FRONTEND_BASE_URL has to be https:// or the app refuses to boot.
+      SITE_ADDRESS: ${SITE_ADDRESS:?SITE_ADDRESS is required}
+    volumes:
+      - ./infrastructure/gcp/Caddyfile:/etc/caddy/Caddyfile:ro
+      - static:/srv:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    depends_on:
+      - backend
+      - frontend-build
+
+volumes:
+  pgdata:
+  static:
+  caddydata:
+  caddyconfig:
