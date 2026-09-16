@@ -26,6 +26,7 @@ from app.api.deps import (
     ResumeVersionRepositoryDep,
 )
 from app.api.v1.jobs import summary_of
+from app.core.config import get_settings
 from app.core.exceptions import ResourceNotFoundError
 from app.core.logging import get_logger
 from app.schemas.application import ApplicationRead
@@ -90,18 +91,18 @@ async def list_recommendations(
     if chosen is None:
         return RecommendationsResponse(availability="NO_RESUME", limit=limit)
 
-    if provider is None:
-        # No provider means no vectors to compare, which is indistinguishable
-        # from an unindexed resume as far as this endpoint can act on it.
-        return RecommendationsResponse(
-            availability="PENDING", limit=limit, resume_version_id=chosen
-        )
+    # Deliberately no check on `provider`. "This process cannot *create*
+    # vectors" and "there are no vectors" are different facts, and the comment
+    # that used to sit here called them indistinguishable. They are not: the
+    # vectors live in the database, and reading them is SQL. The recall below
+    # returns nothing when the resume genuinely has none, which is the signal
+    # that actually means what PENDING claims.
 
     recalled = await recall_jobs(
         session=session,
         user_id=user.id,
         resume_version_id=chosen,
-        model_name=provider.model_name,
+        model_name=get_settings().embedding_model,
         exclude_applied=exclude_applied,
     )
     if recalled is None:

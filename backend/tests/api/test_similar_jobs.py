@@ -286,21 +286,40 @@ class TestSimilarEndpoint:
         assert response.json()["availability"] == "PENDING"
         assert response.json()["items"] == []
 
-    async def test_says_disabled_when_no_provider_is_configured(
+    async def test_still_works_when_no_provider_is_configured(
         self,
         client: AsyncClient,
+        db_session: AsyncSession,
         auth_headers: dict[str, str],
         seeded_skills: int,
+        embedding_provider: FakeEmbeddingProvider,
     ) -> None:
-        # Through the transport, because the client fixture builds its own app
-        # with create_app() and never exposes it — the same route test_jobs.py
-        # already uses to switch off the jobs provider.
-        job_id = await submit(client, auth_headers, "Senior Backend Engineer", BACKEND)
+        """Vectors that already exist are readable without a provider.
+
+        This is the deployed shape, not a hypothetical: the VM runs with
+        `EMBEDDING_PROVIDER=none` because the model wants ~2GB and the machine
+        has 1GB, and its vectors are seeded. Comparing them is SQL and needs no
+        model at all.
+
+        Where this test used to assert `DISABLED` it was encoding the opposite
+        assumption — that no provider means no similarity — and that assumption
+        shipped: the demo's match-sorted browse came back empty with an
+        availability of PENDING and 0 of 40 jobs, because three endpoints
+        short-circuited on a provider they only wanted a model *name* from.
+        """
+        target = await submit(client, auth_headers, "Senior Backend Engineer", BACKEND)
+        await submit(client, auth_headers, "Backend Python Developer", ALSO_BACKEND)
+        await index_jobs(session=db_session, provider=embedding_provider, batch_size=10)
+
+        # Only now, once the vectors exist. Through the transport, because the
+        # client fixture builds its own app with create_app() and never exposes
+        # it — the same route test_jobs.py already uses for the jobs provider.
         client._transport.app.dependency_overrides[get_embeddings_provider] = lambda: None  # type: ignore[attr-defined]
 
-        response = await client.get(f"{API}/jobs/{job_id}/similar", headers=auth_headers)
+        response = await client.get(f"{API}/jobs/{target}/similar", headers=auth_headers)
 
-        assert response.json()["availability"] == "DISABLED"
+        assert response.json()["availability"] == "READY"
+        assert response.json()["items"] != []
 
     async def test_unknown_job_is_404(
         self, client: AsyncClient, auth_headers: dict[str, str]

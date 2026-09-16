@@ -155,12 +155,16 @@ export interface SimilarJob {
 export interface SimilarJobsResponse {
   items: SimilarJob[]
   /**
-   * Why `items` is empty, because it has three different reasons:
+   * Why `items` is empty, because it has two different reasons:
    *   READY    the comparison ran and nothing was close enough
    *   PENDING  this posting has no vector yet
-   *   DISABLED embeddings are switched off entirely (the default)
+   *
+   * `DISABLED` was removed: it meant "no embedding provider is configured",
+   * which stopped implying the feature was off. The deployed demo runs with no
+   * provider and seeded vectors, and similarity works there — comparing
+   * vectors is SQL. What is left is a fact about this posting's data.
    */
-  availability: 'READY' | 'PENDING' | 'DISABLED'
+  availability: 'READY' | 'PENDING'
   limit: number
   model_name: string | null
   model_version: string | null

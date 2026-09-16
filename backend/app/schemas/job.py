@@ -162,16 +162,26 @@ class SimilarJob(BaseModel):
 class SimilarJobsResponse(BaseModel):
     """Nearest neighbours by embedding.
 
-    `availability` exists because an empty `items` has three different meanings
+    `availability` exists because an empty `items` has two different meanings
     and the interface has to say which:
 
       READY    the comparison ran; nothing cleared the similarity floor
       PENDING  this posting has no vector yet, so there was nothing to compare
-      DISABLED no embedding provider is configured at all (the default)
+
+    **DISABLED was removed on 2026-09-16, because it had stopped being true.**
+    It meant "no embedding provider is configured", which used to imply the
+    feature could not work. The deployed demo breaks that implication: it runs
+    with `EMBEDDING_PROVIDER=none` and seeded vectors, so nothing can embed and
+    similarity still works perfectly — comparing vectors is SQL. Reporting
+    DISABLED there would have described a working feature as switched off.
+
+    What remains is a claim about data rather than configuration, which is the
+    only thing this endpoint can actually observe: either this posting has a
+    vector or it does not.
     """
 
     items: list[SimilarJob]
-    availability: Literal["READY", "PENDING", "DISABLED"]
+    availability: Literal["READY", "PENDING"]
     limit: int
     #: Which vectors produced this, so a result is attributable — the same
     #: reason the rows carry it (ADR-007).

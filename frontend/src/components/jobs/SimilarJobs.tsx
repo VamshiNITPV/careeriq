@@ -45,8 +45,6 @@ export function SimilarJobs({ jobId }: { jobId: string }) {
 
   if (result === null) return null
 
-  if (result.availability === 'DISABLED') return null
-
   if (result.availability === 'PENDING') {
     return (
       <section aria-labelledby="similar-heading" className="border-t border-slate-200 pt-6">

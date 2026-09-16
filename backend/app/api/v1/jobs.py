@@ -20,6 +20,7 @@ from app.api.deps import (
     MatchingServiceDep,
     ResumeVersionRepositoryDep,
 )
+from app.core.config import get_settings
 from app.core.exceptions import (
     ResourceNotFoundError,
     ServiceUnavailableError,
@@ -211,10 +212,16 @@ async def _match_sorted(
         return JobListResponse(
             items=[], total=0, limit=limit, offset=offset, availability="NO_RESUME"
         )
-    if provider is None:
-        return JobListResponse(
-            items=[], total=0, limit=limit, offset=offset, availability="PENDING"
-        )
+    # The *configured* model name, not a live provider's. Comparing vectors is
+    # SQL; nothing on this path embeds anything, and the provider was being
+    # constructed solely to read this string. That forced the API to carry torch
+    # and ~2GB of RAM to answer a question it already had the answer to -- and
+    # contradicted config.py's own note that "the API compares vectors in SQL
+    # and never loads a model".
+    #
+    # Found deploying: with EMBEDDING_PROVIDER=none the guard below reported
+    # PENDING for every match, so match-sorted browse was empty however many
+    # vectors were in the database.
 
     filters = {
         "query": query,
@@ -237,7 +244,7 @@ async def _match_sorted(
         session=session,
         user_id=user.id,
         resume_version_id=chosen,
-        model_name=provider.model_name,
+        model_name=get_settings().embedding_model,
         exclude_applied=exclude_applied,
         allowed_job_ids=allowed,
     )
@@ -578,13 +585,14 @@ async def similar_jobs(
     # GET /jobs/{id} makes, so the two cannot drift.
     await service.get_job(job_id)
 
-    if provider is None:
-        return SimilarJobsResponse(items=[], availability="DISABLED", limit=limit)
+    # Same reasoning as the match list: this endpoint reads vectors, it does not
+    # make them. DISABLED here meant "the API cannot load a model", which says
+    # nothing about whether this posting has been embedded.
 
     rows = await find_similar(
         session=session,
         job_id=job_id,
-        model_name=provider.model_name,
+        model_name=get_settings().embedding_model,
         limit=limit,
     )
     if rows is None:

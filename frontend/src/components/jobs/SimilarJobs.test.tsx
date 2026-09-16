@@ -88,19 +88,6 @@ describe('SimilarJobs', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('renders nothing when embeddings are switched off', async () => {
-    // The default state of the app. A heading explaining that a feature the
-    // user never asked for is disabled is pure noise.
-    vi.spyOn(jobService, 'similar').mockResolvedValue(
-      response({ items: [], availability: 'DISABLED', model_name: null, model_version: null }),
-    )
-
-    const { container } = renderSection()
-
-    await waitFor(() => expect(jobService.similar).toHaveBeenCalled())
-    expect(container).toBeEmptyDOMElement()
-  })
-
   it('renders nothing when the comparison found nothing close enough', async () => {
     // READY with no items is a real answer, but "Similar jobs (0)" is noise.
     vi.spyOn(jobService, 'similar').mockResolvedValue(response({ items: [] }))
