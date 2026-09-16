@@ -216,20 +216,40 @@ class SalaryPeriod(StrEnum):
 class ApplicationStatus(StrEnum):
     """What the user has done about a job.
 
-    Two members, not the seven database.md section 3.7 sketches. The rest of the
-    lifecycle — ASSESSMENT, INTERVIEW, OFFER, REJECTED, WITHDRAWN — arrives with
-    the funnel that reads them and the `application_events` log that records the
-    transitions (US-7.1 AC2), rather than sitting here as five values nothing can
-    set. Same rule as this module's opening note; same precedent as JobStatus
-    shipping without EXPIRED and SkillRequirement without NICE_TO_HAVE.
+    The full lifecycle, completed 2026-09-16 with US-7.1. It shipped as two
+    members under US-7.0 and the other five waited for the event log that
+    records moving between them — a status nothing can set is worse than a
+    status that does not exist.
+
+    Ordered as the funnel runs. SAVED through OFFER are **active**; REJECTED and
+    WITHDRAWN are where an application stops. US-7.1 AC1 asks for exactly this:
+    a forward chain, with the two endings reachable from any active state.
 
     APPLIED is always the user's own assertion. Auto-submitting applications is
     out of scope (requirements.md section 3), so nothing infers this and nothing
-    may claim it on the user's behalf.
+    may claim it on the user's behalf. The same holds for every stage past it:
+    an employer's reply is something the user tells us about, never something we
+    conclude.
     """
 
     SAVED = "SAVED"
     APPLIED = "APPLIED"
+    ASSESSMENT = "ASSESSMENT"
+    INTERVIEW = "INTERVIEW"
+    OFFER = "OFFER"
+    REJECTED = "REJECTED"
+    WITHDRAWN = "WITHDRAWN"
+
+
+class ApplicationEventType(StrEnum):
+    """What an `application_events` row records (US-7.1 AC2).
+
+    One member for now. `NOTE_ADDED` and `INTERVIEW_SCHEDULED` are sketched in
+    database.md section 3.7 and wait for notes and a scheduler to exist, on the
+    same rule as the statuses above.
+    """
+
+    STATUS_CHANGE = "STATUS_CHANGE"
 
 
 class AnalysisStatus(StrEnum):

@@ -9,7 +9,7 @@ Importing here makes `from app.models import Base` sufficient to see everything.
 from pgvector.sqlalchemy import Vector as _Vector
 from sqlalchemy.dialects.postgresql.base import ischema_names as _pg_ischema_names
 
-from app.models.application import Application
+from app.models.application import Application, ApplicationEvent
 from app.models.base import (
     Base,
     CreatedAtMixin,
@@ -21,6 +21,7 @@ from app.models.career import Certification, EducationRecord, Project, WorkExper
 from app.models.embedding import CandidateEmbedding, JobEmbedding
 from app.models.enums import (
     AnalysisStatus,
+    ApplicationEventType,
     ApplicationStatus,
     AuthProvider,
     EducationLevel,
@@ -61,6 +62,8 @@ _pg_ischema_names.setdefault("vector", _Vector)
 __all__ = [
     "AnalysisStatus",
     "Application",
+    "ApplicationEvent",
+    "ApplicationEventType",
     "ApplicationStatus",
     "AuthProvider",
     "Base",

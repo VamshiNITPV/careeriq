@@ -11,14 +11,22 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, text
 from sqlalchemy import Enum as SAEnum
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
-from app.models.enums import ApplicationStatus
+from app.models.base import (
+    Base,
+    CreatedAtMixin,
+    SoftDeleteMixin,
+    TimestampMixin,
+    UUIDPrimaryKeyMixin,
+)
+from app.models.enums import ApplicationEventType, ApplicationStatus
 from app.models.job import Job
 
 
@@ -119,8 +127,20 @@ class Application(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
         # A row whose status contradicts its timestamp is a row nothing can
         # trust. Modelled on jobs' duplicate_has_canonical, and it holds in both
         # directions so unmarking applied must clear the date.
+        # `applied_at` records that the application was actually sent, so it is
+        # required from APPLIED onward and forbidden at SAVED.
+        #
+        # Terminal statuses are exempt rather than required to carry one. AC1
+        # makes REJECTED and WITHDRAWN reachable from any active state including
+        # SAVED, and a job somebody bookmarked and then withdrew was never
+        # applied to — inventing a date for it would put a fabricated
+        # application into the funnel counts.
         CheckConstraint(
-            "(status = 'APPLIED') = (applied_at IS NOT NULL)",
+            "CASE"
+            " WHEN status = 'SAVED' THEN applied_at IS NULL"
+            " WHEN status IN ('REJECTED', 'WITHDRAWN') THEN true"
+            " ELSE applied_at IS NOT NULL"
+            " END",
             name="applied_has_timestamp",
         ),
         # A live row has to mean something. Once `is_saved` and `status` became
@@ -129,8 +149,12 @@ class Application(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
         # the row is deleted rather than kept as an empty relationship. The API
         # rejects that combination too; this is the backstop that makes it
         # unreachable by any other writer.
+        # Was `is_saved OR status = 'APPLIED'`, which refused an unbookmarked
+        # application the moment it reached ASSESSMENT. The rule it meant is
+        # unchanged: a row that is neither bookmarked nor past SAVED has nothing
+        # left to remember, and is deleted rather than kept empty.
         CheckConstraint(
-            "is_saved OR status = 'APPLIED'",
+            "is_saved OR status <> 'SAVED'",
             name="saved_or_applied",
         ),
         # database.md section 3.7 also specifies ix_applications_status on
@@ -141,3 +165,63 @@ class Application(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
         # When a funnel or real volume arrives it returns as
         # (user_id, status, created_at DESC).
     )
+
+
+class ApplicationEvent(Base, UUIDPrimaryKeyMixin, CreatedAtMixin):
+    """One thing that happened to an application (US-7.1 AC2).
+
+    **Append-only.** No `updated_at`, and nothing updates a row: a correction is
+    another event, not an edit. That is the whole value of the log — a funnel
+    built on numbers that can be quietly rewritten is a funnel nobody should
+    trust, and the analytics in US-7.2 read from here.
+
+    It also holds the one thing `applications.status` cannot: *where* an
+    application stopped. A row reading REJECTED says nothing about whether that
+    happened after a phone screen or the day it was sent, and those are
+    different outcomes to anyone looking at their own results.
+    """
+
+    __tablename__ = "application_events"
+    __table_args__ = (
+        # An event that changes nothing is noise in a record whose worth is that
+        # every row means something happened. NULL `from_status` is the
+        # exception: that row records the application coming into existence.
+        CheckConstraint("from_status IS NULL OR from_status <> to_status", name="ck_events_move"),
+        Index(
+            "ix_application_events_application_occurred",
+            "application_id",
+            "occurred_at",
+        ),
+    )
+
+    application_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("applications.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    #: NULL only on the event that records the application being created.
+    from_status: Mapped[ApplicationStatus | None] = mapped_column(
+        _pg_enum(ApplicationStatus, "application_status"), nullable=True
+    )
+    to_status: Mapped[ApplicationStatus] = mapped_column(
+        _pg_enum(ApplicationStatus, "application_status"), nullable=False
+    )
+    event_type: Mapped[ApplicationEventType] = mapped_column(
+        _pg_enum(ApplicationEventType, "application_event_type"),
+        nullable=False,
+        default=ApplicationEventType.STATUS_CHANGE,
+        server_default=ApplicationEventType.STATUS_CHANGE.value,
+    )
+
+    #: When it happened, which is not always when it was recorded.
+    #:
+    #: Separate from `created_at` because a user tells us about an interview
+    #: after it happened. Collapsing them would date every event to the moment
+    #: someone got round to logging it, and the funnel's timings would measure
+    #: their record-keeping rather than their job hunt.
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    #: Room for what a future event type needs. Named with a trailing underscore
+    #: because `metadata` is taken by SQLAlchemy's declarative base.
+    metadata_: Mapped[dict[str, Any] | None] = mapped_column("metadata_", JSONB, nullable=True)
