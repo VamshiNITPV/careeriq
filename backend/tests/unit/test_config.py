@@ -148,6 +148,9 @@ class TestProductionHardening:
             "email_provider": "smtp",
             "frontend_base_url": "https://app.example.com",
             "storage_provider": "gcs",
+            # Required now. Before the adapter existed, "gcs" satisfied the
+            # production check and then wrote to local disk anyway.
+            "storage_bucket": "careeriq-uploads",
             # conftest sets EMBEDDING_PROVIDER=fake so the suite never loads a
             # model, and pydantic reads the real environment regardless of
             # _env_file=None — so the baseline has to state this explicitly.
@@ -276,6 +279,37 @@ class TestJobsProvider:
                 log_json=True,
                 email_provider="smtp",
                 storage_provider="gcs",
+                storage_bucket="careeriq-uploads",
                 frontend_base_url="https://app.example.com",
                 jobs_provider="fake",
             )._check_production_hardening()
+
+
+class TestStorageProvider:
+    """The check that forbids local storage in production only means something
+    if there is another provider to mean instead.
+
+    Until the Cloud Storage adapter landed, the factory ignored this setting
+    entirely: `STORAGE_PROVIDER=gcs` passed the production check and wrote to
+    the container's disk, silently. A rule satisfiable without being obeyed is
+    worse than no rule, because it reads as one.
+    """
+
+    def test_an_unknown_provider_is_refused(self) -> None:
+        with pytest.raises(PydanticValidationError, match="STORAGE_PROVIDER"):
+            build(storage_provider="s3")
+
+    def test_gcs_without_a_bucket_is_refused(self) -> None:
+        """At startup, not at the first upload — by which point a user is
+        waiting and the file they chose is already gone."""
+        with pytest.raises(PydanticValidationError, match="STORAGE_BUCKET"):
+            build(storage_provider="gcs", storage_bucket="")
+
+    def test_gcs_with_a_bucket_is_accepted(self) -> None:
+        assert build(storage_provider="gcs", storage_bucket="my-bucket").storage_bucket == (
+            "my-bucket"
+        )
+
+    def test_local_needs_no_bucket(self) -> None:
+        assert build(storage_provider="local").storage_provider == "local"
+

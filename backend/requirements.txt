@@ -57,6 +57,14 @@ fpdf2>=2.8
 # removing this or buying Artifex's licence.
 pymupdf>=1.24
 
+# --- object storage ---
+# Resume files in production. The production config refuses local storage, and
+# until 2026-09-16 there was no adapter to refuse it *in favour of* — so the
+# setting was satisfiable without being obeyed.
+#
+# Synchronous, with no async interface; the adapter runs it on a worker thread.
+google-cloud-storage>=2.18
+
 # --- email ---
 # Async SMTP. stdlib smtplib is blocking and would stall the event loop for the
 # duration of every send (ADR-004).

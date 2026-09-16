@@ -1,9 +1,16 @@
 """Object storage behind an interface (ADR-011, ADR-018).
 
-Resume files never live on the application filesystem in production: Cloud Run
-containers have no persistent disk, and ADR-014 requires uploads to be stored
+Resume files never live on the application filesystem in production: a container
+has no persistent disk worth trusting, and ADR-014 requires uploads to be stored
 outside the app's own filesystem regardless. The local adapter exists so
-development needs no cloud account; the interface is shaped for Cloud Storage.
+development needs no cloud account.
+
+**The Cloud Storage adapter arrived 2026-09-16, with the deployment.** Until
+then the factory returned the local adapter unconditionally while the production
+config refused `STORAGE_PROVIDER=local` -- so setting anything else passed the
+check and wrote to the container's disk anyway, silently. A safety rule that can
+be satisfied without being obeyed is worse than no rule, because it reads as
+one.
 
 Keys are generated UUIDv7 paths, never derived from the client filename — that
 is what makes path traversal structurally impossible rather than filtered.
@@ -11,10 +18,11 @@ is what makes path traversal structurally impossible rather than filtered.
 
 from __future__ import annotations
 
+import asyncio
 import shutil
 from functools import lru_cache
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from app.core.config import get_settings
 from app.core.exceptions import ResourceNotFoundError
@@ -99,10 +107,81 @@ class LocalObjectStorage:
         self._root.mkdir(parents=True, exist_ok=True)
 
 
+class GcsObjectStorage:
+    """Google Cloud Storage.
+
+    The client is synchronous, so every call runs on a worker thread. That is
+    not a compromise: `google-cloud-storage` has no async interface, and the
+    alternative -- reimplementing signed requests over httpx -- would mean owning
+    authentication, retries and resumable uploads to avoid one `to_thread`.
+
+    The client is built lazily and reused. Constructing it reads credentials and
+    can perform network I/O, which must not happen at import time on a machine
+    that has none.
+    """
+
+    def __init__(self, bucket: str) -> None:
+        if not bucket:
+            raise ValueError("STORAGE_BUCKET is required when STORAGE_PROVIDER is 'gcs'.")
+        self._bucket_name = bucket
+        self._bucket: Any | None = None
+
+    @property
+    def name(self) -> str:
+        return f"gs://{self._bucket_name}"
+
+    def _handle(self) -> Any:
+        if self._bucket is None:
+            from google.cloud import storage as gcs
+
+            self._bucket = gcs.Client().bucket(self._bucket_name)
+        return self._bucket
+
+    async def put(self, key: str, content: bytes, *, content_type: str) -> None:
+        def _upload() -> None:
+            self._handle().blob(key).upload_from_string(content, content_type=content_type)
+
+        await asyncio.to_thread(_upload)
+        log.debug("stored object", key=key, bytes=len(content), content_type=content_type)
+
+    async def get(self, key: str) -> bytes:
+        from google.cloud.exceptions import NotFound
+
+        def _download() -> bytes:
+            return self._handle().blob(key).download_as_bytes()
+
+        try:
+            return await asyncio.to_thread(_download)
+        except NotFound as exc:
+            # The same error the local adapter raises, so callers do not have to
+            # know which storage they are talking to.
+            raise ResourceNotFoundError("Stored file") from exc
+
+    async def delete(self, key: str) -> None:
+        def _delete() -> None:
+            # Matches the local adapter's `unlink(missing_ok=True)`: deleting
+            # something already gone is the outcome the caller wanted.
+            self._handle().blob(key).delete(if_generation_match=None)
+
+        from google.cloud.exceptions import NotFound
+
+        try:
+            await asyncio.to_thread(_delete)
+        except NotFound:
+            return
+
+    async def exists(self, key: str) -> bool:
+        def _exists() -> bool:
+            return bool(self._handle().blob(key).exists())
+
+        return await asyncio.to_thread(_exists)
+
+
 @lru_cache(maxsize=1)
 def get_object_storage() -> ObjectStorage:
     settings = get_settings()
-    # Only the local adapter exists today. The Cloud Storage adapter lands in
-    # Phase 11; adding it is a new class and a config value, not a change to any
-    # caller.
+
+    if settings.storage_provider == "gcs":
+        return GcsObjectStorage(settings.storage_bucket)
+
     return LocalObjectStorage(Path(settings.storage_local_path))

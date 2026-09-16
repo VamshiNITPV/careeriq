@@ -63,8 +63,11 @@ class Settings(BaseSettings):
     bcrypt_rounds: int = Field(default=12, ge=4, le=18)
 
     # ---------------------------------------------------------------- storage
-    # local -> filesystem (development). gcs -> Cloud Storage (Phase 11).
+    # local -> filesystem (development). gcs -> Cloud Storage.
     storage_provider: str = "local"
+    #: The bucket, when `storage_provider` is "gcs". Required then, unused
+    #: otherwise.
+    storage_bucket: str = ""
     # Inside the container, and on a volume — never the application directory
     # (ADR-014). Cloud Run has no persistent disk, so production must not be
     # local (enforced in the production check below).
@@ -307,6 +310,25 @@ class Settings(BaseSettings):
         # it and gets a 401 from the vendor.
         if self.jobs_provider == "jsearch" and not self.jobs_api_key.strip():
             raise ValueError("JOBS_API_KEY is required when JOBS_PROVIDER is 'jsearch'.")
+        return self
+
+    @model_validator(mode="after")
+    def _storage_provider_is_usable(self) -> Settings:
+        """Refuse an unknown provider, and a bucket-less "gcs".
+
+        There was no validator here, and the factory ignored the value
+        entirely — so `STORAGE_PROVIDER=gcs` satisfied the production check that
+        forbids "local" and then wrote to local disk anyway. The check read like
+        a guarantee while guaranteeing nothing, which is the worst state for a
+        safety rule to be in.
+        """
+        allowed = {"local", "gcs"}
+        if self.storage_provider not in allowed:
+            raise ValueError(f"STORAGE_PROVIDER must be one of {sorted(allowed)}")
+        # Fail at startup rather than on the first upload, when a user is
+        # waiting and the file they chose is already gone.
+        if self.storage_provider == "gcs" and not self.storage_bucket.strip():
+            raise ValueError("STORAGE_BUCKET is required when STORAGE_PROVIDER is 'gcs'.")
         return self
 
     @model_validator(mode="after")
