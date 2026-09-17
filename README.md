@@ -17,6 +17,38 @@ conducts adaptive AI mock interviews.
 
 ---
 
+## Live demo
+
+> **Not yet deployed.** The stack below is built and verified end to end on a local
+> production stack, but no VM exists yet, so there is no URL to publish. This section
+> is written ahead of it deliberately — when the link goes in, nothing else here changes.
+
+| | |
+|---|---|
+| URL | *(pending — see [Deployment](#deployment))* |
+| Email | `demo@careeriq.app` |
+| Password | `CareerIQDemo2026!` |
+
+**The password is meant to be public.** It opens a shared account holding invented data
+and nothing else, so hiding it would make the demo harder to open without making anything
+safer.
+
+**The person is invented; the model output is not.** "Asha Mehra" is not anybody and her
+resume was written for `backend/app/data/demo.py` — publishing a real person's resume to
+be browsed by strangers is a different thing entirely. The 40 postings and every vector in
+the fixture are **real model output** exported from a working database, so the match scores
+are genuinely computed rather than written down. A fabricated vector would produce a
+similarity score that looks meaningful and means nothing, which is the failure mode
+[ADR-012](docs/architecture.md) exists to refuse.
+
+She is a payments backend engineer targeting AI roles. That is not decoration: it is what
+makes the skill-gap screen show real gaps (Machine Learning `CRITICAL`, LLMs and AWS `HIGH`)
+instead of congratulating her on a completeness nobody measured.
+
+The account is shared, so anything a visitor changes is reset nightly.
+
+---
+
 ## Why this project exists
 
 Job searching is fragmented. A candidate manually reads hundreds of job descriptions, guesses
@@ -410,6 +442,72 @@ files into cloud-only placeholders that Docker's build cannot read, and it will
 try to sync `node_modules/` and virtualenvs. If a build fails with
 `invalid file request`, or `npm install` hits file-lock errors, that is the
 cause — see ADR-016 in [docs/architecture.md](docs/architecture.md).
+
+---
+
+## Deployment
+
+One Always Free GCP `e2-micro`. Three containers stay up — Postgres, the backend, and
+Caddy — plus a one-shot container that builds the frontend bundle and exits. That is **not** what
+[ADR-011](docs/architecture.md) decided — it specified Cloud Run, Cloud SQL, Pub/Sub,
+Secret Manager and a CDN — and the ADR carries an amendment saying so rather than
+quietly contradicting itself.
+
+The reason is a single line item: **Cloud SQL has no free tier**, and Cloud Run reaching
+a Postgres anywhere else needs VPC egress. A stateless container with nowhere free to
+keep state is not a system, and NFR-11 caps spend at zero.
+
+```
+  Internet ──▶ Caddy :443  (obtains and renews its own certificate)
+                 ├── /        → the built frontend, from a volume
+                 └── /api/*   → backend :8000
+                                  │
+               Postgres 16 + pgvector, same host, not exposed
+```
+
+Same-origin is not a preference here. `apiClient.ts` calls `/api/v1` on its own origin
+with no build-time override, so one hostname *has* to serve both — which is also why the
+repo's `frontend/nginx.conf` is not used in production: it has no `/api` proxy and would
+answer every API call with `index.html` and a 200.
+
+```bash
+cp .env.production.example .env.production   # fill in; chmod 600; never committed
+./infrastructure/gcp/deploy.sh               # idempotent, same script every time
+
+# Seed the demo account (nightly, via cron)
+docker compose -f docker-compose.prod.yml run --rm backend python -m app.data.demo
+```
+
+`deploy.sh` runs `alembic upgrade head` as an explicit step before anything serves
+traffic. Nothing migrates automatically: the app's lifespan seeds the skill taxonomy but
+never migrates, and against a schema-less database that seeding logs an error and carries
+on — so the API would come up looking healthy and be unusable.
+
+**What is deliberately not deployed.** The embedder (the model wants ~2GB; the VM has 1GB),
+Redis (nothing depends on it), and Mailpit. So `EMBEDDING_PROVIDER=none` — and note that
+*no provider* does not mean *no vectors*: the demo's vectors are seeded, and comparing them
+is SQL. The consequence that is real: a résumé uploaded to the deployed instance gets no
+embedding until something else embeds it.
+
+**Production refuses to boot misconfigured.** `config.py` checks the whole set at startup
+and reports every problem together — `DEBUG=true`, a short or placeholder `JWT_SECRET_KEY`,
+`*` in `CORS_ORIGINS`, a non-https `FRONTEND_BASE_URL`, `STORAGE_PROVIDER=local` (a
+container's disk is the wrong place for somebody's résumé), `EMAIL_PROVIDER=console`
+(password reset would silently never arrive), and `fake` providers. `none` is allowed and
+degrades a feature to a 503 rather than inventing anything.
+
+**On cost.** The instance-hours are free and so is 5GB of Cloud Storage, but **free quotas
+do not stop when exhausted — they stop being free.** Egress is the line item that scales
+with visitors rather than time (1GB/month from North America at the time of writing), and
+serving the frontend from the same VM puts every asset byte through it. A **$1 budget alert
+is part of the setup, not an optional extra.** Free-tier terms change; verify current
+eligibility at `cloud.google.com/free` before deploying.
+
+**On latency.** The free tier is US-region only, so expect ~250ms from India. Accepted
+deliberately.
+
+**No redundancy.** One VM. If it dies the demo is down until it is rebuilt — fine for a
+portfolio demo and for nothing else.
 
 ---
 
