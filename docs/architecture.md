@@ -424,6 +424,10 @@ cycle, and enforce NFR-8 rate limits.
   upload that vanishes because Cloud Run scaled down is unacceptable.
 - *Cloud Pub/Sub locally.* Adds a cloud dependency to local development. We use Pub/Sub in
   production (ADR-011) behind the same queue interface.
+  **No longer true (2026-09-17).** ADR-011's amendment drops Pub/Sub, and the queue interface has no
+  production implementation: nothing enqueues, and Redis is not deployed either. The rejection of
+  in-process tasks above also loses its stated reason, since nothing scales down — though it stays
+  correct for the other one, that a task dies with its process.
 
 **Consequences.** One container covers three needs locally. Cache invalidation is explicit: changing
 preferences deletes matching `rec:{user_id}:*` keys. **Cache is never authoritative** — every cached
@@ -472,7 +476,7 @@ the query string leaks it into access logs.
 
 ---
 
-### ADR-011 — GCP Cloud Run for deployment
+### ADR-011 — GCP for deployment (Cloud Run as decided; a single VM as deployed)
 
 **Context.** NFR-11 caps development spend at zero, and the target is a deployed, demonstrable
 system.
@@ -497,6 +501,62 @@ which aligns with the security requirement to store files outside the applicatio
 
 > ⚠️ Free-tier terms and pricing change. Verify current eligibility before deploying, and set a
 > billing budget alert as the first action in a new GCP project.
+
+**Amendment (2026-09-17) — superseded in practice by a single VM.** What is deployed is not what
+this ADR specifies, and recording that is the point of writing it down.
+
+*Why.* NFR-11 caps spend at zero, and one piece of the Decision cannot be had for zero: **the
+database**. Cloud SQL has no free tier at all (~$7–10/month for the smallest instance), and Cloud Run
+reaching a Postgres anywhere else needs VPC egress, which is where another ~$8–10/month appears. Cloud
+Run itself is not the problem — its own free tier is generous — but a stateless container with
+nowhere free to keep state is not a system. (Managed Redis is worse still, ~$35/month, which is part
+of why nothing depends on Redis being deployed.) The choice was to relax NFR-11 or to change the
+architecture; the architecture changed.
+
+*What runs instead.* One Always Free `e2-micro` in `us-central1` running four containers:
+`pgvector/pgvector:pg16`, the backend's `production` image, a one-shot frontend build, and Caddy as
+the only way in. Postgres data lives in a named volume on the VM. See `docker-compose.prod.yml`,
+`infrastructure/gcp/Caddyfile` and `infrastructure/gcp/deploy.sh`.
+
+*What survived unchanged.* **Cloud Storage for uploads** — 5GB free in US regions, and
+`STORAGE_PROVIDER=local` is refused in production precisely so a container's disk cannot become the
+place a résumé lives. The no-persistent-local-disk consequence above is still enforced even though
+the reason for it (Cloud Run's ephemeral filesystem) no longer applies.
+
+*What was dropped.* Pub/Sub — the queue interface has no production implementation and nothing
+enqueues. Secret Manager — secrets are a root-owned `chmod 600` `.env.production` on the VM, which is
+weaker and is a deliberate trade for $0. Cloud Logging — logs are JSON on stdout, read with
+`docker compose logs`. The CDN — Caddy serves the static build from a volume, which is also what
+makes the frontend's same-origin `/api/v1` calls work without a build-time override.
+
+*The rejected alternative was rejected for the right reason and chosen anyway.* "Compute Engine VM.
+Cheapest at idle, but we hand-roll deployment, TLS, scaling, and health checks" — all four are
+accurate, and all four were paid. The estimate that was wrong is TLS: Caddy obtains and renews a
+certificate for `<ip>.sslip.io` with no domain purchase and no certbot, so that cost is close to
+zero. Scaling was not paid because there is none.
+
+*Consequences, stated rather than discovered.*
+- **1GB of RAM** holds Postgres, the API and Caddy together. 2GB of swap is part of the VM setup, not
+  an optimisation. Enough for a demo; not for load.
+- **The embedder is not deployed at all.** The model wants ~2GB. So `EMBEDDING_PROVIDER=none`, the
+  demo's vectors are seeded, and the API only ever compares them in SQL. A résumé uploaded to the
+  deployed instance gets no embedding until something else embeds it. Note that "no provider" must
+  not be read as "no vectors" — conflating the two blanked the demo's match list once already.
+- **No scale-to-zero, and no need for it.** Always Free is an inclusive hourly allowance, so an idle
+  VM and a busy one cost the same — for the *instance*.
+- **Egress is the part that can still bill.** The instance-hours are free; outbound traffic is only
+  free up to a monthly allowance (1GB from North America at the time of writing, excluding China and
+  Australia), and **free quotas do not stop when exhausted — they stop being free.** This is the one
+  line item that scales with visitors rather than with time, which is why a budget alert at $1 is
+  part of the VM setup and not an optional extra. Serving a static frontend from the same VM puts
+  every asset byte through this allowance; the CDN that ADR-011 originally specified would not have.
+- **~250ms from India**, accepted deliberately; the free tier is US-region only.
+- **No redundancy.** If the VM dies the demo is down until it is rebuilt. Acceptable for a portfolio
+  demo and not for anything else.
+
+*To move back*, the pieces are deliberately swappable: `STORAGE_PROVIDER` already branches, and the
+backend reads `DATABASE_URL`. Cloud Run + Cloud SQL needs a budget that is not zero, a Cloud SQL
+instance, VPC egress, and the frontend served from somewhere other than Caddy.
 
 ---
 
@@ -592,7 +652,9 @@ personal data, and file upload plus LLM invocation is a large attack surface.
 - Redis-backed rate limiting (NFR-8), stricter on AI endpoints.
 - Pydantic validation on every input.
 - Explicit CORS allow-list — never `*` with credentials.
-- All secrets from environment / Secret Manager. Nothing in git; `.env` is gitignored.
+- All secrets from the environment. Nothing in git; `.env` is gitignored. *Secret Manager was the
+  plan; the deployed VM uses a root-owned `chmod 600` `.env.production` instead (ADR-011
+  amendment), which is weaker and is a deliberate trade for $0.*
 - SQL injection prevented by parameterized ORM queries; raw SQL requires bound parameters.
 - Error responses never leak stack traces or internal identifiers in production.
 
@@ -1132,7 +1194,7 @@ production value. Missing required config fails loudly at startup, not at first 
 | Resume parsing accuracy on varied layouts | Poor profiles → poor matches | Confidence scores + user correction (US-2.4); measured via evaluation set |
 | Hand-tuned ranking weights are wrong | Bad recommendations | Weights are config, validated against labelled dataset; learned model is the migration path |
 | Scanned/image PDFs | Extraction returns nothing | Detect and reject with a clear message; do not silently produce garbage |
-| Cold starts on Cloud Run | Slow first request | Keep ML models out of the API container's import path; consider min-instances if it matters |
+| Cold starts | Slow first request | Keep ML models out of the API container's import path. The Cloud Run trigger is gone with ADR-011's amendment — the VM's containers stay up — but the rule earns its keep anyway: it is why the API image has no torch, which is what lets a 1GB VM run it at all |
 | Scope is large for one developer | Never finishing | Strict phase gates; each phase is independently demonstrable |
 | Embedding model change invalidates vectors | All matches break | `model_name`/`model_version` stored per vector; re-embedding is a supported migration |
 | Jobs API quota exhausted, or its terms change | Corpus stops growing; stored rows keep their links | Provider behind `JobProvider` (ADR-019); `PARTNER_API` + namespaced `external_id` makes per-provider removal one query |

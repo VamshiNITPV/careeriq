@@ -37,7 +37,7 @@ CareerIQ turns that into one instrumented, measurable system.
 | Database | PostgreSQL 16 + `pgvector` |
 | Cache / Queue | Redis 7 |
 | AI / ML | spaCy, Sentence Transformers, Google Gemini (behind a provider abstraction) |
-| Infrastructure | Docker Compose (local), GCP Cloud Run + Cloud SQL + Cloud Storage + Pub/Sub |
+| Infrastructure | Docker Compose (local and deployed), one GCP `e2-micro` VM + Cloud Storage, Caddy for TLS |
 | CI/CD | GitHub Actions |
 | Testing | Pytest, Vitest, React Testing Library |
 
