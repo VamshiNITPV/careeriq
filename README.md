@@ -470,6 +470,12 @@ with no build-time override, so one hostname *has* to serve both — which is al
 repo's `frontend/nginx.conf` is not used in production: it has no `/api` proxy and would
 answer every API call with `index.html` and a 200.
 
+Creating the server is a one-off, and the commands are written out in
+**[infrastructure/gcp/SETUP.md](infrastructure/gcp/SETUP.md)** — including the two
+defaults that quietly cost money (`pd-balanced` boot disks and multi-region buckets are
+not in the free tier) and the one item that may not be free at all: the external IPv4
+address. After that:
+
 ```bash
 cp .env.production.example .env.production   # fill in; chmod 600; never committed
 ./infrastructure/gcp/deploy.sh               # idempotent, same script every time
