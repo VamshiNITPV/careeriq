@@ -54,12 +54,26 @@ Do not trust a blog post on this, including one that sounds confident. **Your
 billing report after 24–48 hours is the only real answer**, and by then you have
 the $300 credit absorbing it anyway.
 
-If it does turn out to be charged and you want a true $0 after the trial:
+If it does turn out to be charged, there are only two real options:
 
-- Accept ~$3.65/month. It is the entire cost of the deployment.
-- Or use a free tunnel instead of a public IP (Cloudflare Tunnel, Tailscale
-  Funnel). The VM keeps no external IP and the tunnel provides the hostname.
-  This changes `SITE_ADDRESS` and removes the need for Caddy's own certificate.
+- **Accept ~$3.65/month.** It is the entire cost of the deployment.
+- **Move to a host that does not charge for the address.** Oracle Cloud Always
+  Free has no time limit and no IP charge, and gives far more RAM. The stack is
+  Docker Compose, so it is largely the same steps on a different machine.
+
+**A tunnel does not help here, and this is worth stating because it looks like
+it should.** Cloudflare Tunnel removes the need for an *inbound* public address,
+but a GCP VM with no external IP cannot reach the internet **outbound** either —
+and `cloudflared` has to dial out to Cloudflare to work at all. The only way to
+give a VM outbound access without its own address is Cloud NAT, and **Cloud NAT
+bills its own external IP at the same $0.005/hour**, plus $0.0014/hour of
+gateway fee and $0.045/GiB of data processing. That is roughly $56/year against
+$43.80 for simply keeping the address. Removing the IP to save money costs more
+money.
+
+The tunnel is still worth considering for *security* — the server stops being
+directly reachable, and DDoS protection comes free — but not as a way to cut
+the bill.
 
 Everything else here is genuinely free and has no end date: instance hours, a
 30GB standard disk, 5GB of Cloud Storage, and 1GB/month of outbound traffic.
