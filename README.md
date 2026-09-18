@@ -11,9 +11,11 @@ parses job descriptions, ranks jobs by personalized fit using hybrid semantic + 
 identifies skill gaps, suggests grounded resume improvements, tracks application outcomes, and
 conducts adaptive AI mock interviews.
 
-> **Status:** Phases 1–6 complete. 6.1 (embeddings), 6.2 (the explainable match score),
-> 6.3 (recommendations) and 6.4 (evaluation, including near-duplicate detection) are all
-> done and measured. Phase 7 is next.
+> **Status:** Phases 1–7 complete. Matching is measured rather than asserted (6.4), and
+> career intelligence — skill gaps, learning paths and grounded resume optimization — is
+> shipped with the fabrication validator that makes the last of those safe to offer at all.
+> Phase 8's application funnel and event log are in; its analytics are not. The deployment
+> is built and proven locally, and is waiting on a VM rather than on code.
 
 ---
 
@@ -151,11 +153,11 @@ Read these in order:
 | 6.2 | Hybrid explainable score — six dimensions, `/jobs/{id}/match` | ✅ Done⁶ |
 | 6.3 | Recommendations — two-stage retrieval, ranked list, dashboard tile | ✅ Done⁷ |
 | 6.4 | Evaluation — labelled dataset, metrics, weight tuning, near-duplicates | ✅ Done⁸ ⁹ |
-| 7 | Career intelligence — skill gaps, learning paths, resume optimization | ⬜ |
-| 8 | Application system — tracking, analytics, outcome analysis | ⬜ |
+| 7 | Career intelligence — skill gaps, learning paths, resume optimization | ✅ Done¹⁰ |
+| 8 | Application system — tracking, analytics, outcome analysis | 🟡 Part¹¹ |
 | 9 | AI interview — question generation, adaptive engine, evaluation | ⬜ |
 | 10 | Production engineering — Redis, background jobs, WebSockets, security | ⬜ |
-| 11 | Cloud — Docker, GCP, CI/CD, monitoring | ⬜ |
+| 11 | Cloud — Docker, GCP, CI/CD, monitoring | 🟡 Part¹² |
 | 12 | Final polish — testing, documentation, diagrams, demo | ⬜ |
 
 ¹ **Duplicate detection is stage one of two.** A content hash catches exact and
@@ -323,6 +325,46 @@ double-spend. It is off by default and needs a working `JOBS_PROVIDER`.
 **The honest limit:** a 200-request month buys about six fetches a day, and the matrix takes about
 a month to work through. After that, new arrivals slow to a trickle — a property of the free tier,
 not something the design can engineer away.
+
+¹⁰ **Three features, and the dangerous one is deliberately the most constrained.**
+Skill gaps (`/skills/gaps`) compare what the target roles ask for against what the
+candidate holds, weighted by how firmly each posting asks. Learning paths order
+what to study so a prerequisite never follows the thing that needs it. Both are
+computed per request and never stored, for the reason ADR-006 gives for not
+caching match scores: a gap depends on a corpus that changes daily, so a stored
+row would be wrong more often than right.
+
+**Resume optimization is the one that could do real harm**, and it is built to
+refuse rather than to impress. An LLM asked to improve a resume will invent an
+AWS certification the candidate does not hold — that is career damage, not a bug.
+So every suggestion is checked programmatically against the source resume, and
+any entity that is not already there is rejected before a human ever sees it
+(ADR-012). Suggestions that survive are shown as individual diffs to accept or
+reject one at a time, and accepted edits are written into a **new version** —
+the uploaded file is never modified. Some genuinely good suggestions get thrown
+out by the validator. That is the correct trade: a false negative costs a
+suggestion, a false positive costs the user their credibility in an interview.
+
+¹¹ **The funnel exists; the analytics do not yet.** `ApplicationStatus` carries
+all seven stages, transitions are validated against explicit rules rather than
+trusted from the client, and every change is recorded in `application_events` —
+so "how long did this sit in ASSESSMENT" is answerable rather than guessed at.
+The event log is written now precisely because it cannot be reconstructed later.
+
+What is missing is the outcome analysis this data exists for, and a screen to
+manage applications from. The demo seeds applications across every stage, so the
+data shape is real and visible through the API.
+
+¹² **Built and verified, not yet running anywhere.** The production stack, the
+Cloud Storage adapter, the deploy script, CI, and a seeded demo account are all
+done and were proven end to end on a local production stack — real migrations,
+real Caddy, real match scores. What has not happened is the deploy itself, which
+needs GCP credentials rather than code.
+
+ADR-011 was amended rather than quietly contradicted: the free tier ruled out
+Cloud SQL, so this runs on one Always Free `e2-micro` instead of Cloud Run.
+[infrastructure/gcp/SETUP.md](infrastructure/gcp/SETUP.md) has the commands.
+Monitoring is still outstanding.
 
 ---
 
