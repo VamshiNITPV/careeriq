@@ -7,27 +7,62 @@ You need the `gcloud` CLI: https://cloud.google.com/sdk/docs/install
 
 ---
 
-## Read this first — the one thing that may not be free
+## Read this first — what this actually costs
 
-Google's Always Free tier covers the **e2-micro instance**. It does **not**
-clearly cover the **external IPv4 address** attached to it. Google began
-charging for external IPv4 addresses (about **$0.004/hour, ~$3/month**) and I
-cannot check today's terms from here.
+Two separate things, and it is worth keeping them apart.
 
-So this may cost ~$3/month rather than $0, and the public IP is the reason.
+### The $300 trial credit — your first 90 days
 
-**Before you build anything, check the current terms at
-https://cloud.google.com/free and the pricing page for external IP addresses.**
+A new account gets **$300 in credit, valid for 90 days**. It pays for anything
+that is not covered by the free tier. So for the first 90 days this deployment
+costs you **nothing on your card**, whatever the free tier does or does not
+include.
 
-If it is charged and you want a true $0, the options are:
+Staying inside the free-tier monthly limits does **not** use up the credit. The
+credit is only touched by what goes over.
 
-- Accept ~$3/month. It is the whole cost of the deployment.
-- Use a free tunnel instead of a public IP (Cloudflare Tunnel, Tailscale
-  Funnel). The VM keeps no external IP and the tunnel gives you a hostname.
+**The real cliff is day 90, and it is not about money.** When the trial ends,
+Google stops every resource you created and marks your data for deletion. From
+Google's own documentation:
+
+> All resources you created during the trial are stopped. Further, any data you
+> stored in services like Compute Engine is marked for deletion and might be lost.
+
+There is a **30-day grace period** to upgrade to a paid account and recover it.
+After that it is permanently deleted. Nothing is charged automatically — if you
+do nothing, the account simply closes and the demo disappears.
+
+So put a reminder in your calendar for **day 85**. Losing the demo silently is a
+worse outcome than a $3 bill.
+
+### After you upgrade — the external IPv4 address
+
+Always Free has no end date and continues after you upgrade. The open question
+is the **public IP address**.
+
+Google raised the price of an in-use external IPv4 address on a standard VM to
+**$0.005/hour** on 1 February 2024, which is about **$3.65/month**.
+
+**Whether the free-tier e2-micro is exempt is genuinely unclear.** I checked
+Google's free-tier feature list, the Compute Engine getting-started page, and
+Google's own external-IP pricing announcement. **None of the three mentions the
+free tier in connection with external IPs.** Community answers contradict each
+other, and there are forum posts from people billed a small amount for an
+e2-micro they believed was free.
+
+Do not trust a blog post on this, including one that sounds confident. **Your
+billing report after 24–48 hours is the only real answer**, and by then you have
+the $300 credit absorbing it anyway.
+
+If it does turn out to be charged and you want a true $0 after the trial:
+
+- Accept ~$3.65/month. It is the entire cost of the deployment.
+- Or use a free tunnel instead of a public IP (Cloudflare Tunnel, Tailscale
+  Funnel). The VM keeps no external IP and the tunnel provides the hostname.
   This changes `SITE_ADDRESS` and removes the need for Caddy's own certificate.
 
-Everything else here is genuinely free: instance hours, a 30GB standard disk,
-5GB of Cloud Storage, and 1GB/month of outbound traffic.
+Everything else here is genuinely free and has no end date: instance hours, a
+30GB standard disk, 5GB of Cloud Storage, and 1GB/month of outbound traffic.
 
 **Free quotas do not stop when they run out. They stop being free.** Step 2 is
 a budget alert for exactly this reason. Do it before creating anything.
@@ -176,8 +211,9 @@ hostname, and a real certificate, without buying a domain.
 
 > **This IP is ephemeral.** If you stop and start the VM it changes, the
 > hostname changes, and the certificate no longer matches. A reboot is fine; a
-> stop/start is not. If you plan to stop the VM, reserve a static IP — but see
-> the warning at the top, because a static IP is the address that gets charged.
+> stop/start is not. If you plan to stop the VM, reserve a static IP — but note
+> that an *unattached* static IP is charged at a higher rate than an attached
+> one, so releasing it matters if you ever delete the VM.
 
 ---
 
@@ -354,8 +390,17 @@ Postgres data lives in a named volume and the containers restart themselves, so
 nothing should need doing by hand. If swap is missing after the reboot, the
 `/etc/fstab` line in step 8 did not get written.
 
-**Check the billing report after 24 hours.** That is the only real proof the
-cost is what you expect.
+**Check the billing report after 24–48 hours.** That is the only real proof of
+what this costs — and specifically, it is how you find out whether the external
+IP address is being charged, which Google's documentation does not say.
+
+Look for a line item named **"External IP Charge on a Standard VM"** (SKU
+`C054-7F72-A02E`). If it is there, the answer is yes and it is ~$3.65/month. If
+it is absent after two days, the free tier covers it.
+
+**Set a calendar reminder for day 85 of the trial.** On day 90 everything stops
+and your data is marked for deletion, with a 30-day grace period to upgrade and
+recover it.
 
 ---
 
