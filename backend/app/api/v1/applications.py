@@ -24,9 +24,11 @@ from app.core.exceptions import InvalidStateTransitionError, ResourceNotFoundErr
 from app.core.logging import get_logger
 from app.models.enums import ApplicationStatus
 from app.schemas.application import ApplicationRead, ApplicationTransition
+from app.schemas.application_analytics import FunnelAnalyticsResponse, FunnelSegment
 from app.schemas.application_list import ApplicationListItem, ApplicationListResponse
 from app.schemas.common import ErrorResponse
 from app.services.application import lifecycle
+from app.services.application.analytics import MIN_FOR_RATE, Segment, funnel_report
 from app.services.application.transition import NothingLeftError, apply_transition
 
 log = get_logger(__name__)
@@ -150,3 +152,52 @@ async def change_status(
         to_status=application.status.value,
     )
     return ApplicationRead.model_validate(application)
+
+
+@router.get(
+    "/analytics",
+    response_model=FunnelAnalyticsResponse,
+    summary="How your applications have gone",
+)
+async def funnel_analytics(
+    user: CurrentUser,
+    session: DbSession,
+) -> FunnelAnalyticsResponse:
+    """Application count, interview rate and offer rate (US-7.2).
+
+    **Rates are read from the event log, not from current status.** An
+    application sitting at REJECTED may have been rejected after two interviews,
+    and scoring it as never having reached one would make every number here
+    quietly too low. That is what `application_events` is for.
+
+    **Under five applications a segment reports counts and no rate** (AC3). One
+    interview in two applications is not a 50% interview rate; it is one
+    interview in two applications. `min_for_rate` travels with the response so a
+    client can say so without keeping its own copy of the threshold.
+
+    `segments_available` is honest about AC2 rather than quiet: role and location
+    are here, resume version and match-score band are not, because neither is
+    recorded against an application yet. Both have to be captured *when* the
+    application is sent — a resume changes and the corpus moves, so neither can
+    be reconstructed later.
+    """
+    report = await funnel_report(session, user_id=user.id)
+
+    def out(segment: Segment) -> FunnelSegment:
+        return FunnelSegment(
+            label=segment.label,
+            applications=segment.applications,
+            interviews=segment.interviews,
+            offers=segment.offers,
+            interview_rate=segment.interview_rate,
+            offer_rate=segment.offer_rate,
+            low_confidence=segment.low_confidence,
+        )
+
+    return FunnelAnalyticsResponse(
+        overall=out(report.overall),
+        by_role=[out(segment) for segment in report.by_role],
+        by_location=[out(segment) for segment in report.by_location],
+        min_for_rate=MIN_FOR_RATE,
+        segments_available=["role", "location"],
+    )
