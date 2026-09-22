@@ -1,4 +1,5 @@
 import { ApplicationBoard } from '@/components/applications/ApplicationBoard'
+import { FunnelAnalytics } from '@/components/applications/FunnelAnalytics'
 
 /**
  * Where an application is, and moving it on (US-7.1).
@@ -22,6 +23,11 @@ export function ApplicationsPage() {
         </p>
       </div>
 
+      {/* Outcomes first, then the list. "How am I doing" is the question
+          somebody opens this page with; "where is each one" is what they scroll
+          to once they have the answer. The two count different things and say
+          so in their own headings — reached-ever here, sitting-there-now below. */}
+      <FunnelAnalytics />
       <ApplicationBoard />
     </div>
   )

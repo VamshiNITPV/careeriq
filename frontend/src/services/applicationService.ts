@@ -3,6 +3,7 @@ import type {
   ApplicationListResponse,
   ApplicationRead,
   ApplicationStatus,
+  FunnelAnalyticsResponse,
 } from '@/types/application'
 
 export const applicationService = {
@@ -65,5 +66,19 @@ export const applicationService = {
       status,
       ...(occurredAt === undefined ? {} : { occurred_at: occurredAt }),
     })
+  },
+
+  /**
+   * Counts and outcome rates for everything applied to (US-7.2).
+   *
+   * A separate request from `list()` rather than derived from it, because the
+   * two measure different things: the list holds where each application is
+   * *now*, and these rates read the event log for where each one ever *got*.
+   * An application rejected after two interviews is at REJECTED in the list and
+   * counts as an interview here, and no amount of client-side arithmetic over
+   * the list can recover that.
+   */
+  analytics(): Promise<FunnelAnalyticsResponse> {
+    return api.get<FunnelAnalyticsResponse>('/applications/analytics')
   },
 }

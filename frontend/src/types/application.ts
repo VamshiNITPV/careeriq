@@ -113,3 +113,32 @@ export interface ApplicationListResponse {
   items: ApplicationListItem[]
   total: number
 }
+
+/** One slice of the funnel (US-7.2). Mirrors schemas/application_analytics.py. */
+export interface FunnelSegment {
+  label: string
+  applications: number
+  interviews: number
+  offers: number
+  /**
+   * Fraction, not a percentage, and **null is not zero**.
+   *
+   * Null means "too few applications to say" — the server withholds a rate
+   * below `min_for_rate`. `0` means "enough of them, and none reached it",
+   * which is a real answer. Rendering the two the same way would turn "we do
+   * not know" into "you failed".
+   */
+  interview_rate: number | null
+  offer_rate: number | null
+  low_confidence: boolean
+}
+
+export interface FunnelAnalyticsResponse {
+  overall: FunnelSegment
+  by_role: FunnelSegment[]
+  by_location: FunnelSegment[]
+  /** The threshold the server applied, so this side need not hold a copy. */
+  min_for_rate: number
+  /** Which of US-7.2 AC2's slices exist yet — currently role and location. */
+  segments_available: string[]
+}
