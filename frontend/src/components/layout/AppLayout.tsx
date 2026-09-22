@@ -114,7 +114,9 @@ export function AppLayout() {
         ref={shellRef}
         className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur"
       >
-        <div className="mx-auto flex h-16 max-w-7xl items-center gap-4 px-4 sm:px-6 lg:px-8">
+        {/* `relative` so the phone panel below can anchor to this row rather
+            than to the button inside it — see the panel's own note. */}
+        <div className="relative mx-auto flex h-16 max-w-7xl items-center gap-4 px-4 sm:px-6 lg:px-8">
           <NavLink
             to="/dashboard"
             className="flex items-center gap-2 text-lg font-bold tracking-tight text-indigo-600"
@@ -129,17 +131,20 @@ export function AppLayout() {
           </NavLink>
 
           {/*
-            One wrapper around the button and its panel, which is what lets the
-            panel anchor to the button instead of spanning the header.
+            One wrapper around the button and its panel, so the hover wiring is
+            a single pair of handlers rather than one on each. The panel being a
+            descendant means moving from button into panel fires no
+            `pointerleave` at all — only the gap between them leans on the close
+            delay, which is the arrangement DropdownMenu already had.
 
-            It also collapses the hover wiring to a single pair of handlers.
-            They used to sit on the button *and* the panel, because the two had
-            no common parent; now the panel is a descendant, so moving from one
-            into the other fires no `pointerleave` at all and only the 8px gap
-            leans on the close delay — the same arrangement DropdownMenu uses.
+            Deliberately **not** `relative`. An absolutely positioned child
+            anchors to the nearest *positioned* ancestor, so leaving this one
+            static sends the panel up to the header row instead — which is what
+            lets it line up with the logo rather than with this button, without
+            a hardcoded offset measuring the distance between them.
           */}
           <div
-            className="relative sm:hidden"
+            className="sm:hidden"
             onPointerEnter={navHover.onPointerEnter}
             onPointerLeave={navHover.onPointerLeave}
           >
@@ -163,7 +168,14 @@ export function AppLayout() {
             </button>
 
             {/*
-              A panel anchored under the button, not a bar across the header.
+              A panel under the logo, not a bar across the header.
+
+              `left-4` rather than `left-0`, and it is not arbitrary: this
+              anchors to the header row, whose own `px-4` is what puts the logo
+              where it is. Matching that padding lines the panel's left edge up
+              with the CQ mark exactly, and the two move together if the
+              padding ever changes. Only the `px-4` step matters here — the
+              `sm:px-6` above it applies at widths where this panel is hidden.
 
               Full width made four short labels sit alone on four full-width
               rows, which read as a page rather than a menu. `w-56` is the
@@ -184,7 +196,7 @@ export function AppLayout() {
               id="mobile-nav"
               hidden={!menuOpen}
               className={cn(
-                'absolute top-full left-0 z-30 mt-2 w-56 max-w-[calc(100vw-2rem)]',
+                'absolute top-full left-4 z-30 mt-2 w-56 max-w-[calc(100vw-2rem)]',
                 'rounded-lg border border-slate-200 bg-white p-2 shadow-lg',
               )}
             >
