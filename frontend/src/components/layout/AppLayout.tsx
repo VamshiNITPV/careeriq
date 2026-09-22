@@ -197,7 +197,7 @@ export function AppLayout() {
               hidden={!menuOpen}
               className={cn(
                 'absolute top-full left-4 z-30 mt-2 w-56 max-w-[calc(100vw-2rem)]',
-                'rounded-lg border border-slate-200 bg-white p-2 shadow-lg',
+                'rounded-xl bg-white p-2 ring-1 ring-slate-900/5 shadow-overlay',
               )}
             >
               {/* Navigation only. The account details and Sign out live in the

@@ -10,6 +10,7 @@ import { ApiError } from '@/services/apiClient'
 import { careerService } from '@/services/careerService'
 import { fromMonthInput, toMonthInput, type CareerKind } from '@/types/career'
 import { cn } from '@/utils/cn'
+import { cardClass } from '@/components/ui/cardStyles'
 
 /**
  * One editable list of career entries.
@@ -298,7 +299,7 @@ export function CareerSection<T extends CareerEntry>({
   )
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-4 sm:p-6">
+    <section className={cardClass()}>
       <ConfirmDialog
         open={pendingDelete !== null}
         title={`Remove this ${noun}?`}

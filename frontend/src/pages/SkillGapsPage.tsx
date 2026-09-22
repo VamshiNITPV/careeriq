@@ -6,7 +6,10 @@ import { buttonClass } from '@/components/ui/buttonStyles'
 import { Spinner } from '@/components/ui/Spinner'
 import { skillGapService } from '@/services/skillGapService'
 import type { GapSeverity, GapStatus, SkillGapsResponse } from '@/types/skillGap'
+import { PILL_SHAPE } from '@/components/ui/cardStyles'
 import { cn } from '@/utils/cn'
+import { cardClass } from '@/components/ui/cardStyles'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 /**
  * What stands between you and the roles you are aiming at (US-5.1).
@@ -45,10 +48,7 @@ const STATUS_LABEL: Record<GapStatus, string> = {
 function Pill({ className, children }: { className: string; children: React.ReactNode }) {
   return (
     <span
-      className={cn(
-        'inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset',
-        className,
-      )}
+      className={cn(PILL_SHAPE, className)}
     >
       {children}
     </span>
@@ -102,10 +102,12 @@ export function SkillGapsPage() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Skill gaps</h1>
-        <p className="mt-1 text-sm text-slate-600">
-          What the roles you are aiming at ask for, and how much of it you already have.
-        </p>
+        <PageHeader
+          title="Skill gaps"
+          description={
+            <>What the roles you are aiming at ask for, and how much of it you already have.</>
+          }
+        />
       </header>
 
       {state === 'loading' ? (
@@ -154,7 +156,7 @@ export function SkillGapsPage() {
           </Link>
         </section>
       ) : result.items.length === 0 ? (
-        <section className="rounded-xl border border-slate-200 bg-white p-6">
+        <section className={cardClass()}>
           <p className="text-sm text-slate-600">
             Nothing stands out across the {result.target_jobs} matching{' '}
             {result.target_jobs === 1 ? 'job' : 'jobs'} we found.
@@ -174,7 +176,7 @@ export function SkillGapsPage() {
           {missing.length > 0 && (
             <section
               aria-labelledby="gaps-missing"
-              className="rounded-xl border border-slate-200 bg-white p-4 sm:p-6"
+              className={cardClass()}
             >
               <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
                 <h2 id="gaps-missing" className="text-base font-semibold text-slate-900">
@@ -204,7 +206,7 @@ export function SkillGapsPage() {
           {covered.length > 0 && (
             <section
               aria-labelledby="gaps-covered"
-              className="rounded-xl border border-slate-200 bg-white p-4 sm:p-6"
+              className={cardClass()}
             >
               <h2 id="gaps-covered" className="text-base font-semibold text-slate-900">
                 Already covered

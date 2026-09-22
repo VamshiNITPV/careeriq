@@ -33,6 +33,7 @@ import {
   type JobFilterKey,
   type JobSort,
 } from '@/utils/jobListParams'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 /**
  * Browse the job corpus, by date or by how well each posting matches you.
@@ -309,10 +310,12 @@ export function JobsPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Jobs</h1>
-          <p className="mt-1 text-sm text-slate-600">
-            Every posting anyone has added. Paste one and we&apos;ll pull out its requirements.
-          </p>
+          <PageHeader
+          title="Jobs"
+          description={
+            <>Every posting anyone has added. Paste one and we&apos;ll pull out its requirements.</>
+          }
+        />
         </div>
         <Link to="/jobs/new" className={buttonClass()}>
           Add a job

@@ -31,6 +31,7 @@ import {
 } from '@/types/profile'
 import { avatarColourFor, displayNameFor, initialsFor } from '@/utils/initials'
 import { cn } from '@/utils/cn'
+import { cardClass } from '@/components/ui/cardStyles'
 
 /**
  * Profile page.
@@ -68,7 +69,7 @@ function Section({
     <form
       ref={formRef}
       onSubmit={onSubmit}
-      className="rounded-xl border border-slate-200 bg-white p-6"
+      className={cardClass()}
       noValidate
     >
       <h2 className="text-base font-semibold text-slate-900">{title}</h2>

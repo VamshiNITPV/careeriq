@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 import { applicationService } from '@/services/applicationService'
 import type { FunnelAnalyticsResponse, FunnelSegment } from '@/types/application'
+import { cardClass } from '@/components/ui/cardStyles'
 
 /**
  * How the applications have gone — counts, and rates where there are enough
@@ -187,7 +188,7 @@ export function FunnelAnalytics() {
 
   if (failed) {
     return (
-      <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 sm:p-6">
+      <section className={cardClass({ className: 'space-y-3' })}>
         <Alert tone="error" title="We couldn't work out how your applications have gone">
           Please try again.
         </Alert>
@@ -200,7 +201,7 @@ export function FunnelAnalytics() {
 
   if (data === null) {
     return (
-      <section className="flex justify-center rounded-xl border border-slate-200 bg-white p-8">
+      <section className={cardClass({ className: 'flex justify-center' })}>
         <Spinner className="size-6 text-indigo-600" label="Working out your rates" />
       </section>
     )
@@ -215,7 +216,7 @@ export function FunnelAnalytics() {
   return (
     <section
       aria-labelledby="outcomes-heading"
-      className="rounded-xl border border-slate-200 bg-white p-4 sm:p-6"
+      className={cardClass()}
     >
       <h2 id="outcomes-heading" className="text-base font-semibold text-slate-900">
         How it has gone

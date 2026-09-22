@@ -8,6 +8,8 @@ import { ApiError } from '@/services/apiClient'
 import { jobService } from '@/services/jobService'
 import { MIN_DESCRIPTION_CHARS } from '@/types/job'
 import { externalLink } from '@/utils/externalUrl'
+import { cardClass } from '@/components/ui/cardStyles'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 /**
  * Paste a job description (US-3.1).
@@ -70,11 +72,16 @@ export function AddJobPage() {
         <Link to="/jobs" className="text-sm font-medium text-indigo-600 hover:underline">
           ← Back to jobs
         </Link>
-        <h1 className="mt-2 text-2xl font-bold tracking-tight text-slate-900">Add a job</h1>
-        <p className="mt-1 text-sm text-slate-600">
-          Paste the full posting. We&apos;ll pull out the title, company, location, pay and the
-          skills it asks for.
-        </p>
+        <PageHeader
+          className="mt-2"
+          title="Add a job"
+          description={
+            <>
+              Paste the full posting. We&apos;ll pull out the title, company, location, pay and
+              the skills it asks for.
+            </>
+          }
+        />
       </div>
 
       {typeof error === 'string' && (
@@ -90,7 +97,7 @@ export function AddJobPage() {
 
       <form
         onSubmit={(e) => void onSubmit(e)}
-        className="space-y-4 rounded-xl border border-slate-200 bg-white p-6"
+        className={cardClass({ className: 'space-y-4' })}
         noValidate
       >
         <Textarea

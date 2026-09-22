@@ -1,5 +1,6 @@
 import { ApplicationBoard } from '@/components/applications/ApplicationBoard'
 import { FunnelAnalytics } from '@/components/applications/FunnelAnalytics'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 /**
  * Where an application is, and moving it on (US-7.1).
@@ -16,11 +17,13 @@ export function ApplicationsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Applications</h1>
-        <p className="mt-1 text-sm text-slate-600">
-          Every stage is something you told us about — nothing here moves on its own. Changes are
-          recorded with their date, so you can see how long each one took.
-        </p>
+        <PageHeader
+          title="Applications"
+          description={
+            <>Every stage is something you told us about — nothing here moves on its own. Changes are
+          recorded with their date, so you can see how long each one took.</>
+          }
+        />
       </div>
 
       {/* Outcomes first, then the list. "How am I doing" is the question

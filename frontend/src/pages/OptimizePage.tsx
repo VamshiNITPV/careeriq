@@ -6,6 +6,8 @@ import { Spinner } from '@/components/ui/Spinner'
 import { optimizationService } from '@/services/optimizationService'
 import type { AnalysisResponse, ApplyResult, Suggestion } from '@/types/optimization'
 import { cn } from '@/utils/cn'
+import { cardClass } from '@/components/ui/cardStyles'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 /**
  * Review tailored rewrites, one at a time (US-6.1 AC1).
@@ -65,7 +67,7 @@ function SuggestionCard({
   )
 
   return (
-    <li className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+    <li className={cardClass()}>
       <div className="flex flex-wrap items-baseline gap-x-2">
         <span className="text-sm font-medium text-slate-900">
           {suggestion.position}. {suggestion.section || 'resume'}
@@ -191,11 +193,13 @@ export function OptimizePage() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Tailor your resume</h1>
-        <p className="mt-1 text-sm text-slate-600">
-          Rewrites of what your resume already says. Nothing here adds a skill, employer or number
-          you have not written down.
-        </p>
+        <PageHeader
+          title="Tailor your resume"
+          description={
+            <>Rewrites of what your resume already says. Nothing here adds a skill, employer or number
+          you have not written down.</>
+          }
+        />
       </header>
 
       {state === 'loading' ? (
@@ -212,7 +216,7 @@ export function OptimizePage() {
           </Button>
         </div>
       ) : result === null ? null : applied ? (
-        <section className="rounded-xl border border-slate-200 bg-white p-6">
+        <section className={cardClass()}>
           <p className="text-sm font-medium text-slate-900">{applied.message}</p>
           <p className="mt-1 text-sm text-slate-600">
             {/* Named explicitly, because a "new version" that silently replaced
@@ -261,7 +265,7 @@ export function OptimizePage() {
       ) : (
         <>
           {result.suggestions.length === 0 ? (
-            <section className="rounded-xl border border-slate-200 bg-white p-6">
+            <section className={cardClass()}>
               <p className="text-sm font-medium text-slate-900">No changes to suggest.</p>
               <p className="mt-1 text-sm text-slate-600">
                 {result.rejected_by_validator > 0
@@ -291,7 +295,7 @@ export function OptimizePage() {
 
               {applyError && <Alert tone="error">{applyError}</Alert>}
 
-              <section className="rounded-xl border border-slate-200 bg-white p-4 sm:p-6">
+              <section className={cardClass()}>
                 <p className="text-sm text-slate-700" role="status">
                   {acceptedIds.length} of {result.suggestions.length} selected
                   {undecided > 0 && ` · ${undecided} still to review`}

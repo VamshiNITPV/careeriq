@@ -21,6 +21,7 @@ import {
 } from '@/types/application'
 import { cn } from '@/utils/cn'
 import { formatDateTime, formatPostedAge } from '@/utils/datetime'
+import { cardClass, PILL_SHAPE } from '@/components/ui/cardStyles'
 
 /**
  * Every application, grouped by the stage it is in (US-7.1).
@@ -61,11 +62,7 @@ import { formatDateTime, formatPostedAge } from '@/utils/datetime'
 function StatusPill({ status, className }: { status: ApplicationStatus; className?: string }) {
   return (
     <span
-      className={cn(
-        'inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset',
-        STATUS_TONE[status],
-        className,
-      )}
+      className={cn(PILL_SHAPE, STATUS_TONE[status], className)}
     >
       {STATUS_LABEL[status]}
     </span>
@@ -92,7 +89,7 @@ function FunnelSummary({ items }: { items: ApplicationListItem[] }) {
   return (
     <section
       aria-labelledby="funnel-heading"
-      className="rounded-xl border border-slate-200 bg-white p-4 sm:p-6"
+      className={cardClass()}
     >
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <h2 id="funnel-heading" className="text-base font-semibold text-slate-900">
@@ -272,7 +269,7 @@ function StageCard({
   return (
     <section
       aria-labelledby={`stage-${status}`}
-      className="rounded-xl border border-slate-200 bg-white p-4 sm:p-6"
+      className={cardClass()}
     >
       {/*
         The stage name lives *inside* the heading, not beside it. Putting the

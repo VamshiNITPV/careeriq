@@ -4,6 +4,28 @@
 @theme {
   --font-sans:
     ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+
+  /*
+   * Elevation, as three steps rather than as taste.
+   *
+   * Tailwind's own shadow scale was being used four different ways across the
+   * app — `shadow-sm` sixteen times, `shadow-lg` three, and a stray `md` and
+   * `xl` — because nothing said which meant what. These are named for the job
+   * instead of the size, so picking one is a decision about what the thing is
+   * rather than about how heavy it should look.
+   *
+   * Tinted with slate rather than pure black: a neutral-black shadow over a
+   * slate-50 page reads slightly muddy, and matching the shadow's hue to the
+   * surface it falls on is most of what separates "soft" from "grey".
+   */
+  --shadow-card: 0 1px 2px 0 rgb(15 23 42 / 0.04), 0 1px 3px 0 rgb(15 23 42 / 0.06);
+  --shadow-card-hover: 0 4px 12px -2px rgb(15 23 42 / 0.1), 0 2px 6px -2px rgb(15 23 42 / 0.06);
+  /* Overlays float above the page and should look like it, so this one is
+     deliberately heavier than anything a panel gets. */
+  --shadow-overlay: 0 10px 30px -5px rgb(15 23 42 / 0.18), 0 4px 10px -4px rgb(15 23 42 / 0.1);
+
+  /* One radius for every panel, so a card, a dialog and a menu agree. */
+  --radius-card: 1rem;
 }
 
 @layer base {

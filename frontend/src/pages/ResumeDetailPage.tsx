@@ -21,6 +21,7 @@ import {
   type ResumeVersionDetail,
 } from '@/types/resume'
 import { formatDateTime } from '@/utils/datetime'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 /**
  * One resume: the document, and what the parser made of it.
@@ -385,13 +386,13 @@ export function ResumeDetailPage() {
                 routinely one unbreakable token: `Parshuram_Bardawal_Resume_2026.pdf`
                 rendered as a one-word-per-line tower in a narrow column.
               */}
-              <h1 className="text-2xl font-bold tracking-tight break-words text-slate-900">
-                {detail.title}
-              </h1>
-              <p className="mt-1 text-sm text-slate-600">
-                Added {formatDateTime(detail.created_at)}
-                {version?.processed_at != null && ` · Read ${formatDateTime(version.processed_at)}`}
-              </p>
+              <PageHeader
+          title={detail.title}
+          description={
+            <>Added {formatDateTime(detail.created_at)}
+                {version?.processed_at != null && ` · Read ${formatDateTime(version.processed_at)}`}</>
+          }
+        />
             </>
           )}
           {/* Both changes are otherwise silent to a screen reader. */}

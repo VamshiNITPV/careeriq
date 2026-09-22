@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { jobService } from '@/services/jobService'
 import type { MatchDimension, MatchDimensionName, MatchResponse } from '@/types/job'
+import { cardClass } from '@/components/ui/cardStyles'
 
 const LABELS: Record<MatchDimensionName, string> = {
   semantic: 'Role fit',
@@ -97,7 +98,7 @@ export function MatchBreakdown({ jobId }: { jobId: string }) {
   return (
     <section
       aria-labelledby="match-heading"
-      className="rounded-xl border border-slate-200 bg-white p-4 sm:p-6"
+      className={cardClass()}
     >
       <h2 id="match-heading" className="text-base font-semibold text-slate-900">
         How you match

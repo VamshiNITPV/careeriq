@@ -204,7 +204,7 @@ export function DropdownMenu({
             // `overflow-y-auto` replaces `overflow-hidden`; `max-h` bounds it.
             'absolute top-full z-30 mt-2 w-60 max-w-[calc(100vw-2rem)]',
             'max-h-[calc(100vh-5rem)] overflow-x-hidden overflow-y-auto',
-            'rounded-lg border border-slate-200 bg-white py-1 shadow-lg',
+            'rounded-xl bg-white py-1 ring-1 ring-slate-900/5 shadow-overlay',
             align === 'right' ? 'right-0' : 'left-0',
             className,
           )}

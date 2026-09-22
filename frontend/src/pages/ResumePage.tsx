@@ -19,6 +19,7 @@ import {
 } from '@/types/resume'
 import { cn } from '@/utils/cn'
 import { formatDateTime } from '@/utils/datetime'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 /**
  * Client-side pre-check.
@@ -369,10 +370,12 @@ export function ResumePage() {
       </ConfirmDialog>
 
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Resume</h1>
-        <p className="mt-1 text-sm text-slate-600">
-          Upload a PDF or DOCX and we&apos;ll pull out your skills automatically.
-        </p>
+        <PageHeader
+          title="Resume"
+          description={
+            <>Upload a PDF or DOCX and we&apos;ll pull out your skills automatically.</>
+          }
+        />
       </div>
 
       {error !== null && (

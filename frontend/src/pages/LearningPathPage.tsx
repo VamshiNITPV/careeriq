@@ -7,6 +7,8 @@ import { Spinner } from '@/components/ui/Spinner'
 import { learningService } from '@/services/learningService'
 import type { LearningPathResponse, LearningStep } from '@/types/learning'
 import { cn } from '@/utils/cn'
+import { cardClass } from '@/components/ui/cardStyles'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 /**
  * What to learn, in the order to learn it (US-5.2).
@@ -139,10 +141,12 @@ export function LearningPathPage() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Learning path</h1>
-        <p className="mt-1 text-sm text-slate-600">
-          Your gaps, ordered so that nothing asks for something you have not learnt yet.
-        </p>
+        <PageHeader
+          title="Learning path"
+          description={
+            <>Your gaps, ordered so that nothing asks for something you have not learnt yet.</>
+          }
+        />
       </header>
 
       {state === 'loading' ? (
@@ -184,14 +188,14 @@ export function LearningPathPage() {
           </Link>
         </section>
       ) : result.steps.length === 0 ? (
-        <section className="rounded-xl border border-slate-200 bg-white p-6">
+        <section className={cardClass()}>
           <p className="text-sm text-slate-600">
             Nothing to plan yet — no missing skill has guidance written for it.
           </p>
         </section>
       ) : (
         <>
-          <section className="rounded-xl border border-slate-200 bg-white p-4 sm:p-6">
+          <section className={cardClass()}>
             <p className="text-sm text-slate-700" role="status">
               <strong className="text-slate-900">{result.remaining_hours}</strong> of{' '}
               {result.total_hours} hours remaining · {done} of {result.steps.length} done
@@ -212,7 +216,7 @@ export function LearningPathPage() {
             </p>
           </section>
 
-          <section className="rounded-xl border border-slate-200 bg-white p-4 sm:p-6">
+          <section className={cardClass()}>
             <ul className="divide-y divide-slate-200">
               {result.steps.map((step) => (
                 <StepRow

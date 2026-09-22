@@ -9,6 +9,8 @@ import { resumeService, skillService } from '@/services/resumeService'
 import type { JobListResponse } from '@/types/job'
 import { firstNameFor } from '@/utils/initials'
 import { cn } from '@/utils/cn'
+import { cardClass } from '@/components/ui/cardStyles'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 /**
  * Dashboard.
@@ -38,11 +40,17 @@ interface Stat {
 
 function StatCard({ stat }: { stat: Stat }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5 transition-shadow hover:shadow-sm">
+    // Not `interactive`. It carried a hover lift and has no click handler, no
+    // link and nothing to open — a card that rises under the cursor and then
+    // does nothing is a promise the interface does not keep.
+    <div className={cardClass()}>
       <p className="text-sm font-medium text-slate-600">{stat.label}</p>
       <p
         className={cn(
-          'mt-2 text-3xl font-bold tabular-nums',
+          // No `tabular-nums`. It gives every digit the width of a zero, which
+          // reads loose at display sizes — tabular is for columns of figures
+          // that have to line up down a page, not for a single large number.
+          'mt-2 text-3xl font-bold',
           stat.available ? 'text-slate-900' : 'text-slate-300',
         )}
       >
@@ -139,7 +147,7 @@ function NextStep({ hasResume, skillCount }: { hasResume: boolean; skillCount: n
 
 function Panel({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-6">
+    <section className={cardClass()}>
       <h2 className="text-base font-semibold text-slate-900">{title}</h2>
       <div className="mt-4">{children}</div>
     </section>
@@ -249,12 +257,10 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">
-          Welcome back, {firstName}
-        </h1>
-        <p className="mt-1 text-sm text-slate-600">Here is where your profile stands.</p>
-      </div>
+      <PageHeader
+        title={`Welcome back, ${firstName}`}
+        description="Here is where your profile stands."
+      />
 
       {user !== null && user.email_verified_at === null && <VerifyEmailNotice />}
 

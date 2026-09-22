@@ -24,6 +24,8 @@ import {
 import { backLabelFor } from '@/utils/backTo'
 import { cn } from '@/utils/cn'
 import { externalLink } from '@/utils/externalUrl'
+import { cardClass } from '@/components/ui/cardStyles'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 /** One labelled fact. Rendered only when the posting actually stated it. */
 function Fact({ label, value }: { label: string; value: string | null }) {
@@ -312,12 +314,14 @@ function JobDetailView({
         </Alert>
       )}
 
-      <header className="rounded-xl border border-slate-200 bg-white p-6">
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">{job.title}</h1>
-        <p className="mt-1 text-sm text-slate-600">
-          {job.company?.name ?? 'Company not stated'}
-          {job.location !== null && <span className="text-slate-400"> · {job.location}</span>}
-        </p>
+      <header className={cardClass()}>
+        <PageHeader
+          title={job.title}
+          description={
+            <>{job.company?.name ?? 'Company not stated'}
+          {job.location !== null && <span className="text-slate-400"> · {job.location}</span>}</>
+          }
+        />
 
         {/*
           One column on the narrowest phones. This was the only grid in the app
@@ -388,7 +392,7 @@ function JobDetailView({
       <MatchBreakdown jobId={job.id} />
 
       {job.skills.length > 0 && (
-        <section className="rounded-xl border border-slate-200 bg-white p-6">
+        <section className={cardClass()}>
           <h2 className="text-base font-semibold text-slate-900">Skills this job asks for</h2>
           <p className="mt-1 text-sm text-slate-600">
             {/* The distinction is stated because it is what drives matching, and
@@ -421,7 +425,7 @@ function JobDetailView({
         </section>
       )}
 
-      <div className="space-y-6 rounded-xl border border-slate-200 bg-white p-6">
+      <div className={cardClass({ className: 'space-y-6' })}>
         <BulletList title="Responsibilities" items={job.responsibilities} />
         <BulletList title="Requirements" items={job.requirements} />
         <BulletList title="Benefits" items={job.benefits} />

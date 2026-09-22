@@ -4,6 +4,7 @@ import { Alert } from '@/components/ui/Alert'
 import { Spinner } from '@/components/ui/Spinner'
 import { useAuth } from '@/hooks/useAuth'
 import { authService } from '@/services/authService'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 type State = 'verifying' | 'verified' | 'failed' | 'missing-token'
 
@@ -41,7 +42,7 @@ export function VerifyEmailPage() {
   return (
     <div className="flex min-h-screen flex-col justify-center bg-slate-50 px-6 py-12">
       <div className="mx-auto w-full max-w-sm text-center">
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Email confirmation</h1>
+        <PageHeader title="Email confirmation" />
 
         <div className="mt-6">
           {state === 'verifying' && (
