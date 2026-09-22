@@ -1,12 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { UserMenu } from '@/components/layout/UserMenu'
+import { useHoverIntent } from '@/components/ui/hoverIntent'
 import { usePopoverDismiss } from '@/components/ui/popoverDismiss'
 import { cn } from '@/utils/cn'
 
+/**
+ * Four, not five. "Resume" was here *and* in the account menu as "Your resume",
+ * and a navbar is the wrong place to keep the duplicate: it is the one surface
+ * where every extra item costs width at exactly the sizes that have none.
+ *
+ * The route and the page are untouched. Only the link moved out.
+ */
 const NAV_ITEMS = [
   { to: '/dashboard', label: 'Dashboard' },
-  { to: '/resume', label: 'Resume' },
   { to: '/jobs', label: 'Jobs' },
   { to: '/applications', label: 'Applications' },
   { to: '/skill-gaps', label: 'Skills' },
@@ -75,6 +82,24 @@ export function AppLayout() {
     return () => document.removeEventListener('keydown', onKey)
   }, [menuOpen])
 
+  /*
+   * Hover opens the disclosure on a machine with a real pointer.
+   *
+   * Handlers go on the button *and* the panel, sharing one hook, because the
+   * two are not inside a common wrapper — the button sits in the header row and
+   * the panel is a full-width bar beneath it. Entering either cancels the
+   * pending close; leaving either schedules one. Restructuring the header to
+   * put a single wrapper around them would be a larger change than this earns.
+   *
+   * Worth saying plainly: below `sm` is phone territory, where nothing can
+   * hover, so this fires only when a laptop window has been narrowed. It is
+   * cheap and consistent with the account menu rather than significant.
+   */
+  const navHover = useHoverIntent({
+    onOpen: () => setMenuOpen(true),
+    onClose: () => setMenuOpen(false),
+  })
+
   const navLinkClass = ({ isActive }: { isActive: boolean }) =>
     cn(
       'rounded-md px-3 py-2 text-sm font-medium transition-colors',
@@ -117,13 +142,18 @@ export function AppLayout() {
             aria-label={menuOpen ? 'Close menu' : 'Open menu'}
             // `size-10` on the hit area: this was 36px, and it is the only route
             // to navigation on a phone. The icon is unchanged.
-            className="inline-flex size-10 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100 hover:text-slate-900 md:hidden"
+            onPointerEnter={navHover.onPointerEnter}
+            onPointerLeave={navHover.onPointerLeave}
+            className="inline-flex size-10 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100 hover:text-slate-900 sm:hidden"
           >
             <MenuIcon open={menuOpen} />
           </button>
 
-          {/* Desktop navigation. */}
-          <nav aria-label="Main" className="hidden gap-1 md:flex">
+          {/* Desktop navigation, from `sm` rather than `md`. Four links, the
+              logo and the avatar measure roughly 545px together, so 640px clears
+              them — which makes the disclosure below genuinely phone-shaped
+              instead of something a half-width laptop window also gets. */}
+          <nav aria-label="Main" className="hidden gap-1 sm:flex">
             {NAV_ITEMS.map((item) => (
               <NavLink key={item.to} to={item.to} className={navLinkClass}>
                 {item.label}
@@ -145,7 +175,9 @@ export function AppLayout() {
         <div
           id="mobile-nav"
           hidden={!menuOpen}
-          className="border-t border-slate-200 bg-white md:hidden"
+          className="border-t border-slate-200 bg-white sm:hidden"
+          onPointerEnter={navHover.onPointerEnter}
+          onPointerLeave={navHover.onPointerLeave}
         >
           {/* Navigation only. The account details and Sign out moved into the
               avatar menu, which is visible at every breakpoint, so duplicating

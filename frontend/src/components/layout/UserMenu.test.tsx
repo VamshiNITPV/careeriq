@@ -1,7 +1,7 @@
-import { render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { UserMenu } from './UserMenu'
 
 /**
@@ -64,5 +64,121 @@ describe('UserMenu', () => {
     await openMenu()
 
     expect(screen.getByRole('menuitem', { name: 'Sign out' })).toHaveClass('text-red-600')
+  })
+})
+
+/**
+ * Opening on hover (fine pointers only).
+ *
+ * `matchMedia` is stubbed per test rather than globally, so each one states the
+ * device it is assuming. The suite-wide default from `test/setup.ts` is
+ * `matches: false` — a device that cannot hover — which is why these have to opt
+ * in and the touch test below does not.
+ */
+describe('UserMenu on a device with a pointer', () => {
+  function withFinePointer(matches: boolean) {
+    vi.spyOn(window, 'matchMedia').mockImplementation(
+      (query: string) =>
+        ({
+          matches,
+          media: query,
+          onchange: null,
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          dispatchEvent: () => false,
+          addListener: () => {},
+          removeListener: () => {},
+        }) as MediaQueryList,
+    )
+  }
+
+  function renderMenu() {
+    render(
+      <MemoryRouter>
+        <UserMenu />
+      </MemoryRouter>,
+    )
+    return screen.getByRole('button', { name: /Banoth Vamshi/ })
+  }
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('opens when the pointer rests on it', async () => {
+    withFinePointer(true)
+    vi.useFakeTimers()
+    const trigger = renderMenu()
+
+    fireEvent.pointerEnter(trigger.parentElement as HTMLElement)
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+
+    await act(async () => {
+      vi.advanceTimersByTime(150)
+    })
+
+    expect(screen.getByRole('menu')).toBeInTheDocument()
+  })
+
+  it('ignores a cursor passing over on its way somewhere else', async () => {
+    withFinePointer(true)
+    vi.useFakeTimers()
+    const trigger = renderMenu()
+    const root = trigger.parentElement as HTMLElement
+
+    // In and out again inside the open delay. Without an intent delay this is
+    // the gesture that flings menus open behind someone crossing the header.
+    fireEvent.pointerEnter(root)
+    await act(async () => {
+      vi.advanceTimersByTime(60)
+    })
+    fireEvent.pointerLeave(root)
+    await act(async () => {
+      vi.advanceTimersByTime(500)
+    })
+
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+  })
+
+  it('closes again once the pointer leaves', async () => {
+    withFinePointer(true)
+    vi.useFakeTimers()
+    const trigger = renderMenu()
+    const root = trigger.parentElement as HTMLElement
+
+    fireEvent.pointerEnter(root)
+    await act(async () => {
+      vi.advanceTimersByTime(150)
+    })
+    expect(screen.getByRole('menu')).toBeInTheDocument()
+
+    fireEvent.pointerLeave(root)
+    // Not gone yet: the close delay is what lets a cursor cross the 8px gap
+    // between the trigger and the panel without the menu shutting mid-reach.
+    await act(async () => {
+      vi.advanceTimersByTime(100)
+    })
+    expect(screen.getByRole('menu')).toBeInTheDocument()
+
+    await act(async () => {
+      vi.advanceTimersByTime(200)
+    })
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+  })
+
+  it('does nothing on hover where there is no pointer, and still opens on tap', async () => {
+    withFinePointer(false)
+    const user = userEvent.setup()
+    const trigger = renderMenu()
+
+    fireEvent.pointerEnter(trigger.parentElement as HTMLElement)
+    // A tap fires pointerenter and then click. If hover were not gated, the
+    // enter would open the menu and the click would toggle it straight back
+    // shut — two taps to open, looking broken, for the people least able to
+    // work around it.
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+
+    await user.click(trigger)
+    expect(screen.getByRole('menu')).toBeInTheDocument()
   })
 })

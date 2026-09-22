@@ -7,6 +7,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from 'react'
+import { useHoverIntent } from '@/components/ui/hoverIntent'
 import { usePopoverDismiss } from '@/components/ui/popoverDismiss'
 import { cn } from '@/utils/cn'
 
@@ -83,6 +84,17 @@ export function DropdownMenu({
     if (returnFocus) triggerRef.current?.focus()
   }, [])
 
+  // Hover opens and closes it on a machine with a real pointer. Click, keyboard
+  // and outside-tap dismissal are untouched — this is an additional way in, not
+  // a replacement, which is what keeps it usable by touch and by keyboard.
+  //
+  // `close(false)`, never `close(true)`: the pointer has moved elsewhere, and
+  // dragging the focus ring back to the trigger would move it under the user.
+  const hover = useHoverIntent({
+    onOpen: () => setOpen(true),
+    onClose: () => close(false),
+  })
+
   // Focus is applied in an effect rather than immediately after setOpen, and
   // rather than inside requestAnimationFrame: the panel does not exist in the
   // DOM until React has committed the render, so focusing any earlier is a
@@ -144,7 +156,16 @@ export function DropdownMenu({
   }
 
   return (
-    <div ref={rootRef} className="relative">
+    // The handlers sit on the root rather than the trigger, and the panel is a
+    // DOM descendant of it — so moving from trigger into panel fires no
+    // `pointerleave` at all, and only the 8px gap between them relies on the
+    // close delay.
+    <div
+      ref={rootRef}
+      className="relative"
+      onPointerEnter={hover.onPointerEnter}
+      onPointerLeave={hover.onPointerLeave}
+    >
       <button
         ref={triggerRef}
         id={triggerId}

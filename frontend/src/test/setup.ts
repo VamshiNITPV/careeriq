@@ -41,6 +41,38 @@ if (typeof URL.createObjectURL !== 'function') {
   URL.revokeObjectURL = () => {}
 }
 
+/**
+ * jsdom does not implement `matchMedia`.
+ *
+ * `useHoverIntent` calls it on mount, so without this every test rendering a
+ * menu — which is most of them — dies on a missing function rather than on
+ * anything it was written to check.
+ *
+ * **Defaults to `matches: false`, meaning "this device cannot hover".** That is
+ * the honest default for a headless DOM with no pointer, and it makes the safe
+ * case the one you get for free: hover does nothing unless a test says
+ * otherwise. Tests that want hover stub this explicitly, which forces each of
+ * them to state the environment it is assuming instead of inheriting it.
+ *
+ * Feature-guarded so it disappears the day jsdom ships its own. It provides no
+ * real media evaluation — the query string is ignored — so nothing here can
+ * prove a breakpoint works. Only that the call does not throw.
+ */
+if (typeof window.matchMedia !== 'function') {
+  window.matchMedia = (query: string): MediaQueryList =>
+    ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+      // Deprecated, and still what some libraries reach for first.
+      addListener: () => {},
+      removeListener: () => {},
+    }) as MediaQueryList
+}
+
 afterEach(() => {
   // Unmount rendered trees. Without this, components from an earlier test stay
   // in the document and queries match the wrong element — producing failures
