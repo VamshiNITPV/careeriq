@@ -16,6 +16,7 @@ import { RegisterPage } from '@/pages/RegisterPage'
 import { ResetPasswordPage } from '@/pages/ResetPasswordPage'
 import { ResumeDetailPage } from '@/pages/ResumeDetailPage'
 import { ResumePage } from '@/pages/ResumePage'
+import { ApplicationsPage } from '@/pages/ApplicationsPage'
 import { SavedJobsPage } from '@/pages/SavedJobsPage'
 import { LearningPathPage } from '@/pages/LearningPathPage'
 import { SkillGapsPage } from '@/pages/SkillGapsPage'
@@ -81,6 +82,7 @@ export function App() {
                     declaration order for correctness is the trap the
                     comment above already describes. */}
                 <Route path="/saved-jobs" element={<SavedJobsPage />} />
+                <Route path="/applications" element={<ApplicationsPage />} />
                 <Route path="/skill-gaps" element={<SkillGapsPage />} />
                 <Route path="/learning-path" element={<LearningPathPage />} />
                 {/* Keyed by analysis id so a review is a real address: it can

@@ -1,5 +1,9 @@
 import { api } from './apiClient'
-import type { ApplicationListResponse, ApplicationRead } from '@/types/application'
+import type {
+  ApplicationListResponse,
+  ApplicationRead,
+  ApplicationStatus,
+} from '@/types/application'
 
 export const applicationService = {
   /**
@@ -34,5 +38,32 @@ export const applicationService = {
    */
   list(): Promise<ApplicationListResponse> {
     return api.get<ApplicationListResponse>('/applications')
+  },
+
+  /**
+   * Move one application to another stage.
+   *
+   * **Not idempotent**, unlike `set` above, and deliberately so: asking to move
+   * to the stage it is already in is a 409, because staying put is not a
+   * transition and an event recording that nothing happened is noise in a log
+   * whose whole worth is the opposite.
+   *
+   * A refused move throws `ApiError` with code `INVALID_STATUS_TRANSITION` and
+   * `details.allowed` listing where it can actually go — so a caller recovers
+   * from the server's answer rather than keeping its own copy of the rules.
+   *
+   * `occurredAt` is for moves reported after the fact, which is most of them:
+   * people log an interview the evening after it. Omitted means now. The server
+   * refuses a future time.
+   */
+  changeStatus(
+    applicationId: string,
+    status: ApplicationStatus,
+    occurredAt?: string,
+  ): Promise<ApplicationRead> {
+    return api.patch<ApplicationRead>(`/applications/${applicationId}/status`, {
+      status,
+      ...(occurredAt === undefined ? {} : { occurred_at: occurredAt }),
+    })
   },
 }
