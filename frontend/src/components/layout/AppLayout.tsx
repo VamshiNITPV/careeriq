@@ -128,26 +128,82 @@ export function AppLayout() {
             CareerIQ
           </NavLink>
 
-          {/* Sits immediately after the logo, where a hamburger is expected.
-              aria-expanded and aria-controls are what tell a screen reader this
-              button owns a collapsible region and whether it is open; without
-              them it announces as an unlabelled button that appears to do
-              nothing. */}
-          <button
-            ref={triggerRef}
-            type="button"
-            onClick={() => setMenuOpen((open) => !open)}
-            aria-expanded={menuOpen}
-            aria-controls="mobile-nav"
-            aria-label={menuOpen ? 'Close menu' : 'Open menu'}
-            // `size-10` on the hit area: this was 36px, and it is the only route
-            // to navigation on a phone. The icon is unchanged.
+          {/*
+            One wrapper around the button and its panel, which is what lets the
+            panel anchor to the button instead of spanning the header.
+
+            It also collapses the hover wiring to a single pair of handlers.
+            They used to sit on the button *and* the panel, because the two had
+            no common parent; now the panel is a descendant, so moving from one
+            into the other fires no `pointerleave` at all and only the 8px gap
+            leans on the close delay — the same arrangement DropdownMenu uses.
+          */}
+          <div
+            className="relative sm:hidden"
             onPointerEnter={navHover.onPointerEnter}
             onPointerLeave={navHover.onPointerLeave}
-            className="inline-flex size-10 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100 hover:text-slate-900 sm:hidden"
           >
-            <MenuIcon open={menuOpen} />
-          </button>
+            {/* Sits immediately after the logo, where a hamburger is expected.
+                aria-expanded and aria-controls are what tell a screen reader
+                this button owns a collapsible region and whether it is open;
+                without them it announces as an unlabelled button that appears
+                to do nothing. */}
+            <button
+              ref={triggerRef}
+              type="button"
+              onClick={() => setMenuOpen((open) => !open)}
+              aria-expanded={menuOpen}
+              aria-controls="mobile-nav"
+              aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+              // `size-10` on the hit area: this was 36px, and it is the only
+              // route to navigation on a phone. The icon is unchanged.
+              className="inline-flex size-10 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+            >
+              <MenuIcon open={menuOpen} />
+            </button>
+
+            {/*
+              A panel anchored under the button, not a bar across the header.
+
+              Full width made four short labels sit alone on four full-width
+              rows, which read as a page rather than a menu. `w-56` is the
+              width: "Applications" is the longest label at roughly 85px, and
+              224px clears it with room to spare while staying a step narrower
+              than the account menu's `w-60` beside it — the two read as the
+              same family without being the same size.
+
+              `max-w-[calc(100vw-2rem)]` for the same reason DropdownMenu
+              carries it: on a very narrow phone a fixed width would push past
+              the viewport and take the horizontal scrollbar with it.
+
+              Kept mounted and toggled with `hidden` so the links stay in the
+              accessibility tree in a predictable place, and so the collapse is
+              one attribute change rather than a remount.
+            */}
+            <div
+              id="mobile-nav"
+              hidden={!menuOpen}
+              className={cn(
+                'absolute top-full left-0 z-30 mt-2 w-56 max-w-[calc(100vw-2rem)]',
+                'rounded-lg border border-slate-200 bg-white p-2 shadow-lg',
+              )}
+            >
+              {/* Navigation only. The account details and Sign out live in the
+                  avatar menu, which is visible at every breakpoint, so
+                  duplicating them here would be two places to keep in step. */}
+              <nav aria-label="Main" className="space-y-1">
+                {NAV_ITEMS.map((item) => (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    className={({ isActive }) => cn(navLinkClass({ isActive }), 'block')}
+                  >
+                    {item.label}
+                  </NavLink>
+                ))}
+              </nav>
+            </div>
+          </div>
 
           {/* Desktop navigation, from `sm` rather than `md`. Four links, the
               logo and the avatar measure roughly 545px together, so 640px clears
@@ -169,31 +225,6 @@ export function AppLayout() {
           </div>
         </div>
 
-        {/* Mobile panel. Kept mounted and toggled with `hidden` so the links
-            stay in the accessibility tree in a predictable place, and so the
-            collapse is a single attribute change rather than a remount. */}
-        <div
-          id="mobile-nav"
-          hidden={!menuOpen}
-          className="border-t border-slate-200 bg-white sm:hidden"
-          onPointerEnter={navHover.onPointerEnter}
-          onPointerLeave={navHover.onPointerLeave}
-        >
-          {/* Navigation only. The account details and Sign out moved into the
-              avatar menu, which is visible at every breakpoint, so duplicating
-              them here would be two places to keep in step. */}
-          <nav aria-label="Main" className="space-y-1 px-4 py-3 sm:px-6">
-            {NAV_ITEMS.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                className={({ isActive }) => cn(navLinkClass({ isActive }), 'block')}
-              >
-                {item.label}
-              </NavLink>
-            ))}
-          </nav>
-        </div>
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">

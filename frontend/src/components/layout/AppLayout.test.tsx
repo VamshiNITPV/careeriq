@@ -50,8 +50,17 @@ describe('AppLayout navigation', () => {
 
     const trigger = screen.getByRole('button', { name: 'Open menu' })
     expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    // One nav while closed: the panel carries `hidden`, which takes it out of
+    // the accessibility tree along with its links.
+    expect(screen.getAllByRole('navigation', { name: 'Main' })).toHaveLength(1)
 
     await user.click(trigger)
+
+    // Two once open. aria-expanded alone would have gone on saying "open"
+    // while the panel showed nothing — the restructure into an anchored
+    // dropdown is exactly the kind of change that can break one without the
+    // other.
+    expect(screen.getAllByRole('navigation', { name: 'Main' })).toHaveLength(2)
 
     // The accessible name flips with the state, so this also proves the label
     // is not stale — a button still reading "Open menu" while the panel is open
