@@ -14,8 +14,9 @@ conducts adaptive AI mock interviews.
 > **Status:** Phases 1–7 complete. Matching is measured rather than asserted (6.4), and
 > career intelligence — skill gaps, learning paths and grounded resume optimization — is
 > shipped with the fabrication validator that makes the last of those safe to offer at all.
-> Phase 8's application funnel and event log are in; its analytics are not. The deployment
-> is built and proven locally, and is waiting on a VM rather than on code.
+> Phase 8's funnel, its event log and the outcome rates read off it are in — rates come
+> from history, so a rejection after two interviews still counts as an interview. The
+> deployment is built and proven locally, and is waiting on a VM rather than on code.
 
 ---
 
@@ -345,15 +346,28 @@ the uploaded file is never modified. Some genuinely good suggestions get thrown
 out by the validator. That is the correct trade: a false negative costs a
 suggestion, a false positive costs the user their credibility in an interview.
 
-¹¹ **The funnel exists; the analytics do not yet.** `ApplicationStatus` carries
-all seven stages, transitions are validated against explicit rules rather than
-trusted from the client, and every change is recorded in `application_events` —
-so "how long did this sit in ASSESSMENT" is answerable rather than guessed at.
-The event log is written now precisely because it cannot be reconstructed later.
+¹¹ **The funnel, its log, and the numbers read off it — minus two slices.**
+`ApplicationStatus` carries all seven stages, transitions are validated against
+explicit rules rather than trusted from the client, and every change writes an
+immutable `application_event`.
 
-What is missing is the outcome analysis this data exists for, and a screen to
-manage applications from. The demo seeds applications across every stage, so the
-data shape is real and visible through the API.
+That log is the whole point, and US-7.2's rates are why. **Outcome rates are
+computed from history, not from current status.** An application sitting at
+REJECTED may have been rejected *after* two interviews, and scoring it by where
+it is now would count it as never having reached one — every rate quietly too
+low, with nothing failing. `/applications` shows application count, interview
+rate and offer rate, sliced by role and by location.
+
+**Below five applications a segment reports counts and no rate** (AC3). One
+interview in two applications is not a 50% success rate, and a null rate is
+rendered as an em-dash rather than as 0% — "not enough happened to say" and
+"enough happened, and none of it was this" are different answers.
+
+**What is left is AC2's other two slices**, by resume version and by match-score
+band. Neither can be computed after the fact: an application carries no
+`resume_version_id`, match scores are never stored (ADR-006), and by next month
+both the resume and the corpus have moved. Both have to be captured at the
+moment of applying, which is a schema change rather than a query.
 
 ¹² **Built and verified, not yet running anywhere.** The production stack, the
 Cloud Storage adapter, the deploy script, CI, and a seeded demo account are all

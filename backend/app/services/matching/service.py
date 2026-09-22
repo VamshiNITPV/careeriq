@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from app.integrations.embeddings.base import EmbeddingProvider
+from app.core.config import get_settings
 from app.models.enums import SkillRequirement
 from app.models.job import Job
 from app.repositories.matching import CandidateSnapshot, MatchingRepository, SkillFacts
@@ -142,15 +142,32 @@ def _scored_weight(rows: tuple[ScoredDimension, ...]) -> Decimal:
 class MatchingService:
     """Scores one candidate against one job.
 
-    Takes the provider only to learn *which* model's vectors to compare, exactly
-    as `similar_jobs` does. **No model is ever loaded here** — the comparison is
-    a cosine in SQL, which is what lets the API image stay free of torch
-    (architecture.md's cold-start risk, asserted by a test).
+    **No model is ever loaded here** — the comparison is a cosine in SQL, which
+    is what lets the API image stay free of torch (architecture.md's cold-start
+    risk, asserted by a test).
+
+    ## It reads the configured model name, not a provider's
+
+    This used to take an `EmbeddingProvider | None` "only to learn which model's
+    vectors to compare", and then skipped the comparison entirely when that was
+    None. The two are not the same fact. A provider is what *makes* a vector;
+    reading one back is SQL.
+
+    The deployed VM is the case that proves it: `EMBEDDING_PROVIDER=none`,
+    because the model wants ~2GB and the machine has 1GB, with the demo's
+    vectors seeded. Under the old arrangement every posting there scored with
+    the semantic dimension reporting NEEDS_DATA — "we haven't compared this
+    posting against your resume yet" — while both vectors sat in the database.
+    The one dimension that is actually machine learning, silently absent from
+    every score on the page a visitor lands on, with nothing failing.
+
+    Same bug and same fix as `024fbc8`, which found it in three endpoints. This
+    was the fourth, and it hid longer because it degrades a score rather than
+    emptying a list.
     """
 
-    def __init__(self, *, repo: MatchingRepository, provider: EmbeddingProvider | None) -> None:
+    def __init__(self, *, repo: MatchingRepository) -> None:
         self._repo = repo
-        self._provider = provider
 
     async def snapshot(self, user_id: uuid.UUID) -> CandidateSnapshot:
         """Load the candidate once.
@@ -179,14 +196,10 @@ class MatchingService:
         """Score one job. Two queries: the cosine, and the taxonomy."""
         candidate = snapshot if snapshot is not None else await self.snapshot(user_id)
 
-        cosine = (
-            None
-            if self._provider is None
-            else await self._repo.candidate_job_cosine(
-                resume_version_id=resume_version_id,
-                job_id=job.id,
-                model_name=self._provider.model_name,
-            )
+        cosine = await self._repo.candidate_job_cosine(
+            resume_version_id=resume_version_id,
+            job_id=job.id,
+            model_name=get_settings().embedding_model,
         )
         # Both sides in one query: the one-level rule looks up the parent of a
         # job's skill *and* of the candidate's, and either direction can produce

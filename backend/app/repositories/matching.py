@@ -181,6 +181,20 @@ class MatchingRepository:
     #: reports honestly as "not compared yet".
     #:
     #: Vectors are stored L2-normalised, so `1 - (a <=> b)` is the cosine.
+    #: The candidate-to-job cosine.
+    #:
+    #: `model_name` **orders, it does not filter** — the same arrangement
+    #: `recall.py` uses for its anchor, and for the same reason. The JOIN above
+    #: is what makes the number meaningful: both vectors must come from one
+    #: model, or the arithmetic is over unrelated numbers. Pinning additionally
+    #: to a configured name adds no correctness and takes some away, because a
+    #: name that does not match what is stored returns nothing at all — and
+    #: "nothing" reads downstream as NEEDS_DATA, i.e. the semantic dimension
+    #: quietly dropping out of every score.
+    #:
+    #: Preferring it still matters for a user holding vectors from two models:
+    #: the configured one wins, and anything else is a usable fallback rather
+    #: than a silent zero.
     _COSINE = text("""
         SELECT 1 - (ce.embedding <=> je.embedding)
         FROM candidate_embeddings ce
@@ -189,7 +203,7 @@ class MatchingRepository:
          AND je.model_version = ce.model_version
         WHERE ce.resume_version_id = :resume_version_id
           AND je.job_id = :job_id
-          AND ce.model_name = :model_name
+        ORDER BY (ce.model_name = :model_name) DESC, ce.created_at DESC
         LIMIT 1
     """)
 

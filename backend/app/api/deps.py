@@ -190,12 +190,12 @@ def get_matching_repository(session: DbSession) -> MatchingRepository:
 
 def get_matching_service(
     repo: Annotated[MatchingRepository, Depends(get_matching_repository)],
-    provider: Annotated[EmbeddingProvider | None, Depends(get_embeddings_provider)],
 ) -> MatchingService:
-    # The provider is injected to learn *which* model's vectors to compare, not
-    # to run one — the cosine happens in SQL. The same arrangement similar_jobs
-    # uses, and the reason the API image needs no ML dependency.
-    return MatchingService(repo=repo, provider=provider)
+    # No provider. Scoring reads vectors and never makes one, so the model name
+    # comes from configuration — injecting a provider to learn a string is what
+    # made the semantic dimension vanish wherever no provider was configured,
+    # which is exactly how the deployed VM runs.
+    return MatchingService(repo=repo)
 
 
 def get_career_repositories(session: DbSession) -> list[CareerEntityRepository[Any]]:

@@ -165,6 +165,44 @@ class TestAvailability:
         assert body["availability"] == "READY"
         assert row(body, Dimension.SEMANTIC)["status"] == "SCORED"
 
+    async def test_vectors_are_compared_even_with_no_provider(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        embedding_provider: FakeEmbeddingProvider,
+        run_pipeline,
+    ) -> None:
+        """The deployed shape, and the one the test below does not cover.
+
+        That test removes the provider from a database with *no* vectors, so
+        NEEDS_DATA is the right answer there. This one indexes both sides first
+        and only then takes the provider away — which is exactly how the VM
+        runs: `EMBEDDING_PROVIDER=none` because the model wants ~2GB and the
+        machine has 1GB, with the demo's vectors seeded.
+
+        Comparing two stored vectors is a cosine in SQL. A provider is needed to
+        *make* one, never to read one, and the service's own docstring says it
+        takes the provider "only to learn which model's vectors to compare".
+        Learning a string must not be what decides whether the semantic
+        dimension — the part of this project that is actually machine
+        learning — contributes at all.
+        """
+        job_id = await submit(client, auth_headers, "Senior Backend Engineer", BACKEND)
+        await upload_resume(client, auth_headers, run_pipeline)
+        await index_jobs(session=db_session, provider=embedding_provider, batch_size=10)
+        await index_candidates(session=db_session, provider=embedding_provider, batch_size=10)
+
+        # Only now, once both vectors exist.
+        client._transport.app.dependency_overrides[get_embeddings_provider] = lambda: None  # type: ignore[attr-defined]
+
+        response = await client.get(f"{API}/jobs/{job_id}/match", headers=auth_headers)
+
+        body = response.json()
+        assert body["availability"] == "READY"
+        assert row(body, Dimension.SEMANTIC)["status"] == "SCORED"
+
     async def test_no_provider_is_partial_not_an_error(
         self,
         client: AsyncClient,
