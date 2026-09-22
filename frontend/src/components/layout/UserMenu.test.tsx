@@ -37,10 +37,9 @@ describe('UserMenu', () => {
       '/profile',
     )
     expect(screen.getByRole('menuitem', { name: 'Your resume' })).toHaveAttribute('href', '/resume')
-    expect(screen.getByRole('menuitem', { name: 'Saved jobs' })).toHaveAttribute(
-      'href',
-      '/saved-jobs',
-    )
+    // No "Saved jobs" entry: that page was a second view of the rows now on
+    // /applications, and two views of one list can disagree.
+    expect(screen.queryByRole('menuitem', { name: 'Saved jobs' })).not.toBeInTheDocument()
   })
 
   it('puts every entry in the keyboard sequence', async () => {
@@ -51,9 +50,12 @@ describe('UserMenu', () => {
      */
     const user = await openMenu()
 
+    // Three presses reaches the last entry now that Saved jobs is gone. Landing
+    // on Sign out is the stronger assertion anyway: it is the item furthest
+    // from the trigger, so reaching it proves every one before it participates.
     await user.keyboard('{ArrowDown}{ArrowDown}{ArrowDown}')
 
-    expect(screen.getByRole('menuitem', { name: 'Saved jobs' })).toHaveFocus()
+    expect(screen.getByRole('menuitem', { name: 'Sign out' })).toHaveFocus()
   })
 
   it('keeps sign out separated from the navigation', async () => {

@@ -2,8 +2,8 @@
  * What to call the job page's back link, given where it returns to.
  *
  * The link used to read "Back to jobs" unconditionally, which was wrong
- * wherever the reader had not come from the job list — from Saved jobs it both
- * said and did the wrong thing. Naming the destination means the link can be
+ * wherever the reader had not come from the job list — from the applications
+ * funnel it both said and did the wrong thing. Naming the destination means the link can be
  * read before it is clicked, which is the one advantage it has over the
  * browser's own Back button sitting a few pixels away.
  *
@@ -13,7 +13,7 @@
 
 /** Pathname prefix → what to call it. Order matters only if prefixes overlap. */
 const LABELS: readonly (readonly [string, string])[] = [
-  ['/saved-jobs', 'Back to saved jobs'],
+  ['/applications', 'Back to applications'],
   ['/dashboard', 'Back to dashboard'],
 ]
 

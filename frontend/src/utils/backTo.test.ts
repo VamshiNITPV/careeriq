@@ -3,7 +3,7 @@ import { backLabelFor } from './backTo'
 
 describe('backLabelFor', () => {
   it('names the page the link returns to', () => {
-    expect(backLabelFor('/saved-jobs')).toBe('Back to saved jobs')
+    expect(backLabelFor('/applications')).toBe('Back to applications')
     expect(backLabelFor('/dashboard')).toBe('Back to dashboard')
     expect(backLabelFor('/jobs')).toBe('Back to jobs')
   })
@@ -13,7 +13,7 @@ describe('backLabelFor', () => {
     // where the link goes, never part of what it is called.
     expect(backLabelFor('/jobs?q=python&offset=20')).toBe('Back to jobs')
     expect(backLabelFor('/jobs?sort=match')).toBe('Back to jobs')
-    expect(backLabelFor('/saved-jobs?anything=1')).toBe('Back to saved jobs')
+    expect(backLabelFor('/applications?anything=1')).toBe('Back to applications')
   })
 
   it('falls back rather than failing on a path it does not know', () => {
@@ -35,7 +35,7 @@ describe('backLabelFor', () => {
      * that adding such a page later must not silently inherit the label.
      */
     expect(backLabelFor('/dashboards-of-my-team')).toBe('Back to jobs')
-    expect(backLabelFor('/saved-jobs-archive')).toBe('Back to jobs')
+    expect(backLabelFor('/applications-archive')).toBe('Back to jobs')
   })
 
   it('matches a child path of a known page', () => {

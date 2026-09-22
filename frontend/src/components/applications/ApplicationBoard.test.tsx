@@ -105,8 +105,8 @@ describe('ApplicationBoard', () => {
       .mockResolvedValue({ ...item({ status: 'INTERVIEW' }) })
 
     renderBoard()
-    const select = await screen.findByRole('combobox')
-    await userEvent.selectOptions(select, 'INTERVIEW')
+    await userEvent.click(await screen.findByRole('button', { name: /Move Backend Engineer/ }))
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Interview' }))
 
     await waitFor(() => expect(change).toHaveBeenCalledWith('a1', 'INTERVIEW'))
     // Refetched rather than patched locally: a transition can change more than
@@ -127,7 +127,8 @@ describe('ApplicationBoard', () => {
     )
 
     renderBoard()
-    await userEvent.selectOptions(await screen.findByRole('combobox'), 'OFFER')
+    await userEvent.click(await screen.findByRole('button', { name: /Move Backend Engineer/ }))
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Offer' }))
 
     // The server's own answer. Collapsing this into "something went wrong"
     // would throw away the one fact that tells the user what to do instead.
@@ -150,7 +151,87 @@ describe('ApplicationBoard', () => {
 
     // "You have no applications" and "we could not reach the server" must never
     // look the same — one is a fact about the user, the other about us.
-    expect(await screen.findByText(/could not be loaded/)).toBeInTheDocument()
+    expect(await screen.findByText(/couldn't load your applications/i)).toBeInTheDocument()
     expect(screen.queryByText(/Nothing here yet/)).not.toBeInTheDocument()
+  })
+  it('names the stage in each card heading, not just the count', async () => {
+    vi.spyOn(applicationService, 'list').mockResolvedValue({
+      items: [item({ status: 'APPLIED' })],
+      total: 1,
+    })
+
+    renderBoard()
+
+    // The stage name has to be inside the heading. With the pill beside it
+    // instead, every card's accessible name was "1 job" and a screen reader
+    // never said which stage — the one piece of information this page carries.
+    const heading = await screen.findByRole('heading', { name: /Applied/ })
+    expect(heading).toHaveAccessibleName(expect.stringContaining('Applied'))
+  })
+
+  it('draws a meter per stage with the counts it actually has', async () => {
+    vi.spyOn(applicationService, 'list').mockResolvedValue({
+      items: [
+        item({ id: 'a1', status: 'APPLIED' }),
+        item({ id: 'a2', job_id: 'j2', status: 'APPLIED' }),
+        item({ id: 'a3', job_id: 'j3', status: 'INTERVIEW' }),
+      ],
+      total: 3,
+    })
+
+    renderBoard()
+
+    const applied = await screen.findByRole('meter', { name: 'Applied: 2' })
+    expect(applied).toHaveAttribute('aria-valuenow', '2')
+    // Scaled against the busiest stage, not the total: one application per
+    // stage would otherwise draw five stripes too thin to see.
+    expect(applied).toHaveAttribute('aria-valuemax', '2')
+    expect(screen.getByRole('meter', { name: 'Interview: 1' })).toHaveAttribute(
+      'aria-valuenow',
+      '1',
+    )
+  })
+
+  it('offers a way in when there is nothing yet', async () => {
+    vi.spyOn(applicationService, 'list').mockResolvedValue({ items: [], total: 0 })
+
+    renderBoard()
+
+    // Carried over from the Saved jobs page this screen replaced. An empty
+    // state that only explains itself leaves the reader with nowhere to go.
+    expect(await screen.findByRole('link', { name: /Browse jobs/ })).toHaveAttribute(
+      'href',
+      '/jobs',
+    )
+  })
+
+  it('keeps the bookmark control on every row', async () => {
+    vi.spyOn(applicationService, 'list').mockResolvedValue({
+      items: [item({ status: 'APPLIED', is_saved: true })],
+      total: 1,
+    })
+
+    renderBoard()
+
+    // Also carried over. Deleting /saved-jobs without this would have removed
+    // the only place to unsave a job.
+    expect(
+      await screen.findByRole('button', { name: /Remove Backend Engineer from saved/ }),
+    ).toBeInTheDocument()
+  })
+
+  it('lets you return here from the job it links to', async () => {
+    vi.spyOn(applicationService, 'list').mockResolvedValue({
+      items: [item({ status: 'APPLIED' })],
+      total: 1,
+    })
+
+    renderBoard()
+
+    // The job page falls back to /jobs when this state is absent — silently,
+    // and plausibly, since /jobs is a real page it might have come from.
+    const link = await screen.findByRole('link', { name: 'Backend Engineer' })
+    await userEvent.click(link)
+    expect(link).toHaveAttribute('href', '/jobs/j1')
   })
 })

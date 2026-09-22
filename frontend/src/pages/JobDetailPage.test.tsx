@@ -204,17 +204,17 @@ describe('JobDetailPage', () => {
 
     it('names the page it returns to', async () => {
       /*
-       * It read "Back to jobs" wherever it came from, so from Saved jobs it
-       * both said and did the wrong thing. The label is read before the click —
+       * It read "Back to jobs" wherever it came from, so from the applications
+       * funnel it both said and did the wrong thing. The label is read before the click —
        * that is the only thing it offers over the browser's own Back button
        * sitting a few pixels away — so it has to be true.
        */
       vi.spyOn(jobService, 'get').mockResolvedValue(detailFixture())
-      renderPage({ backTo: '/saved-jobs' })
+      renderPage({ backTo: '/applications' })
       await screen.findByRole('heading', { name: 'Senior Data Engineer' })
 
-      const link = screen.getByRole('link', { name: '← Back to saved jobs' })
-      expect(link).toHaveAttribute('href', '/saved-jobs')
+      const link = screen.getByRole('link', { name: '← Back to applications' })
+      expect(link).toHaveAttribute('href', '/applications')
     })
 
     it('returns to the list you came from', async () => {

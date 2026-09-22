@@ -46,15 +46,38 @@ export const STATUS_LABEL: Record<ApplicationStatus, string> = {
  * Tailwind v4 scans source *text* for class names, so a template literal like
  * `bg-${tone}-100` produces a class that exists at runtime and was never
  * compiled into the stylesheet — it fails silently as unstyled output.
+ *
+ * The 50/700/600-20 ring-inset triple is the app's pill palette, matching
+ * `SkillGapsPage`'s severity and status pills. These were flat `bg-X-100` in
+ * the first version of this screen, which is why it read as belonging to a
+ * different application than the rest.
  */
 export const STATUS_TONE: Record<ApplicationStatus, string> = {
-  SAVED: 'bg-slate-100 text-slate-700',
-  APPLIED: 'bg-sky-100 text-sky-800',
-  ASSESSMENT: 'bg-violet-100 text-violet-800',
-  INTERVIEW: 'bg-amber-100 text-amber-900',
-  OFFER: 'bg-emerald-100 text-emerald-800',
-  REJECTED: 'bg-rose-100 text-rose-800',
-  WITHDRAWN: 'bg-stone-200 text-stone-700',
+  SAVED: 'bg-slate-100 text-slate-600 ring-slate-500/20',
+  APPLIED: 'bg-sky-50 text-sky-700 ring-sky-600/20',
+  ASSESSMENT: 'bg-violet-50 text-violet-700 ring-violet-600/20',
+  INTERVIEW: 'bg-amber-50 text-amber-700 ring-amber-600/20',
+  OFFER: 'bg-emerald-50 text-emerald-700 ring-emerald-600/20',
+  REJECTED: 'bg-red-50 text-red-700 ring-red-600/20',
+  WITHDRAWN: 'bg-slate-100 text-slate-600 ring-slate-500/20',
+}
+
+/**
+ * The filled portion of each stage's bar in the funnel summary.
+ *
+ * Separate from `STATUS_TONE` because a pill's background and a bar's fill want
+ * opposite weights: the pill is a tint behind text, the bar is a solid mark
+ * read on its own. Reusing the pill's 50-shade here drew bars that were
+ * invisible against the slate-100 track.
+ */
+export const STATUS_FILL: Record<ApplicationStatus, string> = {
+  SAVED: 'bg-slate-400',
+  APPLIED: 'bg-sky-500',
+  ASSESSMENT: 'bg-violet-500',
+  INTERVIEW: 'bg-amber-500',
+  OFFER: 'bg-emerald-500',
+  REJECTED: 'bg-red-400',
+  WITHDRAWN: 'bg-slate-300',
 }
 
 export interface ApplicationRead {
