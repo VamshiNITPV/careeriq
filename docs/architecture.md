@@ -637,6 +637,27 @@ details:
   strong answer without ordering them. Breadth first: an interview that drills one topic to `EXPERT`
   has measured less about somebody than one that establishes competence across the blueprint.
 
+**Amendment (2026-09-23, 9.2) — what stops a question inventing experience.** The generated
+question is gated four ways, and the fourth turned out to need narrowing against a real model rather
+than reasoning:
+
+- It parses as the schema; the returned topic and difficulty are the ones requested (ml.md section
+  6.2's rule, so a model that substitutes an easier topic cannot silently ignore the policy above
+  it).
+- **The model must name the exact resume words it built on, and they must be there** — anchored with
+  `resume/anchoring.py`'s whitespace-tolerant, word-exact matcher. A grounding that does not anchor
+  is experience the candidate never reported, and the question is rejected. This is what carries the
+  safety claim.
+- An entity check, **restricted to invented credentials**. It began as the full check
+  `resume/fabrication.py` runs, and two runs against Gemini showed that flagging `RAG`, `BM25`,
+  `WSGI`, `ASGI` and `GIL` as fabrications — the field's own vocabulary — made the ungrounded
+  fallback the normal path. The check cannot separate *attribution* ("at Netflix you handled
+  failover") from *hypothesis* ("how would you handle failover"), and that distinction is the entire
+  question, so it now claims only what it can: a credential the resume does not contain.
+
+Where personalisation fails, the question falls back to topic-only and the row records
+`degraded = true`. A weaker question, said to be one.
+
 **And one thing it leaves open that is not yet answered.** "The role's blueprint" — the topic list a
 role is examined against — is a small static map for now, and `policy.py` says so where it is
 defined. It should come from the role's own skill demand, which is the aggregation the skill-gap

@@ -227,8 +227,8 @@ Each story carries acceptance criteria (AC) that become test cases.
 ### Epic 8 — AI Interview
 
 **US-8.1** As a user, I want a mock interview for a target role, so that I can practise.
-- AC1: Questions are generated from the target role and my actual profile, not from a fixed bank.
-- AC2: The session persists and can be resumed.
+- AC1: Questions are generated from the target role and my actual profile, not from a fixed bank. *Note 2026-09-23 (9.2): taken to mean all three of the role's real demand, the specific posting, and the candidate's resume. Topics come from aggregating `job_skills` over live postings matching the role — the same aggregation skill gaps uses — falling back to a generic list below three matching postings and saying which it gave. The model must name the exact resume words it builds on, verified present before the question is stored; where it cannot, the question falls back to topic-only and the row records `degraded = true`. There is no fallback bank: one that appears only when the model fails is still a bank.*
+- AC2: The session persists and can be resumed. *Met by ADR-013's decision to hold the state machine in Postgres rather than in a model's context window: `GET /interviews/{id}` returns the same transcript, difficulty and covered topics tomorrow.*
 
 **US-8.2** As a user, I want the interview to adapt, so that it probes my real level.
 - AC1: A weak answer produces an easier clarifying follow-up; a strong answer escalates difficulty.

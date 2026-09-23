@@ -47,6 +47,7 @@ from app.repositories.skill import (
 from app.repositories.user import ProfileRepository, UserRepository
 from app.repositories.verification import VerificationTokenRepository
 from app.services.auth import AuthService
+from app.services.interview.session import ask_next_question
 from app.services.job.service import JobService
 from app.services.matching.service import MatchingService
 from app.services.notifications import NotificationService
@@ -273,8 +274,18 @@ def get_analysis_runner() -> Callable[[uuid.UUID], Awaitable[None]]:
     return run_optimization_analysis
 
 
+def get_interview_runner() -> Callable[[uuid.UUID], Awaitable[None]]:
+    # Injected rather than imported at the call site, so a test can substitute
+    # one that does not reach for a model -- the same arrangement the analysis
+    # runner uses.
+    return ask_next_question
+
+
 PipelineRunnerDep = Annotated[Callable[[uuid.UUID], Awaitable[None]], Depends(get_pipeline_runner)]
 AnalysisRunnerDep = Annotated[Callable[[uuid.UUID], Awaitable[None]], Depends(get_analysis_runner)]
+InterviewRunnerDep = Annotated[
+    Callable[[uuid.UUID], Awaitable[None]], Depends(get_interview_runner)
+]
 SkillRepositoryDep = Annotated[SkillRepository, Depends(get_skill_repository)]
 ResumeVersionRepositoryDep = Annotated[
     ResumeVersionRepository, Depends(get_resume_version_repository)

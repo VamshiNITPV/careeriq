@@ -172,7 +172,13 @@ class TestTheRubric:
 
 
 class TestEntityCheck:
-    """Gate 4, which is advisory here and absolute in the resume feature."""
+    """Gate 4, narrowed to credentials after measuring it against a real model.
+
+    The full entity check flagged RAG, BM25, WSGI, ASGI and GIL -- the field's
+    vocabulary, not inventions -- and made its own fallback the normal path. It
+    cannot tell attribution from hypothesis, and that distinction is the whole
+    question, so it now claims only the one thing it can claim.
+    """
 
     def test_a_question_using_the_postings_vocabulary_is_not_flagged(self) -> None:
         """The reason this gate is soft.
@@ -188,22 +194,16 @@ class TestEntityCheck:
 
         assert found == ()
 
-    def test_an_acronym_opening_a_sentence_is_still_flagged(self) -> None:
-        """The exception the opener rule preserves.
+    def test_an_invented_credential_is_flagged(self) -> None:
+        """The one thing this gate still claims.
 
-        Sentence-initial capitals are dropped because questions open with
-        "Walk" and "Describe", which are not organisations. An all-caps acronym
-        is different wherever it sits -- "AWS Certified" opening a sentence is
-        the canonical fabrication, and dropping it would reopen the hole the
-        rule was narrowed to avoid.
+        "Your AWS certification" is ADR-012's canonical fabrication, it is
+        almost never legitimate vocabulary inside a question, and the validator
+        already recognises the credential words that identify it.
         """
-        # The acronym is the ONLY token that can be flagged here: it opens the
-        # sentence, and so does "Describe", which the rule drops. If the rule
-        # swallowed acronyms too this would come back empty -- which is exactly
-        # what the mutation check confirmed before this was tightened.
         question = parse(
             reply(
-                question_text="AWS certification matters for this. Describe yours.",
+                question_text="Your AWS certification covers this. Describe how.",
                 grounded_in=None,
             )
         )
@@ -212,7 +212,39 @@ class TestEntityCheck:
 
         assert found == ("AWS",)
 
-    def test_an_invented_employer_is_flagged(self) -> None:
+    @pytest.mark.parametrize(
+        "vocabulary",
+        [
+            "Explain the GIL and how it affects PostgreSQL connection pooling.",
+            "Compare WSGI and ASGI for this workload.",
+            "Would RAG or BM25 suit the retrieval step here?",
+        ],
+    )
+    def test_the_fields_vocabulary_is_not_a_fabrication(self, vocabulary: str) -> None:
+        """Every one of these was flagged by the un-narrowed gate.
+
+        Found by running against the real model twice and reading why questions
+        degraded -- not by any test, because the fixtures were written in
+        ordinary English and never contained an acronym.
+        """
+        question = parse(reply(question_text=vocabulary, grounded_in=None))
+
+        found = check_entities(question, resume_text=RESUME, posting_text=None)
+
+        assert found == ()
+
+    def test_an_invented_employer_slips_past_and_that_is_known(self) -> None:
+        """The cost of narrowing, stated rather than hidden.
+
+        "At Netflix you handled failover" is an attribution the entity check no
+        longer catches, because nothing at the entity level separates it from
+        "how would you handle failover at Netflix's scale". What covers it
+        instead: gate 3 refuses any *declared* grounding that is not in the
+        resume, and the prompt forbids attribution in as many words.
+
+        Asserted rather than left implicit so that the day somebody widens this
+        gate again, they find out here that it was narrowed on purpose.
+        """
         question = parse(
             reply(
                 question_text="At Netflix you handled PostgreSQL failover. How?",
@@ -222,4 +254,4 @@ class TestEntityCheck:
 
         found = check_entities(question, resume_text=RESUME, posting_text=None)
 
-        assert any("Netflix" in entity for entity in found)
+        assert found == ()

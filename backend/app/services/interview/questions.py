@@ -26,20 +26,37 @@ for and about somebody who actually exists.
 
 4. **An entity check, deliberately soft.** See below.
 
-## Why gate 4 is soft when the resume feature's is absolute
+## Gate 4 is credentials only, and that is a retreat I measured into
 
-`resume/fabrication.py` over-rejects on purpose: there, a false positive costs
-one phrasing nobody misses, and a false negative costs somebody their
-credibility in an interview. **Here the costs invert.** A question is *supposed*
-to introduce vocabulary the resume does not contain -- that is what examining
-someone against a job's requirements means -- and a hypothetical ("a service
-handling 1 million requests") carries numbers no resume holds. Run as a hard
-gate it would reject most good questions and the feature would produce nothing.
+It began as the full entity check `resume/fabrication.py` runs, softened to a
+retry-then-degrade rather than a rejection. Two runs against the real model
+showed that was still far too broad: the "fabrications" it found were `RAG`,
+`BM25`, `WSGI`, `ASGI` and `GIL`. Those are the field's vocabulary. A question
+about Python concurrency is *supposed* to say `GIL`, and a check that calls it
+an invention makes its own fallback the normal path -- which is the same failure
+as having no gate, with more machinery.
 
-So a failure here means: try once more with a blunter instruction, then fall
-back to a question grounded only in the topic. **Degraded, never fabricated**,
-and the degradation is recorded so a report can say the personalisation did not
-hold rather than quietly pretending it did.
+The deeper problem is that the check cannot tell **attribution** from
+**hypothesis**, and that distinction is the entire question. "At Netflix you
+handled failover" and "how would you handle failover at scale" contain the same
+kinds of entity; only the first is a claim about the candidate. Nothing at the
+entity level separates them, and every threshold I could pick either waves
+through real fabrications or rejects ordinary questions.
+
+So it now flags one thing: **an invented credential**. "Your AWS certification",
+"your PMP" -- the canonical fabrication ADR-012 was written for, almost never
+legitimate vocabulary inside a question, and detectable by the credential words
+the validator already recognises.
+
+What carries the rest of the load is gate 3, which is deterministic and does not
+have this problem: a claim about the candidate must quote the candidate. The
+prompt forbids attribution in as many words besides.
+
+A failure here means: try once more with a blunter instruction, then fall back
+to a question grounded only in the topic. **Degraded, never fabricated**, and
+the degradation is stored on the row -- `interview_questions.degraded` -- so a
+report can say the personalisation did not hold rather than quietly pretending
+it did.
 
 There is no fallback question bank. US-8.1 AC1 rules one out by name, and a bank
 that appears only when the model fails is still a bank.
@@ -62,7 +79,7 @@ from app.integrations.prompts.parsing import unfence
 from app.models.enums import QuestionDifficulty
 from app.services.interview.prompts import question_prompt
 from app.services.resume.anchoring import find_span
-from app.services.resume.fabrication import validate_suggestion
+from app.services.resume.fabrication import EntityKind, validate_suggestion
 from app.services.resume.skill_extraction import SkillMatcher
 
 log = get_logger(__name__)
@@ -236,7 +253,11 @@ def check_entities(
     return tuple(
         entity.text
         for entity in result.fabricated
-        if not _only_ever_sentence_initial(entity.text, question.question_text)
+        if entity.kind is EntityKind.CREDENTIAL
+        # Still dropped even when credential-shaped: questions open with
+        # "Describe" and "Given", and a sentence-initial capital is capitalised
+        # because it has to be, not because it names anything.
+        and not _only_ever_sentence_initial(entity.text, question.question_text)
     )
 
 

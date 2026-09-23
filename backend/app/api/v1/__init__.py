@@ -12,6 +12,7 @@ from app.api.v1 import (
     auth,
     career,
     health,
+    interviews,
     jobs,
     optimize,
     profile,
@@ -41,6 +42,7 @@ api_router.include_router(skills.profile_skills_router)
 # nothing under /profile declares a bare path parameter that would swallow
 # these.
 api_router.include_router(applications.router)
+api_router.include_router(interviews.router)
 api_router.include_router(career.router)
 api_router.include_router(recommendations.router)
 api_router.include_router(optimize.router)

@@ -16,8 +16,10 @@ conducts adaptive AI mock interviews.
 > ships with the fabrication validator that makes the last of those safe to offer at all.
 > The application funnel keeps an immutable event log, and its outcome rates are read from
 > that history, so a rejection after two interviews still counts as an interview. The
-> deployment is built and proven locally, waiting on a VM rather than on code. Phase 9,
-> the AI mock interview, is next.
+> deployment is built and proven locally, waiting on a VM rather than on code. Phase 9's
+> mock interview asks real questions now — built from what the role's postings demand, the
+> specific job, and the candidate's own resume, with the words it builds on verified present
+> before the question is stored. Scoring them is next.
 
 ---
 
@@ -157,7 +159,7 @@ Read these in order:
 | 6.4 | Evaluation — labelled dataset, metrics, weight tuning, near-duplicates | ✅ Done⁸ ⁹ |
 | 7 | Career intelligence — skill gaps, learning paths, resume optimization | ✅ Done¹⁰ |
 | 8 | Application system — tracking, analytics, outcome analysis | ✅ Done¹¹ |
-| 9 | AI interview — question generation, adaptive engine, evaluation | ⬜ |
+| 9 | AI interview — question generation, adaptive engine, evaluation | 🟡 Part¹³ |
 | 10 | Production engineering — Redis, background jobs, WebSockets, security | ⬜ |
 | 11 | Cloud — Docker, GCP, CI/CD, monitoring | 🟡 Part¹² |
 | 12 | Final polish — testing, documentation, diagrams, demo | ⬜ |
@@ -375,6 +377,26 @@ part of.
 Recording it is not allowed to cost anything else: a bookmark records neither,
 and a failure to score still saves the application. Recording *that* you applied
 must not depend on computing *how well*.
+
+¹³ **The state machine and its questions are in; scoring is not.** The interview is an explicit
+state machine in Postgres, not a prompt loop (ADR-013), so the adaptation policy is a pure function
+proven over its whole cross-product with no model involved — and a session survives closing the tab,
+which is what US-8.1 AC2 asks for.
+
+Questions are built from three things at once: what postings for the role actually demand (the same
+`job_skills` aggregation skill gaps runs), the specific posting being targeted, and the candidate's
+own resume. **The model must name the exact resume words it built on, and they are verified present
+before the question is stored** — a claim that does not anchor is experience the candidate never
+reported.
+
+One gate had to be narrowed against a real model rather than reasoned about. Running the full
+fabrication validator over generated questions flagged `RAG`, `BM25`, `WSGI` and `GIL` as
+inventions; those are the field's vocabulary, and the check cannot separate *attribution* from
+*hypothesis*. It now claims only invented credentials, and where personalisation fails the question
+degrades to topic-only with `degraded = true` on the row rather than passing itself off.
+
+Still to come: answering and scoring (US-8.2, US-8.3), and the agreement metric against a
+human-labelled set that ADR-015 requires before this can claim to work.
 
 ¹² **Built and verified, not yet running anywhere.** The production stack, the
 Cloud Storage adapter, the deploy script, CI, and a seeded demo account are all
