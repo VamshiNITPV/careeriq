@@ -146,6 +146,67 @@ def spearman(xs: Sequence[float], ys: Sequence[float]) -> float | None:
     return numerator / denominator
 
 
+def pearson(xs: Sequence[float], ys: Sequence[float]) -> float | None:
+    """Linear correlation between two sequences on the same scale.
+
+    Added for interview scoring (ml.md section 7.3), and it is the one place in
+    this file where Pearson rather than Spearman is the right tool: both sides
+    are marks in `[0, 1]` meaning the same thing, so the distance between them
+    carries information that ranks throw away. Everywhere else in this project
+    the two sides are a score and a label on unrelated scales, where a linear
+    coefficient would be measuring the scales as much as the agreement.
+
+    Reported **beside** `mean_absolute_error`, never instead of it, because the
+    two answer different questions and a model can do well at one while failing
+    the other. A scorer that marks every answer exactly 0.3 too low correlates
+    perfectly: the shape of its judgement is right, and it is still wrong about
+    every answer. MAE is what notices that.
+
+    Returns `None` when either side is constant, where the coefficient is
+    undefined rather than zero.
+    """
+    if len(xs) != len(ys):
+        raise ValueError("sequences must be the same length")
+    if len(xs) < 2:
+        return None
+    # Checked on the values rather than left to the denominator below.
+    # `0.7 + 0.7 + 0.7` is not `2.1` in binary, so a genuinely constant side
+    # produces deviations around 1e-16 instead of exactly zero -- the
+    # denominator is then tiny but nonzero and the function returns a
+    # coefficient computed entirely from rounding error. `spearman` does not
+    # need this because it correlates ranks, which are small exact values.
+    if len(set(xs)) < 2 or len(set(ys)) < 2:
+        return None
+
+    n = len(xs)
+    mean_x, mean_y = sum(xs) / n, sum(ys) / n
+    dx = [value - mean_x for value in xs]
+    dy = [value - mean_y for value in ys]
+    denominator = math.sqrt(sum(a * a for a in dx) * sum(b * b for b in dy))
+    if denominator == 0:
+        return None
+    return sum(a * b for a, b in zip(dx, dy, strict=True)) / denominator
+
+
+def mean_absolute_error(xs: Sequence[float], ys: Sequence[float]) -> float | None:
+    """Average distance between paired values, in the units they are measured in.
+
+    The plain-language half of the agreement report: "the model is typically
+    this far from the human". Absolute rather than squared, deliberately — RMSE
+    would let a handful of badly misjudged answers dominate a figure that is
+    supposed to describe the typical case, and "typically 0.12 out" is a
+    sentence somebody can act on in a way "RMSE 0.19" is not.
+
+    Returns `None` for an empty input: there is no average of nothing, and 0.0
+    would read as perfect agreement.
+    """
+    if len(xs) != len(ys):
+        raise ValueError("sequences must be the same length")
+    if not xs:
+        return None
+    return sum(abs(a - b) for a, b in zip(xs, ys, strict=True)) / len(xs)
+
+
 def _tied_ranks(values: Sequence[float]) -> list[float]:
     """Ranks, with tied values sharing the average of the ranks they span.
 

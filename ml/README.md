@@ -36,9 +36,34 @@ POSIX paths inside `-v` and `-e` arguments, which silently turns `/app:/ml` into
 | `evaluation/run_matching_eval.py` | Scores every ranker and writes `results/`. |
 | `evaluation/build_duplicate_pool.py` | Builds the near-duplicate pair pool (needs the database). |
 | `evaluation/run_duplicate_eval.py` | Threshold sweep and confusion matrix. Pure arithmetic, no database. |
+| `evaluation/scoring_baselines.py` | Constant and length — what the interview scorer must beat. |
+| `evaluation/make_scoring_review.py` | Writes the sheet a human marks interview answers on. |
+| `evaluation/read_scoring_review.py` | Reads the marked sheet back into `human_scores.json`. |
+| `evaluation/run_scoring_eval.py` | Agreement between the scorer and the human. Needs an LLM provider. |
 | `evaluation/results/` | **Committed.** A metric in a closed terminal cannot show a regression. |
 | `datasets/matching/` | `queries.jsonl`, `pairs.jsonl`, `labels.json`, `REVIEW.md`. |
 | `datasets/duplicates/` | `pairs.jsonl`, `labels.json` — 72 job pairs, binary labels. |
+| `datasets/interview_scoring/` | 100 answers to 20 questions, `REVIEW.md`, and the human marks. |
+
+## Marking the interview answers
+
+`datasets/interview_scoring/` is the one dataset here that is **not yet usable**:
+the answers exist, the harness exists, and nobody has marked them. Until somebody
+does, `run_scoring_eval` prints what it needs and stops. It cannot be worked
+around — a model scored against marks it produced itself agrees with itself.
+
+```bash
+docker compose run --rm --no-deps -v "$(pwd)/ml:/ml" backend \
+    sh -c 'cd /ml && python -m evaluation.make_scoring_review'   # writes REVIEW.md
+# fill in the 500 blanks, 0-10, then:
+docker compose run --rm --no-deps -v "$(pwd)/ml:/ml" backend \
+    sh -c 'cd /ml && python -m evaluation.read_scoring_review'   # -> human_scores.json
+```
+
+A partly-marked sheet is fine and the report says how much of it is done. What is
+not fine is editing an answer after marking it: `human_scores.json` records a
+digest of the questions and answers and is refused when they no longer match,
+because a mark applied to the wrong answer produces a worse number and no error.
 
 `ml/embeddings/`, `ml/ranking/` and `ml/classification/` are placeholders from
 the original layout in ml.md section 8. The embedding provider and the scorers

@@ -37,10 +37,10 @@ from datetime import UTC, datetime
 sys.path.insert(0, "/app")
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "backend"))
 
-from app.data.skill_taxonomy import SEED_SKILLS  # noqa: E402
-from app.services.resume.fabrication import validate_suggestion  # noqa: E402
-from app.services.resume.skill_extraction import SkillMatcher  # noqa: E402
-from datasets.fabrication.cases import ALL_CASES, FABRICATED, HONEST, Case  # noqa: E402
+from app.data.skill_taxonomy import SEED_SKILLS
+from app.services.resume.fabrication import validate_suggestion
+from app.services.resume.skill_extraction import SkillMatcher
+from datasets.fabrication.cases import ALL_CASES, FABRICATED, HONEST, Case
 
 RESULTS = pathlib.Path(__file__).parent / "results"
 

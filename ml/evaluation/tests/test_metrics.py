@@ -16,7 +16,9 @@ from evaluation.metrics import (
     RELEVANT_AT,
     confusion_at,
     dcg,
+    mean_absolute_error,
     ndcg_at_k,
+    pearson,
     precision_at_k,
     recall_at_k,
     reciprocal_rank,
@@ -121,6 +123,71 @@ class TestRecall:
 
     def test_no_known_relevant_items_is_none(self):
         assert recall_at_k(["a"], [], 5) is None
+
+
+class TestPearsonAndMAE:
+    """The interview-scoring pair (ml.md section 7.3).
+
+    Reported together because each is blind to something the other sees, and the
+    tests below are mostly about that blindness rather than about the arithmetic.
+    """
+
+    def test_a_perfect_linear_relationship_is_one(self):
+        assert pearson([0.1, 0.2, 0.3], [0.1, 0.2, 0.3]) == pytest.approx(1.0)
+
+    def test_a_constant_offset_still_correlates_perfectly(self):
+        """The reason MAE is reported beside it, in one assertion.
+
+        A scorer marking every answer 0.3 low has the shape of the judgement
+        right and is still wrong about every single answer. Pearson says 1.0.
+        """
+        human = [0.2, 0.5, 0.8]
+        model = [value - 0.3 for value in human]
+
+        assert pearson(model, human) == pytest.approx(1.0)
+        assert mean_absolute_error(model, human) == pytest.approx(0.3)
+
+    def test_mae_is_blind_to_the_ordering_pearson_measures(self):
+        """And the converse, so neither is trusted alone.
+
+        Two answers marked with each other's scores: every individual error is
+        small, and the model has inverted which answer was better.
+        """
+        human = [0.4, 0.6]
+        model = [0.6, 0.4]
+
+        assert mean_absolute_error(model, human) == pytest.approx(0.2)
+        assert pearson(model, human) == pytest.approx(-1.0)
+
+    def test_it_measures_distance_not_rank(self):
+        """Pearson rather than Spearman here, because both sides are marks in
+        [0, 1] meaning the same thing -- so how far apart they are is real
+        information rather than an artefact of two unrelated scales."""
+        assert spearman([1, 2, 3], [1, 2, 1000]) == pytest.approx(1.0)
+        assert pearson([1, 2, 3], [1, 2, 1000]) == pytest.approx(0.866, abs=1e-3)
+
+    def test_a_known_value_longhand(self):
+        # xs = [0, 1, 2], ys = [0, 1, 1]. Means 1 and 2/3.
+        # dx = [-1, 0, 1], dy = [-2/3, 1/3, 1/3]; numerator = 2/3 + 0 + 1/3 = 1.
+        # denominator = sqrt(2 * (4/9 + 1/9 + 1/9)) = sqrt(4/3).
+        assert pearson([0, 1, 2], [0, 1, 1]) == pytest.approx(1 / math.sqrt(4 / 3))
+
+    def test_a_constant_side_is_none_rather_than_zero(self):
+        # A model that gives every answer 0.7 has no correlation to report, and
+        # 0.0 would read as "measured, and found unrelated".
+        assert pearson([0.7, 0.7, 0.7], [0.1, 0.5, 0.9]) is None
+
+    def test_too_few_points_is_none(self):
+        assert pearson([0.5], [0.5]) is None
+
+    def test_mae_of_nothing_is_none_rather_than_zero(self):
+        # 0.0 would read as perfect agreement over an empty dataset.
+        assert mean_absolute_error([], []) is None
+
+    @pytest.mark.parametrize("metric", [pearson, mean_absolute_error])
+    def test_mismatched_lengths_are_a_programming_error(self, metric):
+        with pytest.raises(ValueError):
+            metric([0.1, 0.2], [0.1])
 
 
 class TestSpearman:
