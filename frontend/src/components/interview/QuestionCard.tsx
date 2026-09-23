@@ -61,11 +61,31 @@ export function QuestionCard({
         {question.question_text}
       </p>
 
-      {question.grounded_in && (
+      {/*
+        Three states, not two, and the third was invisible until a live run
+        surfaced it.
+
+        A question can be grounded in the resume, or degraded because a claimed
+        grounding failed verification, or simply ungrounded — the model was
+        given the resume and volunteered no connection to it. That last is not a
+        failure: asked to build an AI Engineer question on a backend engineer's
+        payments resume, declining to link them is the fabrication guard working
+        rather than breaking. But a page whose headline claim is "built from
+        your resume" cannot show that question in silence, because silence reads
+        as the grounded case with the quote left off.
+      */}
+      {question.grounded_in ? (
         <p className="border-l-2 border-indigo-200 pl-3 text-sm text-slate-600">
           <span className="text-slate-500">Asked because your resume says: </span>
           <span className="italic">“{question.grounded_in}”</span>
         </p>
+      ) : (
+        !question.degraded && (
+          <p className="border-l-2 border-slate-200 pl-3 text-sm text-slate-500">
+            A general question for this role — nothing in your resume lines up with this topic
+            closely enough to build on, and inventing a link is the one thing this will not do.
+          </p>
+        )
       )}
 
       {question.expected_points.length > 0 && (
