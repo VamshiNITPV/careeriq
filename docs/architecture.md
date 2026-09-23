@@ -623,6 +623,26 @@ trajectory.
 inspectable — the difficulty trajectory is stored per question and shown in the report (US-8.2 AC2).
 The LLM is used for what it is good at (natural language) and not for control flow.
 
+**Amendment (2026-09-23) — three things the table above does not decide.** Implementing it in
+`services/interview/policy.py` meant answering them, and the answers are decisions rather than
+details:
+
+- **The budget is checked before the score.** Read top-down, the table would let a final answer
+  scoring 0.9 earn an eleventh question on a ten-question budget — a bug that appears only for the
+  users doing best, which is the worst kind to ship.
+- **The difficulty ladder clamps at both ends.** "Easier" at `EASY` and "harder" at `EXPERT` stay
+  put rather than erroring. A struggling candidate needs another `EASY` question on a fresh angle,
+  not a crash.
+- **"Uncovered topic" beats "increase difficulty" while one exists.** The table offers both for a
+  strong answer without ordering them. Breadth first: an interview that drills one topic to `EXPERT`
+  has measured less about somebody than one that establishes competence across the blueprint.
+
+**And one thing it leaves open that is not yet answered.** "The role's blueprint" — the topic list a
+role is examined against — is a small static map for now, and `policy.py` says so where it is
+defined. It should come from the role's own skill demand, which is the aggregation the skill-gap
+feature already performs over `job_skills`. What it must never become is model-generated: choosing
+which topics exist *is* choosing the trajectory, and that is the one thing this ADR forbids.
+
 ---
 
 ### ADR-014 — Security posture

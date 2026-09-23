@@ -287,3 +287,38 @@ class SuggestionDecision(StrEnum):
     PENDING = "PENDING"
     ACCEPTED = "ACCEPTED"
     REJECTED = "REJECTED"
+
+
+class InterviewStatus(StrEnum):
+    """Where a mock interview is (database.md section 3.8, ADR-013).
+
+    CREATED and IN_PROGRESS are separate because they answer different
+    questions. A session exists the moment the user asks for one, but nothing
+    has been asked yet -- and "you have an interview waiting" is a different
+    thing to show than "you are three questions in".
+
+    ABANDONED rather than deleting the row. A half-finished interview is
+    evidence: the questions asked, the answers given and their scores are all
+    still true, and they are the only record of what the user was struggling
+    with when they stopped.
+    """
+
+    CREATED = "CREATED"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    ABANDONED = "ABANDONED"
+
+
+class QuestionDifficulty(StrEnum):
+    """How hard a question is, and the axis the adaptive policy moves along.
+
+    Four rungs, ordered. `policy.py` steps up and down this ladder in response
+    to scores, which is why the order of these members is load-bearing rather
+    than cosmetic -- it is read by `harder()` and `easier()` there, not merely
+    displayed.
+    """
+
+    EASY = "EASY"
+    MEDIUM = "MEDIUM"
+    HARD = "HARD"
+    EXPERT = "EXPERT"

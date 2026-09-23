@@ -39,6 +39,12 @@ from app.models.enums import (
     VerificationPurpose,
     WorkMode,
 )
+from app.models.interview import (
+    Interview,
+    InterviewAnswer,
+    InterviewQuestion,
+    InterviewScore,
+)
 from app.models.job import Company, Job, JobSkill
 from app.models.job_fetch import JobFetchRun
 from app.models.optimization import OptimizationAnalysis, OptimizationSuggestion
@@ -76,6 +82,10 @@ __all__ = [
     "EducationRecord",
     "EmploymentType",
     "ExperienceLevel",
+    "Interview",
+    "InterviewAnswer",
+    "InterviewQuestion",
+    "InterviewScore",
     "Job",
     "JobEmbedding",
     "JobFetchRun",
