@@ -36,18 +36,23 @@ class FunnelAnalyticsResponse(BaseModel):
     caching match scores: every number here is derived from rows that change,
     and a stored copy would be wrong more often than right.
 
-    `segments_available` names which of AC2's four slices this can actually
-    answer. Role and location come from the posting. **Resume version and
-    match-score band do not exist yet** and are absent rather than empty: an
-    application carries no `resume_version_id`, and match scores are computed per
-    request and never stored, so both need capturing at the moment of applying —
-    a historical fact that cannot be recovered afterwards, because next month's
-    resume and today's corpus both differ from the ones that were used.
+    All four of AC2's slices. Role and location come from the posting; resume
+    version and score band come from a snapshot taken when the application was
+    sent, because neither is recoverable afterwards — a resume gets edited and
+    the corpus moves, so recomputing would answer "how well would this match
+    today" rather than the question the funnel asks.
+
+    Applications sent before that snapshot existed carry neither, and appear in
+    the last two lists under a single "Not recorded" heading rather than being
+    dropped. Dropping them would make the segments disagree with the headline
+    count, which reads as a bug; naming them reads as the truth.
     """
 
     overall: FunnelSegment
     by_role: list[FunnelSegment]
     by_location: list[FunnelSegment]
+    by_resume: list[FunnelSegment]
+    by_score_band: list[FunnelSegment]
 
     #: The threshold AC3 sets, sent so a client can explain itself without
     #: hard-coding a number that then drifts from the server's.

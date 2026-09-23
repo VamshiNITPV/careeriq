@@ -55,6 +55,7 @@ from app.services.job.similar import find_similar
 from app.services.matching.dimensions import SkillRequirementInput
 from app.services.matching.recall import recall_jobs
 from app.services.matching.recommend import rank_jobs
+from app.services.matching.service import MatchingService
 from app.services.matching.weights import RANKING_VERSION
 
 log = get_logger(__name__)
@@ -443,6 +444,50 @@ async def get_job(
     )
 
 
+async def _snapshot_for(
+    matching: MatchingService,
+    *,
+    user_id: uuid.UUID,
+    job: Job,
+    applied: bool,
+) -> tuple[uuid.UUID | None, Decimal | None]:
+    """What to record about this application, if anything (US-7.2 AC2).
+
+    `(None, None)` for a bookmark. A saved job is not an application, and a
+    score recorded against one would appear in the funnel's band table for a job
+    nothing was ever sent to.
+
+    **Nothing here is allowed to fail loudly.** This sits inside an idempotent
+    toggle that a phone taps twice, and US-7.0's whole design is that the write
+    is cheap and repeatable — a 500 because a cosine hiccupped would break
+    recording that you applied, in order to record how well you matched. The
+    analytics treat a missing snapshot as "Not recorded", which is exactly what
+    happened.
+
+    Cheap enough to do inline: `match()` is three queries and loads no model.
+    That was worth checking rather than assuming, because the alternative
+    reading — that scoring is expensive — would have meant a background worker
+    this phase has not built.
+    """
+    if not applied:
+        return None, None
+
+    try:
+        version_id = await matching.default_resume_version_id(user_id)
+        if version_id is None:
+            # Nothing uploaded. Not a failure, and the reason the columns are
+            # nullable rather than defaulted.
+            return None, None
+        result = await matching.match(user_id=user_id, job=job, resume_version_id=version_id)
+    except Exception:
+        log.warning(
+            "match snapshot skipped", job_id=str(job.id), user_id=str(user_id), exc_info=True
+        )
+        return None, None
+
+    return version_id, result.overall_score
+
+
 @router.put(
     "/{job_id}/application",
     response_model=ApplicationRead,
@@ -455,6 +500,7 @@ async def set_application(
     user: CurrentUser,
     service: JobServiceDep,
     applications: ApplicationRepositoryDep,
+    matching: MatchingServiceDep,
 ) -> ApplicationRead:
     """Record what the caller has done about this job (US-7.0).
 
@@ -479,10 +525,24 @@ async def set_application(
 
     The job is fetched first so an unknown id is a clean 404 rather than a
     RESTRICT violation surfacing through the catch-all as an opaque 500.
+
+    **Applying takes a snapshot** (US-7.2 AC2): which resume was sent, and what
+    it scored against this posting. Neither survives being asked for later — a
+    resume gets edited and the corpus moves daily, so recomputing in a month
+    answers "how well would this match today" rather than the question the
+    funnel asks. See `_snapshot_for` for why it cannot fail loudly.
     """
-    await service.get_job(job_id)
+    job = await service.get_job(job_id)
+    version_id, score = await _snapshot_for(
+        matching, user_id=user.id, job=job, applied=payload.applied
+    )
     application = await applications.upsert(
-        user_id=user.id, job_id=job_id, saved=payload.saved, applied=payload.applied
+        user_id=user.id,
+        job_id=job_id,
+        saved=payload.saved,
+        applied=payload.applied,
+        resume_version_id=version_id,
+        match_score=score,
     )
     log.info(
         "application recorded",

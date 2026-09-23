@@ -15,8 +15,16 @@ spread across the funnel.
 ## What is and is not real here
 
 The jobs and their embeddings are **real** — exported from a working database by
-`export_demo.py`, model output for the text they accompany. The match scores are
-therefore genuinely computed rather than written down.
+`export_demo.py`, model output for the text they accompany. The match scores
+shown on the jobs and match screens are therefore genuinely computed rather than
+written down.
+
+**One exception, added with US-7.2 and labelled where it lives.** The
+`match_score_at_apply` snapshots in `DEMO_SCORES` are invented. They are a
+record of what a past score *was*, for applications an invented person never
+sent, and nothing recomputes them — so there is no way to derive them and no
+way for a reader to check them. Spreading them across the bands is what makes
+the score-band table show a distribution rather than one row.
 
 The person is invented. "Asha Mehra" is not anybody, the resume text was written
 for this file, and the account exists to be logged into by strangers. That is
@@ -128,6 +136,21 @@ PROFILE_SKILLS = ("Python", "Django", "PostgreSQL", "Redis", "Docker", "Git")
 #: empty list that demonstrates nothing (and matches no posting in this corpus
 #: anyway, which would be NO_JOBS rather than a gap report).
 TARGET_ROLES = ("AI Engineer", "Machine Learning Engineer", "Data Engineer")
+
+#: Match scores recorded against the seeded applications (US-7.2 AC2).
+#:
+#: Written rather than computed, and the distinction matters. Everything else
+#: in this file that looks like a model output *is* one -- the vectors are real,
+#: which is the whole reason `export_demo.py` exists. These are not: they are
+#: plausible numbers chosen to spread across the score bands so the demo shows
+#: the feature instead of one bar and four empty rows.
+#:
+#: That is a fabrication, so it is labelled one. It is acceptable here only
+#: because the alternative is a table nobody can tell works, and because the
+#: number is a *snapshot of a past score* -- a historical claim about a moment
+#: that never happened for an invented person, not a live computation anyone
+#: could check against this corpus.
+DEMO_SCORES = ("72.40", "64.10", "58.75", "61.20", "47.90", "55.30")
 
 #: One application per stage, so the funnel has something in every column and
 #: the lifecycle is visible rather than described.
@@ -336,6 +359,14 @@ async def seed_demo(session: AsyncSession) -> dict[str, int]:
             status=status,
             is_saved=index % 2 == 0,
             applied_at=applied_at,
+            # The snapshot, on applications that were actually sent. A SAVED row
+            # gets neither, matching what the API does -- seeding one would put
+            # a score in the band table for a job nothing was sent to, which is
+            # exactly the bug the API is tested against.
+            resume_version_id=None if applied_at is None else version.id,
+            match_score_at_apply=(
+                None if applied_at is None else Decimal(DEMO_SCORES[index % len(DEMO_SCORES)])
+            ),
         )
         session.add(application)
         await session.flush()

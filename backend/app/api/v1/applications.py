@@ -175,11 +175,12 @@ async def funnel_analytics(
     interview in two applications. `min_for_rate` travels with the response so a
     client can say so without keeping its own copy of the threshold.
 
-    `segments_available` is honest about AC2 rather than quiet: role and location
-    are here, resume version and match-score band are not, because neither is
-    recorded against an application yet. Both have to be captured *when* the
-    application is sent — a resume changes and the corpus moves, so neither can
-    be reconstructed later.
+    All four of AC2's slices. The last two read a snapshot taken when the
+    application was sent, because neither survives being asked for later: a
+    resume gets edited and the corpus moves daily, so recomputing answers a
+    different question than the one the funnel asks. Applications sent before
+    that snapshot existed group under "Not recorded" rather than vanishing from
+    a total they are part of.
     """
     report = await funnel_report(session, user_id=user.id)
 
@@ -198,6 +199,8 @@ async def funnel_analytics(
         overall=out(report.overall),
         by_role=[out(segment) for segment in report.by_role],
         by_location=[out(segment) for segment in report.by_location],
+        by_resume=[out(segment) for segment in report.by_resume],
+        by_score_band=[out(segment) for segment in report.by_score_band],
         min_for_rate=MIN_FOR_RATE,
-        segments_available=["role", "location"],
+        segments_available=["role", "location", "resume_version", "match_score_band"],
     )

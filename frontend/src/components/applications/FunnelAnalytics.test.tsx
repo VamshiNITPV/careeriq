@@ -22,8 +22,10 @@ function response(overrides: Partial<FunnelAnalyticsResponse> = {}): FunnelAnaly
     overall: segment(),
     by_role: [],
     by_location: [],
+    by_resume: [],
+    by_score_band: [],
     min_for_rate: 5,
-    segments_available: ['role', 'location'],
+    segments_available: ['role', 'location', 'resume_version', 'match_score_band'],
     ...overrides,
   }
 }
@@ -109,6 +111,35 @@ describe('FunnelAnalytics', () => {
     // adds up to the total above it.
     const thin = screen.getByRole('row', { name: /Data Engineer/ })
     expect(within(thin).getByLabelText(/Not enough applications/)).toBeInTheDocument()
+  })
+
+  it('breaks the numbers down by the resume that was sent', async () => {
+    vi.spyOn(applicationService, 'analytics').mockResolvedValue(
+      response({
+        by_resume: [segment({ label: 'v2 · asha-mehra.pdf', applications: 6 })],
+        by_score_band: [
+          segment({ label: '70 and above', applications: 4 }),
+          segment({
+            label: 'Not recorded',
+            applications: 2,
+            interview_rate: null,
+            offer_rate: null,
+            low_confidence: true,
+          }),
+        ],
+      }),
+    )
+
+    render(<FunnelAnalytics />)
+
+    // Named for a reader. A column of UUIDs answers no question anybody asked,
+    // and "which resume worked better" is why this slice exists.
+    expect(await screen.findByRole('row', { name: /asha-mehra\.pdf/ })).toBeInTheDocument()
+
+    // "Not recorded" is a row, not an omission. Applications sent before the
+    // snapshot existed are still part of the total above, and a table that
+    // silently loses them reads as a bug.
+    expect(screen.getByRole('row', { name: /Not recorded/ })).toBeInTheDocument()
   })
 
   it('renders nothing at all when nothing has been sent', async () => {

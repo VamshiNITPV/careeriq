@@ -40,8 +40,10 @@ imply what is not.
 
 from __future__ import annotations
 
+import itertools
 import uuid
 from dataclasses import dataclass
+from decimal import Decimal
 
 from sqlalchemy import Select, case, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,6 +51,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.application import Application, ApplicationEvent
 from app.models.enums import ApplicationStatus
 from app.models.job import Job
+from app.models.resume import ResumeVersion
 
 #: Below this many applications a segment reports counts only (AC3).
 #:
@@ -61,6 +64,41 @@ MIN_FOR_RATE = 5
 #: under one heading beats dropping them, which would make the segment counts
 #: disagree with the total and look like a bug.
 UNKNOWN = "Not stated"
+
+#: For a slice whose fact was never captured, rather than never stated.
+#:
+#: Distinct from UNKNOWN on purpose. "Not stated" is about the posting -- it
+#: never named a location. "Not recorded" is about us: every application sent
+#: before migration 0020 has no snapshot, and that information is gone rather
+#: than merely absent from the job advert. Same shape on screen, different
+#: admission.
+UNRECORDED = "Not recorded"
+
+#: Score-band edges, matching the "Minimum score" filter on the Jobs page
+#: (`frontend/src/utils/jobListParams.ts`).
+#:
+#: Borrowed rather than invented. A second scale would mean "60 and above" in
+#: the filter and "60-69" in this table came from two different ideas of what 60
+#: means, and nobody would notice until the numbers disagreed.
+BAND_EDGES = (50, 60, 70)
+
+
+def band_for(score: Decimal | None) -> str:
+    """Which band a captured score falls in.
+
+    Inclusive lower bound: exactly 60 is "60-69", not "50-59". That matches the
+    filter this borrows from -- "60 and above" includes 60 -- and it is the edge
+    that band arithmetic gets wrong.
+    """
+    if score is None:
+        return UNRECORDED
+    value = int(score)
+    if value < BAND_EDGES[0]:
+        return f"Under {BAND_EDGES[0]}"
+    for low, high in itertools.pairwise(BAND_EDGES):
+        if value < high:
+            return f"{low}-{high - 1}"
+    return f"{BAND_EDGES[-1]} and above"
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +128,8 @@ class FunnelReport:
     overall: Segment
     by_role: list[Segment]
     by_location: list[Segment]
+    by_resume: list[Segment]
+    by_score_band: list[Segment]
 
 
 def _reached(status: ApplicationStatus) -> Select[tuple[bool]]:
@@ -120,6 +160,11 @@ class _Row:
     #: reads as a bug rather than as a heading.
     role_label: str
     location: str
+    #: Which resume was sent, named for a reader rather than by id. A table of
+    #: UUIDs answers no question anybody asked.
+    resume: str
+    #: The band its captured score fell in, or "Not recorded".
+    score_band: str
     interviewed: bool
     offered: bool
 
@@ -169,6 +214,9 @@ async def funnel_report(session: AsyncSession, *, user_id: uuid.UUID) -> FunnelR
                 Job.normalized_title.label("role_key"),
                 Job.title.label("title"),
                 Job.location.label("location"),
+                ResumeVersion.version_number.label("version_number"),
+                ResumeVersion.original_filename.label("filename"),
+                Application.match_score_at_apply.label("score"),
                 case((_reached(ApplicationStatus.INTERVIEW), True), else_=False).label(
                     "interviewed"
                 ),
@@ -176,6 +224,11 @@ async def funnel_report(session: AsyncSession, *, user_id: uuid.UUID) -> FunnelR
             )
             .select_from(Application)
             .join(Job, Job.id == Application.job_id)
+            # Outer: an application whose resume version was deleted keeps its
+            # row (the FK is SET NULL), and one sent before 0020 never had one.
+            # An inner join would drop both from the totals and make the
+            # segments disagree with the headline count.
+            .outerjoin(ResumeVersion, ResumeVersion.id == Application.resume_version_id)
             .where(
                 Application.user_id == user_id,
                 Application.deleted_at.is_(None),
@@ -190,6 +243,12 @@ async def funnel_report(session: AsyncSession, *, user_id: uuid.UUID) -> FunnelR
             role_key=(row.role_key or row.title or "").strip().lower() or UNKNOWN,
             role_label=(row.title or "").strip() or UNKNOWN,
             location=(row.location or "").strip() or UNKNOWN,
+            resume=(
+                UNRECORDED
+                if row.version_number is None
+                else f"v{row.version_number} · {row.filename or 'Untitled'}"
+            ),
+            score_band=band_for(row.score),
             interviewed=row.interviewed,
             offered=row.offered,
         )
@@ -205,4 +264,6 @@ async def funnel_report(session: AsyncSession, *, user_id: uuid.UUID) -> FunnelR
         ),
         by_role=_tally(parsed, "role_key", "role_label"),
         by_location=_tally(parsed, "location", "location"),
+        by_resume=_tally(parsed, "resume", "resume"),
+        by_score_band=_tally(parsed, "score_band", "score_band"),
     )

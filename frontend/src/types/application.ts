@@ -137,8 +137,19 @@ export interface FunnelAnalyticsResponse {
   overall: FunnelSegment
   by_role: FunnelSegment[]
   by_location: FunnelSegment[]
+  /**
+   * Which resume was sent, and how well it scored at the time.
+   *
+   * Both read a snapshot taken when the application was sent, because neither
+   * survives being asked for later — a resume gets edited and the corpus moves,
+   * so recomputing would answer "how well would this match today". Rows sent
+   * before that snapshot existed appear under "Not recorded" rather than being
+   * dropped, so these still add up to `overall.applications`.
+   */
+  by_resume: FunnelSegment[]
+  by_score_band: FunnelSegment[]
   /** The threshold the server applied, so this side need not hold a copy. */
   min_for_rate: number
-  /** Which of US-7.2 AC2's slices exist yet — currently role and location. */
+  /** Which of US-7.2 AC2's slices this build answers. All four, since 0020. */
   segments_available: string[]
 }

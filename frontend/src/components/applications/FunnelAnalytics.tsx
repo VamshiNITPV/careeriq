@@ -254,6 +254,11 @@ export function FunnelAnalytics() {
       <div className="mt-6 space-y-6">
         <SegmentTable caption="Role" segments={data.by_role} />
         <SegmentTable caption="Location" segments={data.by_location} />
+        {/* Ordered after the two that come from the posting, because these two
+            are about what you did rather than about the job: which resume you
+            sent, and how good the match looked when you sent it. */}
+        <SegmentTable caption="Resume" segments={data.by_resume} />
+        <SegmentTable caption="Match score" segments={data.by_score_band} />
       </div>
     </section>
   )

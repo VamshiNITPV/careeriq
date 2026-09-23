@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Numeric, text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
@@ -98,6 +99,34 @@ class Application(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     # Set when the user marks it applied, cleared when they unmark it. The
     # profile list shows it.
     applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # ------------------------------------------------- the snapshot (US-7.2 AC2)
+    #
+    # What was true when this was sent, recorded because it cannot be recovered
+    # later. Next month the resume has been edited and the corpus has moved, so
+    # "which resume did I use and how good was the match" has no answer unless
+    # it was written down at the time.
+    #
+    # Both nullable, and all three reasons are ordinary: the user may have
+    # uploaded no resume, the vectors may not exist yet, and scoring is allowed
+    # to fail without taking the application down with it.
+    #
+    # **SET NULL, never CASCADE.** database.md section 3.7 warns that cascading
+    # from a resume would make the funnel "quietly lose data". Deleting an old
+    # resume must not delete the record that you applied to twelve jobs with it
+    # -- the applications outlive the file, and the analytics read them.
+    resume_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("resume_versions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    #: The overall score at the moment of applying.
+    #:
+    #: The number, not a band. Bands are a presentation choice and this keeps
+    #: changing them a query change rather than a migration.
+    match_score_at_apply: Mapped[Decimal | None] = mapped_column(
+        Numeric(5, 2), nullable=True
+    )
 
     # Joined, not lazy. Every path that serialises an application needs the job,
     # and a lazy load in async has no await point — that is MissingGreenlet at

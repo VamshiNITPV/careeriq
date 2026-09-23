@@ -221,7 +221,7 @@ Each story carries acceptance criteria (AC) that become test cases.
 
 **US-7.2** As a user, I want funnel analytics, so that I can see what's working.
 - AC1: Reports application count, interview rate, and offer rate.
-- AC2: Segments by role, location, resume version, and match-score band.
+- AC2: Segments by role, location, resume version, and match-score band. *Note 2026-09-23: role and location are read from the posting. Resume version and match-score band are read from a **snapshot taken when the application is sent** (migration 0020), because neither is recoverable afterwards — a resume gets edited and the corpus moves daily, so recomputing answers "how well would this match today" rather than the question the funnel asks. Applications filed before that snapshot existed carry neither and group under "Not recorded" rather than being dropped from a total they are part of.*
 - AC3: Any segment with fewer than 5 applications is labelled low-confidence rather than shown as a hard rate.
 
 ### Epic 8 — AI Interview

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -23,6 +24,8 @@ class ApplicationRepository(BaseRepository[Application]):
         job_id: uuid.UUID,
         saved: bool,
         applied: bool,
+        resume_version_id: uuid.UUID | None = None,
+        match_score: Decimal | None = None,
     ) -> Application:
         """Set this user's relationship to this job, creating it if absent.
 
@@ -45,9 +48,24 @@ class ApplicationRepository(BaseRepository[Application]):
         the invariant the `applied_has_timestamp` CHECK enforces cannot be
         violated by a caller, and the timestamp is `func.now()` so the value
         comes from PostgreSQL like every other one in the schema.
+
+        **The snapshot moves with `applied_at`** (US-7.2 AC2). `resume_version_id`
+        and `match_score` record what was true when the application was sent, and
+        they are cleared alongside the timestamp when it is unsent — the three
+        describe one event and must not disagree.
+
+        Writing them once and never overwriting was the alternative, and it
+        produces an incoherent row: `applied_at` already resets to `now()` on
+        every re-apply, so a preserved snapshot would sit beside today's date
+        describing the resume of three months ago.
         """
         status = ApplicationStatus.APPLIED if applied else ApplicationStatus.SAVED
         applied_at = func.now() if applied else None
+        # Nothing is recorded for a bookmark. A saved job is not an application,
+        # and a snapshot on one would put a match score in the funnel's
+        # score-band table for a job nothing was ever sent to.
+        version_id = resume_version_id if applied else None
+        score = match_score if applied else None
 
         stmt = pg_insert(Application).values(
             id=uuid7(),
@@ -56,6 +74,8 @@ class ApplicationRepository(BaseRepository[Application]):
             status=status,
             is_saved=saved,
             applied_at=applied_at,
+            resume_version_id=version_id,
+            match_score_at_apply=score,
         )
         stmt = stmt.on_conflict_do_update(
             index_elements=[Application.user_id, Application.job_id],
@@ -69,6 +89,8 @@ class ApplicationRepository(BaseRepository[Application]):
                 "status": stmt.excluded.status,
                 "is_saved": stmt.excluded.is_saved,
                 "applied_at": stmt.excluded.applied_at,
+                "resume_version_id": stmt.excluded.resume_version_id,
+                "match_score_at_apply": stmt.excluded.match_score_at_apply,
                 # `onupdate=func.now()` is an ORM-level hook and does not fire
                 # for a Core insert, so without this line updated_at stays at
                 # the original save time forever.

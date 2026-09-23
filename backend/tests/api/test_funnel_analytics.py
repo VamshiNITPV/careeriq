@@ -5,6 +5,7 @@ from __future__ import annotations
 from httpx import AsyncClient
 
 from tests.api.test_application_transitions import apply_to, move
+from tests.api.test_job_match import upload_resume
 from tests.api.test_jobs import API, posting, submission
 
 
@@ -126,19 +127,18 @@ class TestFunnelAnalytics:
         # the two would hide a genuine result behind a caveat.
         assert body["overall"]["offer_rate"] == 0.0
 
-    async def test_slices_by_role_and_says_which_slices_it_can_do(
+    async def test_slices_by_role_and_offers_all_four(
         self,
         client: AsyncClient,
         auth_headers: dict[str, str],
         seeded_skills: int,
     ) -> None:
-        """AC2, and an honest account of the half of it that is not built.
+        """AC2, now complete.
 
-        Resume version and match-score band need capturing when the application
-        is sent — a resume changes and the corpus moves, so neither can be
-        recovered afterwards. Absent from `segments_available` rather than
-        present and empty, which would read as "you have no data" instead of
-        "this does not exist yet".
+        Two of the four used to be absent because the facts were never
+        recorded. Migration 0020 records them at the moment of applying, which
+        is the only moment they exist — a resume gets edited and the corpus
+        moves, so asking later answers a different question.
         """
         await applied_job(client, auth_headers, "Backend Engineer", company="Acme")
         await applied_job(client, auth_headers, "Backend Engineer", company="Zeta Labs")
@@ -152,7 +152,63 @@ class TestFunnelAnalytics:
         # Busiest first, so the list does not reorder itself between requests.
         assert body["by_role"][0]["label"] == "Backend Engineer"
 
-        assert body["segments_available"] == ["role", "location"]
+        assert body["segments_available"] == [
+            "role",
+            "location",
+            "resume_version",
+            "match_score_band",
+        ]
+
+    async def test_an_application_with_no_snapshot_is_named_not_counted_out(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+    ) -> None:
+        """Every application filed before 0020 has no resume and no score.
+
+        Dropping them from the two new tables would make those tables disagree
+        with the headline count, which reads as a bug. Naming them reads as what
+        it is — the information was never captured and cannot be recovered.
+
+        `applied_job` uploads no resume, so these rows are exactly that case.
+        """
+        await applied_job(client, auth_headers, "Backend Engineer")
+        await applied_job(client, auth_headers, "Platform Engineer")
+
+        body = await analytics(client, auth_headers)
+
+        total = body["overall"]["applications"]
+        assert total == 2
+        for key in ("by_resume", "by_score_band"):
+            assert [s["label"] for s in body[key]] == ["Not recorded"], key
+            # The sum is the point: a segment table that loses rows is worse
+            # than one that admits it does not know about them.
+            assert sum(s["applications"] for s in body[key]) == total, key
+
+    async def test_slices_by_the_resume_that_was_sent(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        run_pipeline,
+    ) -> None:
+        """Labelled for a reader, not by id.
+
+        A column of UUIDs answers no question anybody asked, and "which resume
+        worked better" is the whole reason this slice exists.
+        """
+        await upload_resume(client, auth_headers, run_pipeline)
+        await applied_job(client, auth_headers, "Backend Engineer")
+
+        body = await analytics(client, auth_headers)
+
+        assert len(body["by_resume"]) == 1
+        label = body["by_resume"][0]["label"]
+        assert label != "Not recorded"
+        assert label.startswith("v1")
+        # And a band, since a score was captured alongside it.
+        assert body["by_score_band"][0]["label"] != "Not recorded"
 
     async def test_another_users_applications_are_not_counted(
         self,
