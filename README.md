@@ -11,12 +11,13 @@ parses job descriptions, ranks jobs by personalized fit using hybrid semantic + 
 identifies skill gaps, suggests grounded resume improvements, tracks application outcomes, and
 conducts adaptive AI mock interviews.
 
-> **Status:** Phases 1–7 complete. Matching is measured rather than asserted (6.4), and
-> career intelligence — skill gaps, learning paths and grounded resume optimization — is
-> shipped with the fabrication validator that makes the last of those safe to offer at all.
-> Phase 8's funnel, its event log and the outcome rates read off it are in — rates come
-> from history, so a rejection after two interviews still counts as an interview. The
-> deployment is built and proven locally, and is waiting on a VM rather than on code.
+> **Status:** Phases 1–8 complete. Matching is measured rather than asserted (6.4).
+> Career intelligence — skill gaps, learning paths and grounded resume optimization —
+> ships with the fabrication validator that makes the last of those safe to offer at all.
+> The application funnel keeps an immutable event log, and its outcome rates are read from
+> that history, so a rejection after two interviews still counts as an interview. The
+> deployment is built and proven locally, waiting on a VM rather than on code. Phase 9,
+> the AI mock interview, is next.
 
 ---
 
@@ -155,7 +156,7 @@ Read these in order:
 | 6.3 | Recommendations — two-stage retrieval, ranked list, dashboard tile | ✅ Done⁷ |
 | 6.4 | Evaluation — labelled dataset, metrics, weight tuning, near-duplicates | ✅ Done⁸ ⁹ |
 | 7 | Career intelligence — skill gaps, learning paths, resume optimization | ✅ Done¹⁰ |
-| 8 | Application system — tracking, analytics, outcome analysis | 🟡 Part¹¹ |
+| 8 | Application system — tracking, analytics, outcome analysis | ✅ Done¹¹ |
 | 9 | AI interview — question generation, adaptive engine, evaluation | ⬜ |
 | 10 | Production engineering — Redis, background jobs, WebSockets, security | ⬜ |
 | 11 | Cloud — Docker, GCP, CI/CD, monitoring | 🟡 Part¹² |
@@ -363,11 +364,17 @@ interview in two applications is not a 50% success rate, and a null rate is
 rendered as an em-dash rather than as 0% — "not enough happened to say" and
 "enough happened, and none of it was this" are different answers.
 
-**What is left is AC2's other two slices**, by resume version and by match-score
-band. Neither can be computed after the fact: an application carries no
-`resume_version_id`, match scores are never stored (ADR-006), and by next month
-both the resume and the corpus have moved. Both have to be captured at the
-moment of applying, which is a schema change rather than a query.
+**All four of AC2's slices work**, and the last two are why the phase took a
+migration. By resume version and by match-score band cannot be computed after
+the fact — an application carried no `resume_version_id`, match scores are never
+stored (ADR-006), and by next month both the resume and the corpus have moved.
+So both are captured at the moment of applying, and applications filed before
+that group under "Not recorded" rather than being dropped from a total they are
+part of.
+
+Recording it is not allowed to cost anything else: a bookmark records neither,
+and a failure to score still saves the application. Recording *that* you applied
+must not depend on computing *how well*.
 
 ¹² **Built and verified, not yet running anywhere.** The production stack, the
 Cloud Storage adapter, the deploy script, CI, and a seeded demo account are all
