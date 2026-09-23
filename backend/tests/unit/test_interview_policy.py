@@ -12,7 +12,7 @@ import pytest
 
 from app.models.enums import QuestionDifficulty as D
 from app.services.interview.policy import (
-    BLUEPRINTS,
+    GENERIC_TOPICS,
     LADDER,
     STRONG_AT_OR_ABOVE,
     STRUGGLING_BELOW,
@@ -25,7 +25,10 @@ from app.services.interview.policy import (
     next_topic,
 )
 
-TOPICS = BLUEPRINTS["DEFAULT"]
+# The generic list stands in for any blueprint here. The policy walks whatever
+# tuple it is handed, which is the point of injecting them -- so these cases
+# hold for a demand-derived blueprint too.
+TOPICS = GENERIC_TOPICS
 
 
 def state(

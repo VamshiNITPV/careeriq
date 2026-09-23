@@ -41,10 +41,14 @@ struggling candidate should get another EASY question on a fresh angle, not a
 crash, and somebody acing EXPERT has proven the point already.
 
 **"Adjacent topic" and "the role's blueprint" are undefined.** A blueprint is a
-per-role list of topics to work through. `BLUEPRINTS` below is a small static
-map and is explicitly a stand-in -- see its note. What it must *not* be is
-model-generated, because choosing which topics exist is choosing the trajectory,
-which is the one thing ADR-013 forbids.
+per-role list of topics to work through, and it arrives here already resolved:
+`services/interview/blueprint.py` derives it from what postings for the role
+actually demand, with `GENERIC_TOPICS` below as the answer when the corpus has
+too little to say. Either way it is *data passed in*, never something this
+module fetches, which is what keeps it testable against literals.
+
+What a blueprint must never be is model-generated. Choosing which topics exist
+is choosing the trajectory, and that is the one thing ADR-013 forbids.
 """
 
 from __future__ import annotations
@@ -67,27 +71,23 @@ LADDER: tuple[QuestionDifficulty, ...] = (
 STRUGGLING_BELOW = 0.4
 STRONG_AT_OR_ABOVE = 0.7
 
-#: Topics per role, worked through in order.
+#: Used when nothing better is available. **Not the normal case.**
 #:
-#: **A stand-in, and deliberately a crude one.** A real blueprint would come
-#: from the role's own skill demand -- the same `job_skills` aggregation the
-#: skill-gap feature already does -- so that rehearsing for "AI Engineer" asks
-#: about what those postings actually require. That is real work and it belongs
-#: with 9.2, where questions are generated and a topic has to mean something to
-#: a prompt.
+#: `services/interview/blueprint.py` derives topics from what postings for the
+#: role actually demand, and that is what an interview is normally examined
+#: against. This list is the answer when the corpus holds too few matching
+#: adverts to call anything "demand" -- and the caller is told which it got, so
+#: a generic interview is never presented as a market-derived one.
 #:
-#: What it must not become is model-generated. Choosing which topics exist is
-#: choosing the trajectory, and ADR-013's whole decision is that the model does
-#: not do that.
-BLUEPRINTS: dict[str, tuple[str, ...]] = {
-    "DEFAULT": (
-        "Experience and background",
-        "Core technical knowledge",
-        "System design",
-        "Problem solving",
-        "Collaboration and communication",
-    ),
-}
+#: Kept here rather than in `blueprint.py` so this module remains usable and
+#: testable with no database at all.
+GENERIC_TOPICS: tuple[str, ...] = (
+    "Experience and background",
+    "Core technical knowledge",
+    "System design",
+    "Problem solving",
+    "Collaboration and communication",
+)
 
 
 class Move(StrEnum):
@@ -111,8 +111,14 @@ class InterviewState:
     topics_covered: tuple[str, ...]
     questions_asked: int
     question_budget: int
-    #: Which blueprint to walk. Defaults to the generic one.
-    role: str = "DEFAULT"
+    #: The topics to work through, already resolved, in the order to ask them.
+    #:
+    #: **Injected rather than looked up**, which is what keeps this module pure.
+    #: 9.1 held a role key and consulted a static map here; that put a data
+    #: source inside a function whose whole value is having none. The service
+    #: resolves the blueprint -- from real demand where there is any -- and this
+    #: only walks it.
+    topics: tuple[str, ...] = GENERIC_TOPICS
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,11 +133,6 @@ class Action:
     move: Move
     topic: str | None
     difficulty: QuestionDifficulty | None
-
-
-def blueprint_for(role: str) -> tuple[str, ...]:
-    """The topic list for a role, falling back to the generic one."""
-    return BLUEPRINTS.get(role, BLUEPRINTS["DEFAULT"])
 
 
 def easier(difficulty: QuestionDifficulty) -> QuestionDifficulty:
@@ -153,7 +154,7 @@ def next_topic(state: InterviewState) -> str | None:
     two interviews for one role walk the same path -- which is what makes
     comparing them mean anything.
     """
-    for topic in blueprint_for(state.role):
+    for topic in state.topics:
         if topic not in state.topics_covered:
             return topic
     return None

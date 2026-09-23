@@ -71,7 +71,10 @@ class ResponseFormatError(ValueError):
     """The reply was not usable at all -- not JSON, or not the expected object."""
 
 
-def _unfence(text: str) -> str:
+def unfence(text: str) -> str:
+    """Strip a ```json fence if there is one. Public: the interview parser needs
+    the same habit handled, and two copies of "models wrap JSON in fences" is
+    how they come to disagree about which fences count."""
     match = _FENCED.search(text)
     return match.group(1).strip() if match else text.strip()
 
@@ -99,7 +102,7 @@ def parse_suggestions(reply: str) -> ParseResult:
     defect worth logging, the second is a valid answer.
     """
     try:
-        payload = json.loads(_unfence(reply))
+        payload = json.loads(unfence(reply))
     except (ValueError, TypeError) as exc:
         raise ResponseFormatError("reply was not JSON") from exc
 
