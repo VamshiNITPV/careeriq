@@ -231,12 +231,12 @@ Each story carries acceptance criteria (AC) that become test cases.
 - AC2: The session persists and can be resumed. *Met by ADR-013's decision to hold the state machine in Postgres rather than in a model's context window: `GET /interviews/{id}` returns the same transcript, difficulty and covered topics tomorrow.*
 
 **US-8.2** As a user, I want the interview to adapt, so that it probes my real level.
-- AC1: A weak answer produces an easier clarifying follow-up; a strong answer escalates difficulty.
-- AC2: The difficulty trajectory is recorded per question and visible in the report.
+- AC1: A weak answer produces an easier clarifying follow-up; a strong answer escalates difficulty. *Built 2026-09-23 (9.3). The policy is the pure function from ADR-013, driven by the answer's overall score; a strong answer takes an uncovered topic before it takes a harder rung, which is breadth before depth.*
+- AC2: The difficulty trajectory is recorded per question and visible in the report. *`interview_scores.next_difficulty` stores the decision at the moment it was taken, rather than recomputing it for the report. The policy can change, and a transcript read in a month should show what actually happened.*
 
 **US-8.3** As a user, I want scored feedback, so that I know how to improve.
-- AC1: Each answer is scored on technical correctness, relevance, completeness, communication, and structure.
-- AC2: Feedback cites the specific part of my answer it refers to.
+- AC1: Each answer is scored on technical correctness, relevance, completeness, communication, and structure. *All five are required — four averaged is a different measurement wearing the same name — and each must lie in [0,1]; a value outside it is refused rather than clamped, since clamping turns a misread scale into a perfect mark. The overall is the mean, computed rather than asked for.*
+- AC2: Feedback cites the specific part of my answer it refers to. *Character offsets into the answer, verified to lie inside it before storage, with the stored text taken from the answer rather than from the model's account of it. A citation pointing elsewhere than it claims is worse than none, because it will be believed.*
 - AC3: Scoring is validated against a human-labelled test set with reported agreement.
 
 ---

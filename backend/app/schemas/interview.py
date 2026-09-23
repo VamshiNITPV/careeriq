@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -35,6 +36,63 @@ class InterviewCreate(BaseModel):
     question_budget: int = Field(default=10, ge=3, le=20)
 
 
+class AnswerSubmit(BaseModel):
+    """The body of `POST /interviews/{id}/questions/{qid}/answer`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    answer_text: str = Field(min_length=1, max_length=20_000)
+    #: How long they took. Not scored -- a slow answer is not a worse one -- but
+    #: it is the kind of thing somebody reviewing their own transcript wants.
+    duration_seconds: int | None = Field(default=None, ge=0, le=7_200)
+
+
+class CitedSpanRead(BaseModel):
+    """A part of the answer the feedback points at (US-8.3 AC2)."""
+
+    #: Character offsets into the answer, verified to lie inside it before this
+    #: was stored. A citation that points somewhere other than where it says is
+    #: worse than none, because it will be believed.
+    start: int
+    end: int
+    text: str
+    note: str = ""
+
+
+class AnswerScoreRead(BaseModel):
+    """How one answer was marked (US-8.3 AC1)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    technical_score: Decimal
+    relevance_score: Decimal
+    completeness_score: Decimal
+    communication_score: Decimal
+    structure_score: Decimal
+    #: The mean of the five. Computed here rather than asked of the model, so
+    #: the parts and the whole cannot disagree.
+    overall_score: Decimal
+    feedback: str | None = None
+    strengths: list[str]
+    improvements: list[str]
+    cited_spans: list[CitedSpanRead] | None = None
+    #: What the policy decided next, stored when the score was. The policy can
+    #: change; a report read in a month should show the decision actually taken
+    #: (US-8.2 AC2).
+    next_difficulty: QuestionDifficulty | None = None
+
+
+class InterviewAnswerRead(BaseModel):
+    """What the candidate said, and how it was marked."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    answer_text: str
+    duration_seconds: int | None = None
+    submitted_at: datetime | None = None
+    score: AnswerScoreRead | None = None
+
+
 class InterviewQuestionRead(BaseModel):
     """One question, as asked."""
 
@@ -57,6 +115,8 @@ class InterviewQuestionRead(BaseModel):
     #: fallback -- a weaker question, and said so rather than passed off.
     degraded: bool = False
     asked_at: datetime | None = None
+    #: Null until answered. The pair is the transcript.
+    answer: InterviewAnswerRead | None = None
 
 
 class InterviewRead(BaseModel):

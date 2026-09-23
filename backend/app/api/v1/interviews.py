@@ -7,19 +7,30 @@ behind the response; reading one returns the whole transcript so far.
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, BackgroundTasks, status
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import CurrentUser, DbSession, InterviewRunnerDep
-from app.core.exceptions import ResourceNotFoundError
+from app.api.deps import (
+    CurrentUser,
+    DbSession,
+    InterviewAnswerRunnerDep,
+    InterviewRunnerDep,
+)
+from app.core.exceptions import InvalidStateTransitionError, ResourceNotFoundError
 from app.core.ids import uuid7
 from app.core.logging import get_logger
-from app.models.interview import Interview
+from app.models.interview import Interview, InterviewAnswer, InterviewQuestion
 from app.models.job import Job
 from app.schemas.common import ErrorResponse
-from app.schemas.interview import InterviewCreate, InterviewCreated, InterviewRead
+from app.schemas.interview import (
+    AnswerSubmit,
+    InterviewCreate,
+    InterviewCreated,
+    InterviewRead,
+)
 
 log = get_logger(__name__)
 
@@ -37,8 +48,24 @@ async def _owned(session: DbSession, interview_id: uuid.UUID, user_id: uuid.UUID
     """
     interview = await session.scalar(
         select(Interview)
-        .options(selectinload(Interview.questions))
+        # The whole chain, eagerly. `InterviewRead` serialises questions, their
+        # answers and their scores, and a lazy load inside async has no await
+        # point -- that is MissingGreenlet at render time rather than at the
+        # attribute access, which is the same trap `models/application.py`
+        # records for its own `job` relationship.
+        .options(
+            selectinload(Interview.questions)
+            .selectinload(InterviewQuestion.answer)
+            .selectinload(InterviewAnswer.score)
+        )
         .where(Interview.id == interview_id, Interview.user_id == user_id)
+        # Refresh what is already in the identity map rather than returning it
+        # as last loaded. Without this, an `Interview` whose `questions` were
+        # loaded earlier in the same session comes back with that collection
+        # unchanged -- so a question written since is simply absent from the
+        # response, with no error anywhere. `expire_on_commit=False` is what
+        # makes that possible, and it is set deliberately elsewhere.
+        .execution_options(populate_existing=True)
     )
     if interview is None:
         raise ResourceNotFoundError("Interview")
@@ -125,3 +152,74 @@ async def read_interview(
     """
     interview = await _owned(session, interview_id, user.id)
     return InterviewRead.model_validate(interview)
+
+
+@router.post(
+    "/{interview_id}/questions/{question_id}/answer",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=InterviewCreated,
+    summary="Answer a question, and get the next one",
+    responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
+)
+async def answer_question(
+    interview_id: uuid.UUID,
+    question_id: uuid.UUID,
+    payload: AnswerSubmit,
+    user: CurrentUser,
+    session: DbSession,
+    background: BackgroundTasks,
+    submit: InterviewAnswerRunnerDep,
+) -> InterviewCreated:
+    """Record an answer; marking it and asking the next question follow.
+
+    **The answer is written here, synchronously, before the 202.** Everything
+    after it -- the mark, the policy's decision, the next question -- is a model
+    call and goes to the background. But what the candidate actually typed is
+    theirs, and losing it because a provider was slow would be the one
+    unrecoverable failure in this feature.
+
+    409 rather than 404 for a question already answered: the request is well
+    formed and the resource exists, it is the state that refuses. `UNIQUE` on
+    `interview_answers.question_id` enforces it in the database besides -- a
+    second answer would give one question two scores and double its weight in
+    the report.
+    """
+    interview = await _owned(session, interview_id, user.id)
+
+    question = next((q for q in interview.questions if q.id == question_id), None)
+    if question is None:
+        # Scoped through the interview the caller owns, so a question id from
+        # somebody else's session is indistinguishable from one that does not
+        # exist.
+        raise ResourceNotFoundError("Question")
+
+    existing = await session.scalar(
+        select(InterviewAnswer.id).where(InterviewAnswer.question_id == question_id)
+    )
+    if existing is not None:
+        raise InvalidStateTransitionError("That question has already been answered.")
+
+    session.add(
+        InterviewAnswer(
+            id=uuid7(),
+            question_id=question_id,
+            answer_text=payload.answer_text,
+            duration_seconds=payload.duration_seconds,
+            submitted_at=datetime.now(UTC),
+        )
+    )
+    await session.commit()
+
+    background.add_task(submit, question_id, payload.answer_text)
+
+    log.info(
+        "interview answer recorded",
+        interview_id=str(interview_id),
+        question_id=str(question_id),
+        length=len(payload.answer_text),
+    )
+    return InterviewCreated(
+        interview_id=interview_id,
+        status=interview.status,
+        poll_url=f"/api/v1/interviews/{interview_id}",
+    )

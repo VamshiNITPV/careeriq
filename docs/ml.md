@@ -705,6 +705,19 @@ skills adjacent to real ones; and moved dates.
 Scoring uses the question's `expected_points` (database.md §3.8) as a rubric, so the model judges
 against stated criteria rather than a vague impression.
 
+**Note (2026-09-23, 9.3) — two rules the implementation adds.**
+
+*The overall score is computed here, not asked of the model.* Requesting it would produce two
+authoritative values that can disagree invisibly: a model returning `0.9` beside five dimensions
+averaging `0.4` is not reporting a weighting, it is reporting nothing. Equal weights, because the
+table above names the five without ranking them — and inventing a ranking would be a claim about
+what matters in an interview that nothing in this project has measured.
+
+*A score outside `[0, 1]` is refused, not clamped.* A model returning `4.5` has misread the scale
+rather than marked highly, and clamping would turn a parsing failure into a perfect mark. Every
+dimension is required for the same reason: four of five averaged is a different measurement wearing
+the same name.
+
 ### 7.2 Adaptive policy
 Deterministic, per ADR-013. Implemented as a pure function:
 
@@ -730,6 +743,13 @@ human on all five dimensions. Stored in `interview_scores.human_score` so agreem
 > Rank correlation is included because the practically important property is *ordering* — the
 > system must recognize that answer A is better than answer B. Exact calibration matters less than
 > consistent relative judgement.
+
+**Citations (US-8.3 AC2), as built.** The model returns `[start, end)` offsets into the answer and
+the text it claims sits there. Every span is checked against the answer: out of range, inverted, or
+disagreeing with its own quote, and the span is dropped — the stored `text` always comes from the
+answer at those offsets, never from the model's account of them. A citation pointing somewhere other
+than where it says is worse than no citation, because it will be believed. One malformed span drops
+alone rather than discarding the score, since the other citations and the marks are still usable.
 
 ---
 

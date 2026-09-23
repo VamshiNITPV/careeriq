@@ -28,14 +28,27 @@ from app.core.logging import get_logger
 from app.integrations.llm import get_llm_provider
 from app.integrations.llm.base import LLMProvider
 from app.models.enums import InterviewStatus
-from app.models.interview import Interview, InterviewQuestion
+from app.models.interview import (
+    Interview,
+    InterviewAnswer,
+    InterviewQuestion,
+    InterviewScore,
+)
 from app.models.job import Job
 from app.models.resume import Resume, ResumeVersion
 from app.services.interview.blueprint import blueprint_for
 from app.services.interview.policy import GENERIC_TOPICS, InterviewState, Move, next_action
 from app.services.interview.questions import QuestionRejected, generate_question
+from app.services.interview.scoring import ScoreRejected, score_answer
 
 log = get_logger(__name__)
+
+#: What the policy is told before there is anything to react to.
+#:
+#: Sits inside ADR-013's middling band, which means "same rung, next topic" --
+#: the only action that neither rewards nor punishes a candidate who has not
+#: yet said anything.
+MIDDLING_ENTRY = 0.5
 
 
 async def _resume_text(session: AsyncSession, user_id: uuid.UUID) -> str | None:
@@ -58,6 +71,7 @@ async def _resume_text(session: AsyncSession, user_id: uuid.UUID) -> str | None:
 async def ask_next_question(
     interview_id: uuid.UUID,
     *,
+    last_score: float | None = None,
     session: AsyncSession | None = None,
     provider: LLMProvider | None = None,
 ) -> None:
@@ -68,10 +82,10 @@ async def ask_next_question(
     cannot see, and a test must never call a real model.
     """
     if session is not None:
-        await _run(session, interview_id, provider)
+        await _run(session, interview_id, provider, last_score)
         return
     async with get_session_factory()() as own_session:
-        await _run(own_session, interview_id, provider)
+        await _run(own_session, interview_id, provider, last_score)
 
 
 async def _fail(session: AsyncSession, interview: Interview, reason: str) -> None:
@@ -88,7 +102,10 @@ async def _fail(session: AsyncSession, interview: Interview, reason: str) -> Non
 
 
 async def _run(
-    session: AsyncSession, interview_id: uuid.UUID, provider: LLMProvider | None
+    session: AsyncSession,
+    interview_id: uuid.UUID,
+    provider: LLMProvider | None,
+    last_score: float | None = None,
 ) -> None:
     interview = await session.scalar(
         select(Interview)
@@ -142,8 +159,9 @@ async def _run(
 
     # The first question has no score to react to, so the policy is entered at
     # the middling band: same rung, next topic. Seeding it with a fake "good"
-    # score would start every interview one rung harder than asked for.
-    action = next_action(state, 0.5)
+    # score would start every interview one rung harder than asked for, and a
+    # fake bad one would open every interview with an apology.
+    action = next_action(state, MIDDLING_ENTRY if last_score is None else last_score)
     if action.move is Move.FINISH or action.topic is None or action.difficulty is None:
         interview.status = InterviewStatus.COMPLETED
         interview.completed_at = datetime.now(UTC)
@@ -210,3 +228,124 @@ async def _run(
         difficulty=generated.difficulty.value,
         degraded=generated.degraded,
     )
+
+
+async def submit_answer(
+    question_id: uuid.UUID,
+    answer_text: str,
+    *,
+    duration_seconds: int | None = None,
+    session: AsyncSession | None = None,
+    provider: LLMProvider | None = None,
+) -> None:
+    """Store an answer, mark it, and ask whatever comes next. Never raises.
+
+    The whole loop in one background task, because the three steps are one
+    event from the candidate's side: they answered, and the next question
+    should appear. Splitting them across requests would make a half-finished
+    turn -- answered but unscored -- a state the UI has to render and the policy
+    has to tolerate.
+    """
+    if session is not None:
+        await _answer(session, question_id, answer_text, duration_seconds, provider)
+        return
+    async with get_session_factory()() as own_session:
+        await _answer(own_session, question_id, answer_text, duration_seconds, provider)
+
+
+async def _answer(
+    session: AsyncSession,
+    question_id: uuid.UUID,
+    answer_text: str,
+    duration_seconds: int | None,
+    provider: LLMProvider | None,
+) -> None:
+    question = await session.scalar(
+        select(InterviewQuestion)
+        .options(selectinload(InterviewQuestion.interview))
+        .where(InterviewQuestion.id == question_id)
+    )
+    if question is None:  # pragma: no cover - checked by the route first
+        return
+    interview = question.interview
+
+    llm = provider if provider is not None else get_llm_provider()
+    if llm is None:
+        await _fail(session, interview, "Scoring needs an AI provider, which is not configured.")
+        return
+
+    try:
+        marked = await score_answer(
+            llm,
+            question_text=question.question_text,
+            expected_points=list(question.expected_points),
+            answer_text=answer_text,
+            target_role=interview.target_role,
+        )
+    except ScoreRejected as exc:
+        # The answer is already stored by the route, so nothing the candidate
+        # typed is lost. Only the mark is missing, and saying so beats inventing
+        # a number -- there is no sensible default for "how good was this", and
+        # 0.5 would be a fabrication with a confident face.
+        await _fail(session, interview, f"Could not mark that answer: {exc}")
+        return
+    except Exception:
+        # Deliberately broad, as above: this runs after the response has gone.
+        log.exception("interview: scoring failed", question_id=str(question_id))
+        await _fail(session, interview, "The AI provider could not be reached just now.")
+        return
+
+    # What the policy decides next, recorded *with the score* rather than
+    # recomputed later. The policy can change, and a report read in a month
+    # should show the decision actually taken (US-8.2 AC2).
+    state = InterviewState(
+        current_difficulty=interview.current_difficulty,
+        topics_covered=tuple(interview.topics_covered),
+        questions_asked=interview.questions_asked,
+        question_budget=interview.question_budget,
+    )
+    action = next_action(state, float(marked.overall))
+
+    session.add(
+        InterviewScore(
+            id=uuid7(),
+            answer_id=(await _answer_row(session, question_id)).id,
+            technical_score=marked.dimensions["technical"],
+            relevance_score=marked.dimensions["relevance"],
+            completeness_score=marked.dimensions["completeness"],
+            communication_score=marked.dimensions["communication"],
+            structure_score=marked.dimensions["structure"],
+            overall_score=marked.overall,
+            feedback=marked.feedback,
+            strengths=list(marked.strengths),
+            improvements=list(marked.improvements),
+            cited_spans=[
+                {"start": s.start, "end": s.end, "text": s.text, "note": s.note}
+                for s in marked.cited_spans
+            ],
+            next_difficulty=action.difficulty,
+            scored_by=marked.model,
+        )
+    )
+    interview.summary_feedback = None
+    await session.commit()
+
+    log.info(
+        "interview: answer scored",
+        question_id=str(question_id),
+        overall=str(marked.overall),
+        move=action.move.value,
+        citations=len(marked.cited_spans),
+    )
+
+    # And on to the next, driven by the score that was just recorded.
+    await _run(session, interview.id, provider, float(marked.overall))
+
+
+async def _answer_row(session: AsyncSession, question_id: uuid.UUID) -> InterviewAnswer:
+    row = await session.scalar(
+        select(InterviewAnswer).where(InterviewAnswer.question_id == question_id)
+    )
+    if row is None:  # pragma: no cover - the route writes it before queueing
+        raise RuntimeError("The answer vanished between its write and its scoring.")
+    return row
