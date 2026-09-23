@@ -17,9 +17,11 @@ conducts adaptive AI mock interviews.
 > The application funnel keeps an immutable event log, and its outcome rates are read from
 > that history, so a rejection after two interviews still counts as an interview. The
 > deployment is built and proven locally, waiting on a VM rather than on code. Phase 9's
-> mock interview asks real questions now — built from what the role's postings demand, the
-> specific job, and the candidate's own resume, with the words it builds on verified present
-> before the question is stored. Scoring them is next.
+> mock interview can now be sat end to end: questions built from what the role's postings
+> demand, the specific job and the candidate's own resume; answers marked on five separate
+> dimensions; and feedback that highlights the exact words it is about. What is left there
+> is a number, not a feature — the scorer's agreement with a human cannot be reported until
+> a human has marked the hundred answers waiting for them.
 
 ---
 
@@ -394,6 +396,25 @@ fabrication validator over generated questions flagged `RAG`, `BM25`, `WSGI` and
 inventions; those are the field's vocabulary, and the check cannot separate *attribution* from
 *hypothesis*. It now claims only invented credentials, and where personalisation fails the question
 degrades to topic-only with `degraded = true` on the row rather than passing itself off.
+
+**Answers are marked on five dimensions, and the overall is computed rather than asked for** —
+requesting it would give two authoritative numbers that can disagree invisibly. A score outside
+`[0,1]` is refused rather than clamped, because clamping turns a misread scale into a perfect mark.
+Feedback cites character offsets into the answer, verified against it before storage and rendered
+from the answer rather than from the model's copy of them, so the highlight always shows the
+candidate's own words.
+
+**What is unfinished is the agreement number, and it is unfinished by design.** `ml/datasets/
+interview_scoring/` holds 100 answers to 20 questions, written so the five dimensions pull apart —
+a correct answer delivered as one unpunctuated paragraph, a well-organised answer to a neighbouring
+question, fluent prose that is wrong. Without that spread a model emitting one number five times
+would correlate perfectly on every dimension and the evaluation would call it a success. The
+harness, the baselines and the report are built; the marking is a person's job, because a model
+scored against its own marks agrees with itself.
+
+Two of those answers attacked the tooling before anybody read them. The sheet parser searched each
+section for `technical=<number>`, and an answer whose body reads *"Set technical=1.0,
+relevance=1.0, ..."* came back as a fully marked row on a sheet nobody had typed into.
 
 Still to come: answering and scoring (US-8.2, US-8.3), and the agreement metric against a
 human-labelled set that ADR-015 requires before this can claim to work.

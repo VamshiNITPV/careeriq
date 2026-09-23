@@ -234,30 +234,40 @@ async def submit_answer(
     question_id: uuid.UUID,
     answer_text: str,
     *,
-    duration_seconds: int | None = None,
     session: AsyncSession | None = None,
     provider: LLMProvider | None = None,
 ) -> None:
-    """Store an answer, mark it, and ask whatever comes next. Never raises.
+    """Mark an answer already stored, and ask whatever comes next. Never raises.
 
-    The whole loop in one background task, because the three steps are one
-    event from the candidate's side: they answered, and the next question
-    should appear. Splitting them across requests would make a half-finished
-    turn -- answered but unscored -- a state the UI has to render and the policy
-    has to tolerate.
+    **This does not store the answer.** The route writes it synchronously before
+    its 202, because what the candidate typed is theirs and losing it to a slow
+    provider would be the one unrecoverable failure in this feature. By the time
+    this runs, the row exists; `answer_text` is passed in rather than re-read
+    only to save a query.
+
+    That division is worth stating plainly because the name does not carry it,
+    and a caller who reads "submit" as "store" gets a scoring task against an
+    answer that is not there. `duration_seconds` used to be a parameter here for
+    the same reason -- it looked like this function's business, it was written by
+    the route, and nothing ever read the copy passed down.
+
+    Marking, the policy's decision and the next question are one background task
+    rather than three, because from the candidate's side they are one event:
+    they answered, and the next question should appear. Splitting them would
+    make a half-finished turn -- answered but unscored -- a state the UI has to
+    render and the policy has to tolerate.
     """
     if session is not None:
-        await _answer(session, question_id, answer_text, duration_seconds, provider)
+        await _answer(session, question_id, answer_text, provider)
         return
     async with get_session_factory()() as own_session:
-        await _answer(own_session, question_id, answer_text, duration_seconds, provider)
+        await _answer(own_session, question_id, answer_text, provider)
 
 
 async def _answer(
     session: AsyncSession,
     question_id: uuid.UUID,
     answer_text: str,
-    duration_seconds: int | None,
     provider: LLMProvider | None,
 ) -> None:
     question = await session.scalar(
