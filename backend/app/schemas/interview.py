@@ -149,6 +149,36 @@ class InterviewRead(BaseModel):
     summary_feedback: str | None = None
 
 
+class InterviewSummary(BaseModel):
+    """One row of "your interviews", without the transcript.
+
+    Deliberately not `InterviewRead`. A list of ten sessions, each carrying
+    every question, answer, score and cited span, is a large response to render
+    a page of headings from -- and the transcript is one click away.
+    """
+
+    id: uuid.UUID
+    target_role: str
+    status: InterviewStatus
+    questions_asked: int
+    question_budget: int
+    #: How many have been answered, which is not `questions_asked`: the last
+    #: question is asked and unanswered for as long as somebody is thinking.
+    answered: int
+    #: Mean of the overall marks so far, or null when nothing is marked yet.
+    #:
+    #: Null rather than 0.0, for the reason the scorer refuses to invent a mark:
+    #: an interview nobody has answered has no score, and 0.0 would read as
+    #: having done badly at it.
+    average_score: Decimal | None = None
+    created_at: datetime
+
+
+class InterviewListResponse(BaseModel):
+    items: list[InterviewSummary]
+    total: int
+
+
 class InterviewCreated(BaseModel):
     """`POST /interviews` answers immediately; the first question follows."""
 

@@ -6,16 +6,23 @@ import { usePopoverDismiss } from '@/components/ui/popoverDismiss'
 import { cn } from '@/utils/cn'
 
 /**
- * Four, not five. "Resume" was here *and* in the account menu as "Your resume",
- * and a navbar is the wrong place to keep the duplicate: it is the one surface
- * where every extra item costs width at exactly the sizes that have none.
+ * "Resume" used to be here *and* in the account menu as "Your resume", and a
+ * navbar is the wrong place to keep a duplicate: it is the one surface where
+ * every extra item costs width at exactly the sizes that have none. That link
+ * moved out; the route and the page were untouched.
  *
- * The route and the page are untouched. Only the link moved out.
+ * "Practice" was added back to five deliberately, against that same pressure.
+ * Mock interviews are a top-level thing somebody comes to the product to do,
+ * not a detail of another page, and a feature reachable only by URL may as well
+ * not exist. The label is the short one on purpose — "Interviews" is wider than
+ * "Applications", and the header is measured against the longest label it
+ * carries.
  */
 const NAV_ITEMS = [
   { to: '/dashboard', label: 'Dashboard' },
   { to: '/jobs', label: 'Jobs' },
   { to: '/applications', label: 'Applications' },
+  { to: '/interviews', label: 'Practice' },
   { to: '/skill-gaps', label: 'Skills' },
 ] as const
 

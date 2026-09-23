@@ -728,16 +728,29 @@ a viable target on noise. The API refuses to present a bare number without its s
 
 ### 2.10 Interviews — `/interviews`
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/interviews` | Session list |
-| `POST` | `/interviews` | Start a session for a target role. `201` |
-| `GET` | `/interviews/{id}` | State, questions, answers so far |
-| `GET` | `/interviews/{id}/next-question` | Next question from the adaptive policy |
-| `POST` | `/interviews/{id}/answer` | Submit an answer → scored → `200` |
-| `POST` | `/interviews/{id}/complete` | End early and generate the report |
-| `GET` | `/interviews/{id}/report` | Full report with per-dimension scores |
-| `GET` | `/interviews/{id}/ticket` | Short-lived WebSocket ticket (ADR-010) |
+| Method | Path | Description | Built |
+|---|---|---|---|
+| `GET` | `/interviews` | Session list, newest first, with `answered` and `average_score` | 9.5 |
+| `POST` | `/interviews` | Start a session for a target role. **`202`** | 9.2 |
+| `GET` | `/interviews/{id}` | State, questions, answers so far. Also the poll target | 9.2 |
+| `POST` | `/interviews/{id}/questions/{qid}/answer` | Submit an answer. **`202`** | 9.3 |
+| `GET` | `/interviews/{id}/next-question` | — | planned |
+| `POST` | `/interviews/{id}/complete` | End early and generate the report | planned |
+| `GET` | `/interviews/{id}/report` | Full report with per-dimension scores | planned |
+| `GET` | `/interviews/{id}/ticket` | Short-lived WebSocket ticket (ADR-010) | Phase 10 |
+
+**Two departures from the plan above, both deliberate.**
+
+*`202`, not `201`, on both writes.* A model call takes seconds, and holding the
+request open for it makes every client's timeout the server's problem — the same
+reasoning `POST /optimize/analyze` records. The client polls `GET
+/interviews/{id}`; Phase 10's WebSockets (C14) replace that.
+
+*There is no `GET /next-question`.* Asking for the next question and answering
+the current one were two requests describing one turn, and a client could issue
+them in either order. Answering now sets the whole of the rest going —
+marking, the policy's decision, and the next question — and the transcript is
+where all three show up.
 
 <details>
 <summary><code>POST /interviews/{id}/answer</code> — the adaptive turn (ADR-013)</summary>

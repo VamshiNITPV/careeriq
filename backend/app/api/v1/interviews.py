@@ -1,16 +1,19 @@
 """Starting and resuming a mock interview (US-8.1).
 
-Two routes. Creating one answers immediately and generates the first question
-behind the response; reading one returns the whole transcript so far.
+Four routes. Creating one answers immediately and generates the first question
+behind the response; listing gives somebody a way back to a session they left;
+reading one returns the whole transcript so far; answering records what they
+said and sets the rest going.
 """
 
 from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
+from decimal import Decimal
 
-from fastapi import APIRouter, BackgroundTasks, status
-from sqlalchemy import select
+from fastapi import APIRouter, BackgroundTasks, Query, status
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import (
@@ -22,14 +25,21 @@ from app.api.deps import (
 from app.core.exceptions import InvalidStateTransitionError, ResourceNotFoundError
 from app.core.ids import uuid7
 from app.core.logging import get_logger
-from app.models.interview import Interview, InterviewAnswer, InterviewQuestion
+from app.models.interview import (
+    Interview,
+    InterviewAnswer,
+    InterviewQuestion,
+    InterviewScore,
+)
 from app.models.job import Job
 from app.schemas.common import ErrorResponse
 from app.schemas.interview import (
     AnswerSubmit,
     InterviewCreate,
     InterviewCreated,
+    InterviewListResponse,
     InterviewRead,
+    InterviewSummary,
 )
 
 log = get_logger(__name__)
@@ -128,6 +138,87 @@ async def create_interview(
         interview_id=interview.id,
         status=interview.status,
         poll_url=f"/api/v1/interviews/{interview.id}",
+    )
+
+
+@router.get(
+    "",
+    response_model=InterviewListResponse,
+    summary="Interviews you have started",
+)
+async def list_interviews(
+    user: CurrentUser,
+    session: DbSession,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> InterviewListResponse:
+    """Every session this user has started, newest first.
+
+    US-8.1 AC2 says an interview is resumable. Without this route that is only
+    true for somebody who kept the URL -- the state does survive in Postgres,
+    and there is no way back to it from the product. This is the way back.
+
+    The counts and the average are computed in SQL rather than by loading the
+    transcripts and reducing them in Python. Ten sessions of ten questions with
+    their answers, scores and cited spans is a lot of rows to fetch in order to
+    render a heading and a number.
+    """
+    answers = (
+        select(func.count(InterviewAnswer.id))
+        .select_from(InterviewAnswer)
+        .join(InterviewQuestion, InterviewQuestion.id == InterviewAnswer.question_id)
+        .where(InterviewQuestion.interview_id == Interview.id)
+        .correlate(Interview)
+        .scalar_subquery()
+    )
+    average = (
+        select(func.avg(InterviewScore.overall_score))
+        .select_from(InterviewScore)
+        .join(InterviewAnswer, InterviewAnswer.id == InterviewScore.answer_id)
+        .join(InterviewQuestion, InterviewQuestion.id == InterviewAnswer.question_id)
+        .where(InterviewQuestion.interview_id == Interview.id)
+        .correlate(Interview)
+        .scalar_subquery()
+    )
+
+    total = await session.scalar(
+        select(func.count(Interview.id)).where(Interview.user_id == user.id)
+    )
+    rows = await session.execute(
+        select(Interview, answers.label("answered"), average.label("average_score"))
+        .where(Interview.user_id == user.id)
+        # `id` as the tiebreak, not for ordering's sake but for paging's: two
+        # interviews created in the same millisecond would otherwise be free to
+        # swap places between page one and page two, and one of them would never
+        # be shown. uuid7 ids sort by creation time, so this agrees with the
+        # primary sort rather than fighting it.
+        .order_by(Interview.created_at.desc(), Interview.id.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+
+    return InterviewListResponse(
+        items=[
+            InterviewSummary(
+                id=interview.id,
+                target_role=interview.target_role,
+                status=interview.status,
+                questions_asked=interview.questions_asked,
+                question_budget=interview.question_budget,
+                answered=answered,
+                average_score=(
+                    # Rounded to the three places the column stores. `avg` over
+                    # NUMERIC widens the scale, and a mark rendering as
+                    # 0.6333333333333333 in JSON is noise presented as precision.
+                    average_score.quantize(Decimal("0.001"))
+                    if average_score is not None
+                    else None
+                ),
+                created_at=interview.created_at,
+            )
+            for interview, answered, average_score in rows
+        ],
+        total=total or 0,
     )
 
 

@@ -37,6 +37,12 @@ describe('AppLayout navigation', () => {
     expect(within(nav).getByRole('link', { name: 'Dashboard' })).toBeInTheDocument()
     expect(within(nav).getByRole('link', { name: 'Jobs' })).toBeInTheDocument()
     expect(within(nav).getByRole('link', { name: 'Applications' })).toBeInTheDocument()
+    // Mock interviews are a thing somebody comes to the product to do, and a
+    // feature reachable only by URL may as well not exist.
+    expect(within(nav).getByRole('link', { name: 'Practice' })).toHaveAttribute(
+      'href',
+      '/interviews',
+    )
     expect(within(nav).getByRole('link', { name: 'Skills' })).toBeInTheDocument()
 
     // It lives in the account menu as "Your resume". Two entries to the same
