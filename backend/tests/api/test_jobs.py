@@ -251,15 +251,51 @@ class TestTheApplicationLink:
     what is accepted here is a security boundary, not a formatting preference.
     """
 
-    async def test_a_posting_needs_one(
+    async def test_a_posting_does_not_need_one(
         self, client: AsyncClient, auth_headers: dict[str, str], seeded_skills: int
     ) -> None:
+        """Changed in 9.6, and the premise is what changed.
+
+        This used to be a 422 on the grounds that "a posting someone pasted
+        always came from a page". That is true of the Add-a-job form, which keeps
+        its own client-side requirement because the rows it writes get an Apply
+        button. It is not true of a posting pasted to rehearse an interview
+        against, which arrives as often from a PDF or an email -- and ADR-019
+        forbids following the link anyway, so it buys that flow nothing.
+
+        `Job.source_url` was always nullable and imported jobs routinely have
+        none, so the retired invariant was a property of one route rather than of
+        the corpus. US-3.1 AC1 says "paste raw text **or** provide a URL plus
+        text", which the required field was always stricter than.
+        """
         response = await client.post(
             f"{API}/jobs", headers=auth_headers, json={"description": posting()}
         )
 
-        assert response.status_code == 422
-        assert response.json()["error"]["details"]["fields"][0]["field"] == "source_url"
+        assert response.status_code == 201, response.text
+        assert response.json()["job"]["source_url"] is None
+
+    @pytest.mark.parametrize("blank", ["", "   ", "\t\n"])
+    async def test_a_blank_link_means_no_link(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        blank: str,
+    ) -> None:
+        """An empty box is an absent link, not a malformed one.
+
+        Moved out of the href-injection guard below, where it never belonged:
+        whitespace is not an injection vector. The distinction this pins is the
+        whole content of the change -- **absent is accepted, invalid is refused**
+        -- and collapsing the two in either direction is the way to get it wrong.
+        """
+        response = await client.post(
+            f"{API}/jobs", headers=auth_headers, json=submission(source_url=blank)
+        )
+
+        assert response.status_code == 201, response.text
+        assert response.json()["job"]["source_url"] is None
 
     async def test_a_link_without_a_scheme_is_accepted(
         self, client: AsyncClient, auth_headers: dict[str, str], seeded_skills: int
@@ -282,7 +318,6 @@ class TestTheApplicationLink:
             "data:text/html,<script>alert(1)</script>",
             "vbscript:msgbox(1)",
             "not a url at all",
-            "   ",
         ],
     )
     async def test_a_link_that_is_not_http_is_rejected(
@@ -297,6 +332,11 @@ class TestTheApplicationLink:
         These are rejected as a side effect of how the scheme is added — see
         normalize_url in app/schemas/urls.py. If someone ever "simplifies" that
         prefix branch, this is what fails.
+
+        Still 422 after the field became optional, which is the half of that
+        change that matters: a link somebody typed wrong is said out loud rather
+        than silently dropped, because dropping it leaves the posting looking
+        like one they never had a link for.
         """
         response = await client.post(
             f"{API}/jobs", headers=auth_headers, json=submission(source_url=link)

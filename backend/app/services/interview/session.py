@@ -27,7 +27,7 @@ from app.core.ids import uuid7
 from app.core.logging import get_logger
 from app.integrations.llm import get_llm_provider
 from app.integrations.llm.base import LLMProvider
-from app.models.enums import InterviewStatus
+from app.models.enums import InterviewStatus, InterviewTopicSource
 from app.models.interview import (
     Interview,
     InterviewAnswer,
@@ -137,11 +137,27 @@ async def _run(
         )
         return
 
-    posting_text = None
+    posting_text: str | None = None
+    posting_requirements: list[str] = []
+    posting_responsibilities: list[str] = []
     if interview.target_job_id is not None:
-        posting_text = await session.scalar(
-            select(Job.description_raw).where(Job.id == interview.target_job_id)
-        )
+        # The arrays as well as the prose. They are the parser's extracted
+        # bullets -- far denser than a 4,000-word advert padded with benefits and
+        # culture copy, and they are the *same text the topics were derived from*,
+        # since `job/skills.py` assigns REQUIRED vs PREFERRED by which section a
+        # mention sat in. Passing them makes the question and the topic come from
+        # the same lines rather than merely from the same document.
+        row = (
+            await session.execute(
+                select(Job.description_raw, Job.requirements, Job.responsibilities).where(
+                    Job.id == interview.target_job_id
+                )
+            )
+        ).first()
+        if row is not None:
+            posting_text = row.description_raw
+            posting_requirements = list(row.requirements or [])
+            posting_responsibilities = list(row.responsibilities or [])
         if not posting_text:
             # Logged rather than passed over in silence. The candidate picked a
             # job; if its text contributed nothing they are owed a trace of why,
@@ -204,6 +220,13 @@ async def _run(
             target_role=interview.target_role,
             resume_text=resume_text,
             posting_text=posting_text,
+            posting_requirements=posting_requirements,
+            posting_responsibilities=posting_responsibilities,
+            # The blueprint's own answer, not `posting_text is not None`. A
+            # targeted job whose skills were too thin fell back to role demand,
+            # so the topic really is aggregate demand even though the posting is
+            # right there -- and the instruction must say the true one.
+            topic_from_posting=blueprint.source is InterviewTopicSource.THIS_JOB,
         )
     except QuestionRejected as exc:
         await _fail(session, interview, f"Could not produce a usable question: {exc}")

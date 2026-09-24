@@ -16,8 +16,11 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.integrations.llm.fake import FakeLLMProvider
 from app.models.interview import Interview
-from tests.api.test_interviews import start
+from app.services.interview.session import ask_next_question
+from tests.api.test_interviews import question_reply, start
+from tests.api.test_job_match import upload_resume
 from tests.api.test_jobs import API, BACKEND_BODY
 
 
@@ -252,3 +255,99 @@ class TestTheListSaysWhatItWasFor:
 
         assert row["target_job_id"] is None
         assert row["target_company"] is None
+
+
+class TestWhatTheModelIsGiven:
+    """The posting's extracted requirements reach the prompt (US-8.1 AC1).
+
+    End to end through a real parsed posting, because these arrays are filled by
+    `job/skills.py` reading sections out of the text -- hand-stuffing them would
+    test the assertion rather than the pipeline.
+    """
+
+    async def test_the_postings_requirements_reach_the_context(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        run_pipeline,
+    ) -> None:
+        await upload_resume(client, auth_headers, run_pipeline)
+        job_id = await _job_id(client, auth_headers)
+        created = await start(client, auth_headers, target_job_id=job_id)
+        provider = FakeLLMProvider([question_reply(topic="Python")])
+
+        await ask_next_question(
+            interview_id=uuid.UUID(str(created["interview_id"])),
+            session=db_session,
+            provider=provider,
+        )
+
+        prompt = provider.calls[0]
+        # The *labelled* block, not the concatenated context. That same sentence
+        # also appears in the raw posting, so asserting over everything at once
+        # passes whether or not the requirements were ever extracted -- which is
+        # how the first version of this test sat green through a mutation that
+        # dropped them entirely.
+        extracted = prompt.context["What that posting lists as requirements"]
+        assert "5+ years of professional backend experience" in extracted
+        # ADR-014: in context, where render sanitises and delimits it.
+        assert "5+ years of professional backend experience" not in prompt.instruction
+
+    async def test_a_role_only_interview_sends_no_posting_blocks(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        run_pipeline,
+    ) -> None:
+        await upload_resume(client, auth_headers, run_pipeline)
+        created = await start(client, auth_headers)
+        provider = FakeLLMProvider([question_reply(topic="Python")])
+
+        await ask_next_question(
+            interview_id=uuid.UUID(str(created["interview_id"])),
+            session=db_session,
+            provider=provider,
+        )
+
+        assert set(provider.calls[0].context) == {"The candidate's resume"}
+
+    async def test_the_degraded_fallback_keeps_the_requirements(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        auth_headers: dict[str, str],
+        seeded_skills: int,
+        run_pipeline,
+    ) -> None:
+        """The silent one.
+
+        `questions.py` builds a *second* prompt for the degraded attempt, and a
+        new argument forgotten there costs the fallback its posting with nothing
+        failing anywhere. What that attempt strips is the *resume* the model kept
+        over-reaching from; the employer's own words were never the problem.
+        """
+        await upload_resume(client, auth_headers, run_pipeline)
+        job_id = await _job_id(client, auth_headers)
+        created = await start(client, auth_headers, target_job_id=job_id)
+        provider = FakeLLMProvider(
+            ["not json", "still not json", question_reply(topic="Python")]
+        )
+
+        await ask_next_question(
+            interview_id=uuid.UUID(str(created["interview_id"])),
+            session=db_session,
+            provider=provider,
+        )
+
+        fallback = provider.calls[-1]
+        assert "What that posting lists as requirements" in fallback.context
+        assert (
+            "5+ years of professional backend experience"
+            in fallback.context["What that posting lists as requirements"]
+        )
+        # And it really is the degraded prompt: the resume was replaced.
+        assert fallback.context["The candidate's resume"] == "(not provided for this question)"

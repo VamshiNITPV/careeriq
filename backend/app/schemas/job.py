@@ -44,6 +44,22 @@ def _application_link(value: object) -> object:
     return normalize_url(value, max_length=MAX_JOB_URL, required=True)
 
 
+def _application_link_if_given(value: object) -> object:
+    """Absent costs nothing; present-and-broken costs the request.
+
+    The third of three, and the distinction between them is what a bad link
+    costs. `_application_link` charges the request for a missing one too;
+    `_optional_application_link` charges nothing even for a broken one, because
+    it validates a list item and a raise there would kill the whole batch.
+
+    This one is for a form where the link is genuinely optional but a typo should
+    be said out loud rather than silently discarded -- somebody who pasted a link
+    wrong wants to know, and dropping it would leave the posting looking like one
+    they never had a link for.
+    """
+    return normalize_url(value, max_length=MAX_JOB_URL)
+
+
 def _optional_application_link(value: object) -> object:
     """The same rules, but a bad link costs the link rather than the record.
 
@@ -233,14 +249,24 @@ class JobSubmitRequest(BaseModel):
     description: str = Field(min_length=1, max_length=MAX_DESCRIPTION_CHARS)
     title: str | None = Field(default=None, max_length=300)
     company: str | None = Field(default=None, max_length=200)
-    # Required: this is the link the interface offers as "Apply for this job",
-    # and a posting someone pasted always came from a page. Note that the
-    # importer deliberately does NOT require one — see JobImportRecord.url.
-    source_url: str = Field(max_length=MAX_JOB_URL)
+    # Optional since 9.6, and the premise this used to carry -- "a posting
+    # someone pasted always came from a page" -- is what changed. It is true of
+    # the Add-a-job page, which keeps its own client-side requirement because the
+    # rows it writes get an Apply button. It is not true of a posting pasted to
+    # rehearse against, which arrives as often from a PDF or an email as from a
+    # page, and ADR-019 forbids following the link anyway so it does nothing for
+    # that flow.
+    #
+    # `Job.source_url` was always nullable and imported jobs routinely have none,
+    # so the invariant being retired was a property of one route rather than of
+    # the corpus. US-3.1 AC1 says "paste raw text **or** provide a URL plus text",
+    # which the required field was always stricter than.
+    source_url: str | None = Field(default=None, max_length=MAX_JOB_URL)
 
-    # source_url is deliberately NOT in this list. Blanking it to None would
-    # reach Pydantic as a missing str and surface as "Input should be a valid
-    # string"; _apply_link says what is actually wrong instead.
+    # source_url is deliberately NOT in this list: `_apply_link` already turns a
+    # blank into None, and it refuses a malformed link rather than quietly
+    # dropping it -- absent and invalid are different answers and a form should
+    # give the second one.
     @field_validator("title", "company", mode="before")
     @classmethod
     def _blank_to_none(cls, value: object) -> object:
@@ -250,7 +276,7 @@ class JobSubmitRequest(BaseModel):
             return None
         return value
 
-    _apply_link = field_validator("source_url", mode="before")(_application_link)
+    _apply_link = field_validator("source_url", mode="before")(_application_link_if_given)
 
 
 class JobSubmitResponse(BaseModel):

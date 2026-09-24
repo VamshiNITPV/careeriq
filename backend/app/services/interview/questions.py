@@ -67,6 +67,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from app.core.logging import get_logger
@@ -77,7 +78,7 @@ from app.integrations.llm.base import (
 )
 from app.integrations.prompts.parsing import unfence
 from app.models.enums import QuestionDifficulty
-from app.services.interview.prompts import question_prompt
+from app.services.interview.prompts import bullets, question_prompt
 from app.services.resume.anchoring import find_span
 from app.services.resume.fabrication import EntityKind, validate_suggestion
 from app.services.resume.skill_extraction import SkillMatcher
@@ -238,15 +239,26 @@ def check_entities(
     *,
     resume_text: str,
     posting_text: str | None,
+    posting_requirements: Sequence[str] = (),
     matcher: SkillMatcher | None = None,
 ) -> tuple[str, ...]:
-    """Gate 4. Entities in the question that appear in neither source.
+    """Gate 4. Entities in the question that appear in none of the sources.
 
     Returns what it found rather than a pass/fail, because the caller's response
     is graded -- retry, then degrade -- not binary. See the module note on why
     this is advisory here and absolute in the resume feature.
+
+    The posting's extracted requirements count as evidence alongside its prose.
+    "AWS Certified Solutions Architect required" is exactly where a legitimate
+    credential appears, and leaving those lines out makes this gate more likely
+    to call a real requirement an invention -- the over-rejection this module
+    already retreated from once.
     """
-    source = resume_text if not posting_text else f"{resume_text}\n\n{posting_text}"
+    source = "\n\n".join(
+        part
+        for part in (resume_text, posting_text, bullets(posting_requirements))
+        if part
+    )
     result = validate_suggestion(
         suggested=question.question_text, source=source, matcher=matcher
     )
@@ -279,6 +291,9 @@ async def generate_question(
     target_role: str,
     resume_text: str,
     posting_text: str | None = None,
+    posting_requirements: Sequence[str] = (),
+    posting_responsibilities: Sequence[str] = (),
+    topic_from_posting: bool = False,
     matcher: SkillMatcher | None = None,
 ) -> GeneratedQuestion:
     """One question, gated. Raises `QuestionRejected` if none survives.
@@ -292,6 +307,9 @@ async def generate_question(
         target_role=target_role,
         resume_text=resume_text,
         posting_text=posting_text,
+        posting_requirements=posting_requirements,
+        posting_responsibilities=posting_responsibilities,
+        topic_from_posting=topic_from_posting,
     )
 
     last_reason = "no attempt succeeded"
@@ -307,7 +325,11 @@ async def generate_question(
             continue
 
         fabricated = check_entities(
-            question, resume_text=resume_text, posting_text=posting_text, matcher=matcher
+            question,
+            resume_text=resume_text,
+            posting_text=posting_text,
+            posting_requirements=posting_requirements,
+            matcher=matcher,
         )
         if not fabricated:
             return GeneratedQuestion(
@@ -332,7 +354,14 @@ async def generate_question(
         # material the model kept over-reaching from; leaving it in would invite
         # the same failure a third time.
         resume_text="(not provided for this question)",
+        # The posting and its requirements stay. What this attempt removes is the
+        # *resume* material the model kept over-reaching from; the employer's own
+        # words were never the problem, and dropping them here would quietly make
+        # the fallback question generic in a second way nobody asked for.
         posting_text=posting_text,
+        posting_requirements=posting_requirements,
+        posting_responsibilities=posting_responsibilities,
+        topic_from_posting=topic_from_posting,
     )
     try:
         reply = await _complete_once(provider, bare)
