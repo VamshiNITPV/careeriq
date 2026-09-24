@@ -123,6 +123,24 @@ async def _weighted_topics(session: AsyncSession, job_ids: Sequence[uuid.UUID]) 
             else_=float(SKILL_REQUIREMENT_WEIGHT[SkillRequirement.PREFERRED]),
         )
     )
+    # How clearly the posting asked, summed the same way.
+    #
+    # This is load-bearing for a single posting and nearly inert for a corpus,
+    # which is exactly backwards from how it looks. Across 48 adverts the weight
+    # above already separates everything. Within *one*, every REQUIRED skill
+    # carries an identical weight -- and `job/skills.py` marks REQUIRED for the
+    # Requirements section, the Responsibilities section and any unrecognised
+    # one, so a real posting routinely has thirty of them and the sort collapses
+    # to alphabetical.
+    #
+    # Found by running it: the first live comparison returned "Agile, CI/CD, Data
+    # Processing, Docker, ETL, Embeddings, FastAPI, Flask" for an AI Engineer
+    # posting whose text names Large Language Models, RAG and Python. `MAX_TOPICS`
+    # had cut the substance off at the letter F. Confidence is the parser's own
+    # answer to "how sure are we this was asked for" -- 0.99 from a Requirements
+    # heading, 0.60 from a section it could not identify -- so it orders by
+    # something this posting actually said, and keeps the provenance unmixed.
+    confidence = func.sum(func.coalesce(JobSkill.extraction_confidence, 0))
     rows = (
         await session.execute(
             select(Skill.name, weight.label("weighted"))
@@ -130,10 +148,10 @@ async def _weighted_topics(session: AsyncSession, job_ids: Sequence[uuid.UUID]) 
             .join(Skill, Skill.id == JobSkill.skill_id)
             .where(JobSkill.job_id.in_(job_ids))
             .group_by(Skill.id, Skill.name)
-            # Name breaks ties, so two equally demanded skills order the same
-            # way on every call -- an interview whose topic order shifted
-            # between resumes would be a different interview each time.
-            .order_by(weight.desc(), Skill.name)
+            # Name last, so two skills equal on both measures order the same way
+            # on every call -- an interview whose topic order shifted between
+            # resumes would be a different interview each time.
+            .order_by(weight.desc(), confidence.desc(), Skill.name)
             .limit(MAX_TOPICS)
         )
     ).all()

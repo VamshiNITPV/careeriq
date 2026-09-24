@@ -10,6 +10,18 @@ Schema is built by running the real Alembic migrations rather than
 `create_type=False`, so `create_all` would fail on missing types; and running
 the migrations means every test run also exercises the migration path, so a
 broken migration fails the suite instead of surviving until deployment.
+
+**Do not run two pytest invocations at once.** `_prepare_schema` DROPs and
+rebuilds the schema in `careeriq_test`, once per run, and there is exactly one
+such database -- so a second run pulls the schema out from under the first.
+The symptom is a handful of `ERROR`s at fixture setup in whichever tests were
+mid-flight, scattered across unrelated files, which reads convincingly like a
+regression in whatever was just changed. It happened on 2026-09-24: four errors
+in `test_recommendations.py` from a full suite that overlapped three targeted
+runs, and the code under review had nothing to do with either.
+
+Running against the dev database (`careeriq`) at the same time is fine -- that
+is a different database on the same server, and nothing here touches it.
 """
 
 from __future__ import annotations

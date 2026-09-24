@@ -429,6 +429,19 @@ resume. It now says which of the three it is.
 attempts and then exhausted the free tier, so the marking path has only ever seen the fake provider.
 That is the honest state of it, and it is listed as a debt rather than glossed.
 
+**Three ways to start one, added 2026-09-24 (9.6), and one of them was the point.** Paste the posting
+(the link is optional and never followed — ADR-019), pick a job you applied to, or name a role. The
+first two carry `target_job_id`, and that is what changed: until 9.6 `blueprint_for` took a role
+*string*, so targeting a specific job added its text to the prompt as background reading and altered
+**not one topic**. An interview "for this job" examined the corpus average, and the product implied
+otherwise. Topics now come from the chosen posting's own skills, weighted REQUIRED over PREFERRED by
+the same weights the match score uses.
+
+The page also says which of the three sources it used — *"from the posting you chose"*, *"from 12 live
+postings for this role"*, *"only 2 match, too few to read demand from"* — and says nothing at all
+before the first question exists. `blueprint.py` had claimed in prose since 9.2 that this value
+reached the API; nothing carried it past the function that computed it.
+
 Still to come: answering and scoring (US-8.2, US-8.3), and the agreement metric against a
 human-labelled set that ADR-015 requires before this can claim to work.
 

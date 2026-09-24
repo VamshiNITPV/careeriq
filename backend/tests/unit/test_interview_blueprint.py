@@ -18,6 +18,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,6 +34,7 @@ from app.models.enums import (
 from app.models.job import Job, JobSkill
 from app.models.skill import Skill
 from app.services.interview.blueprint import (
+    MAX_TOPICS,
     MIN_JOB_TOPICS,
     MIN_POSTINGS,
     blueprint_for,
@@ -63,6 +65,7 @@ async def _job(
     *,
     title: str = ROLE,
     skills: Sequence[tuple[Skill, SkillRequirement]] = (),
+    confidences: Sequence[Decimal] | None = None,
     status: JobStatus = JobStatus.ACTIVE,
     expires_at: datetime | None = None,
     canonical_job_id: uuid.UUID | None = None,
@@ -83,8 +86,16 @@ async def _job(
         expires_at=expires_at,
         canonical_job_id=canonical_job_id,
     )
-    for skill, requirement in skills:
-        job.skills.append(JobSkill(skill_id=skill.id, requirement=requirement))
+    for index, (skill, requirement) in enumerate(skills):
+        job.skills.append(
+            JobSkill(
+                skill_id=skill.id,
+                requirement=requirement,
+                extraction_confidence=(
+                    confidences[index] if confidences is not None else None
+                ),
+            )
+        )
     session.add(job)
     await session.flush()
     return job
@@ -352,3 +363,107 @@ class TestTheRolePath:
 
         assert blueprint.source is InterviewTopicSource.GENERIC
         assert blueprint.postings == 0
+
+
+class TestWhenEverySkillIsRequired:
+    """The case a corpus hides and one posting exposes.
+
+    `job/skills.py` marks REQUIRED for the Requirements section, the
+    Responsibilities section *and* any section it could not identify, so a real
+    posting routinely carries thirty REQUIRED skills. Across 48 adverts the
+    summed weight still separates them; within one it is identical for every
+    row, and the sort falls through to whatever comes next.
+
+    This class exists because the first live comparison returned "Agile, CI/CD,
+    Data Processing, Docker, ETL, Embeddings, FastAPI, Flask" for an AI Engineer
+    posting that names Large Language Models, RAG and Python -- `MAX_TOPICS` had
+    cut the substance off at the letter F. No unit test caught it, because none
+    of them had more than a handful of equally-weighted skills.
+    """
+
+    async def test_confidence_orders_what_the_weight_cannot(
+        self, db_session: AsyncSession
+    ) -> None:
+        # Alphabetically last, and the one the posting asked for most clearly.
+        substantive = await _skill(db_session, "Zebra Systems")
+        incidental = [await _skill(db_session, f"Aardvark {n}") for n in range(3)]
+
+        target = await _job(
+            db_session,
+            skills=[
+                (substantive, SkillRequirement.REQUIRED),
+                *[(skill, SkillRequirement.REQUIRED) for skill in incidental],
+            ],
+            confidences=[Decimal("0.99"), Decimal("0.60"), Decimal("0.60"), Decimal("0.60")],
+        )
+
+        blueprint = await blueprint_for(db_session, role=ROLE, job_id=target.id)
+
+        assert blueprint.topics[0] == "Zebra Systems"
+
+    async def test_the_cut_keeps_the_clearest_not_the_earliest(
+        self, db_session: AsyncSession
+    ) -> None:
+        """The actual failure, in miniature.
+
+        More skills than `MAX_TOPICS`, all REQUIRED, with the meaningful ones
+        sorting last by name. Without a confidence tiebreak the interview
+        examines the alphabet.
+        """
+        wanted = [await _skill(db_session, f"Zulu {n}") for n in range(3)]
+        filler = [await _skill(db_session, f"Alpha {n}") for n in range(MAX_TOPICS)]
+
+        target = await _job(
+            db_session,
+            skills=[
+                *[(skill, SkillRequirement.REQUIRED) for skill in wanted],
+                *[(skill, SkillRequirement.REQUIRED) for skill in filler],
+            ],
+            confidences=[
+                *[Decimal("0.99")] * len(wanted),
+                *[Decimal("0.60")] * len(filler),
+            ],
+        )
+
+        blueprint = await blueprint_for(db_session, role=ROLE, job_id=target.id)
+
+        assert len(blueprint.topics) == MAX_TOPICS
+        for skill in wanted:
+            assert skill.name in blueprint.topics, skill.name
+
+    async def test_requirement_still_outranks_confidence(
+        self, db_session: AsyncSession
+    ) -> None:
+        # Confidence is the tiebreak, not the primary. A PREFERRED skill the
+        # parser was certain about is still preferred, not required.
+        sure_but_optional = await _skill(db_session, "AAA Preferred")
+        needed = [await _skill(db_session, f"ZZZ Required {n}") for n in range(3)]
+
+        target = await _job(
+            db_session,
+            skills=[
+                (sure_but_optional, SkillRequirement.PREFERRED),
+                *[(skill, SkillRequirement.REQUIRED) for skill in needed],
+            ],
+            confidences=[Decimal("0.99"), *[Decimal("0.60")] * len(needed)],
+        )
+
+        blueprint = await blueprint_for(db_session, role=ROLE, job_id=target.id)
+
+        assert blueprint.topics[-1] == "AAA Preferred"
+
+    async def test_a_missing_confidence_does_not_drop_the_skill(
+        self, db_session: AsyncSession
+    ) -> None:
+        # The column is nullable, and a null must sort low rather than removing
+        # the row from the result entirely.
+        skills = [
+            (await _skill(db_session, f"Unscored {n}"), SkillRequirement.REQUIRED)
+            for n in range(MIN_JOB_TOPICS)
+        ]
+        target = await _job(db_session, skills=skills, confidences=None)
+
+        blueprint = await blueprint_for(db_session, role=ROLE, job_id=target.id)
+
+        assert blueprint.source is InterviewTopicSource.THIS_JOB
+        assert len(blueprint.topics) == MIN_JOB_TOPICS

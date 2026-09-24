@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { CitedAnswer } from '@/components/interview/CitedAnswer'
 import { QuestionCard } from '@/components/interview/QuestionCard'
+import { TopicProvenance } from '@/components/interview/TopicProvenance'
 import { ScoreBreakdown } from '@/components/interview/ScoreBreakdown'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
@@ -239,6 +240,11 @@ export function InterviewPage() {
             All interviews
           </Link>
         }
+      />
+
+      <TopicProvenance
+        source={interview.topic_source}
+        postings={interview.topic_postings}
       />
 
       {answered.map((question, index) => (

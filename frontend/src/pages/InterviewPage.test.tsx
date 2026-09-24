@@ -92,6 +92,30 @@ describe('InterviewPage', () => {
     expect(screen.getByRole('textbox', { name: /your answer/i })).toBeInTheDocument()
   })
 
+  it('says where the topics came from', async () => {
+    // Wiring only -- the four renderings are covered in TopicProvenance's own
+    // tests. This catches the component being present but never rendered.
+    vi.spyOn(interviewService, 'read').mockResolvedValue(interview())
+
+    renderPage()
+
+    expect(
+      await screen.findByText(/12 live postings for this role/i),
+    ).toBeInTheDocument()
+  })
+
+  it('claims nothing about topics before the first question exists', async () => {
+    vi.spyOn(interviewService, 'read').mockResolvedValue(
+      interview({ questions: [], questions_asked: 0, topic_source: null, topic_postings: null }),
+    )
+
+    renderPage()
+    await screen.findByText(/writing your next question/i)
+
+    expect(screen.queryByText(/for this role/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/general topics/i)).not.toBeInTheDocument()
+  })
+
   it('will not submit an empty answer', async () => {
     vi.spyOn(interviewService, 'read').mockResolvedValue(interview())
     const answer = vi.spyOn(interviewService, 'answer')

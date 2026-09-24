@@ -730,8 +730,8 @@ a viable target on noise. The API refuses to present a bare number without its s
 
 | Method | Path | Description | Built |
 |---|---|---|---|
-| `GET` | `/interviews` | Session list, newest first, with `answered` and `average_score` | 9.5 |
-| `POST` | `/interviews` | Start a session for a target role. **`202`** | 9.2 |
+| `GET` | `/interviews` | Session list, newest first, with `answered`, `average_score` and the job it was for | 9.5, 9.6 |
+| `POST` | `/interviews` | Start a session. `target_role`, optional `target_job_id`. **`202`** | 9.2 |
 | `GET` | `/interviews/{id}` | State, questions, answers so far. Also the poll target | 9.2 |
 | `POST` | `/interviews/{id}/questions/{qid}/answer` | Submit an answer. **`202`** | 9.3 |
 | `GET` | `/interviews/{id}/next-question` | — | planned |
@@ -745,6 +745,21 @@ a viable target on noise. The API refuses to present a bare number without its s
 request open for it makes every client's timeout the server's problem — the same
 reasoning `POST /optimize/analyze` records. The client polls `GET
 /interviews/{id}`; Phase 10's WebSockets (C14) replace that.
+
+*Three ways in, and none of them is a new endpoint (9.6).* `target_job_id` is
+what makes the questions come from a specific posting rather than from aggregate
+demand for the role title. Pasting a posting is therefore two ordinary calls --
+`POST /jobs`, then `POST /interviews` with the id it returns -- rather than a
+second corpus-write entrance on this router. `source_url` on `POST /jobs` became
+optional for it: a posting pasted to rehearse against arrives as often from a PDF
+as from a page, and ADR-019 forbids following the link anyway. A missing link
+costs nothing; a malformed one is still a 422, because absent and invalid are
+different answers.
+
+`GET /interviews/{id}` carries `topic_source` (`THIS_JOB` / `ROLE_DEMAND` /
+`GENERIC`) and `topic_postings`, describing the **latest** question. Null until
+the first question exists, which is a real state and must not be rendered as a
+claim.
 
 *There is no `GET /next-question`.* Asking for the next question and answering
 the current one were two requests describing one turn, and a client could issue

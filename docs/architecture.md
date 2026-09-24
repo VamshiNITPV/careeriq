@@ -664,6 +664,39 @@ defined. It should come from the role's own skill demand, which is the aggregati
 feature already performs over `job_skills`. What it must never become is model-generated: choosing
 which topics exist *is* choosing the trajectory, and that is the one thing this ADR forbids.
 
+**Amendment, 2026-09-24 (9.6) — the blueprint, answered, and in two layers.**
+
+The static map went in 9.2; this closes the rest. `blueprint_for` now has a source
+order: the **targeted posting's own** `job_skills` first, and the role's aggregate
+demand second. Both weighted REQUIRED over PREFERRED by the same
+`SKILL_REQUIREMENT_WEIGHT` the match score uses, so what a candidate is examined
+on and what they are scored on cannot drift apart. Still no model anywhere near
+it — the LLM writes question text for a `(topic, difficulty)` pair it did not
+choose, which is what this ADR requires.
+
+9.2 shipped half of this and the half it shipped was the less useful one: taking
+a role string meant that targeting a specific job added its raw text to the prompt
+as background reading and changed **not one topic**. An interview "for this job"
+examined the corpus average, and the product said otherwise.
+
+Three decisions worth recording, because each could reasonably have gone the other
+way:
+
+- **A thin posting falls through rather than blending.** Below `MIN_JOB_TOPICS` the
+  blueprint uses role demand instead of topping the posting up from it. An unmixed
+  provenance is the whole point — a blended list can be described honestly as
+  neither, and the interface has to describe it.
+- **The targeted posting skips the ACTIVE and non-expired filters.** That filter
+  stops a *sample of market demand* being drawn from dead adverts; a posting
+  somebody applied to six weeks ago is closed and is still exactly what they are
+  interviewing for.
+- **The source is recorded on the row, not recomputed on read.** `InterviewTopicSource`
+  — `THIS_JOB` / `ROLE_DEMAND` / `GENERIC`. Three states because a boolean folded
+  together the two a candidate would most want told apart, and stored because the
+  thresholds and the corpus both move, so a read-time answer can contradict the
+  questions already on the row. It is rewritten per question rather than frozen,
+  and therefore describes the latest one.
+
 ---
 
 ### ADR-014 — Security posture
@@ -1094,6 +1127,22 @@ admin endpoint.
   for ranking experiments at scale. Rejected as the primary source because the postings are a
   historical snapshot whose apply links are largely dead, and a working link was the requirement.
 - *Scraping job boards.* Out of scope by `requirements.md`, and the reason (2) has no fallback.
+
+**Amendment, 2026-09-24 (9.6).** The mock interview grew a "paste a posting" entry
+point, and point (1) above is exactly the decision it had to be built around. It
+was: the user pastes the text, and an optional link is stored as a reference and
+never dereferenced. `JobSubmitRequest.source_url` became optional to allow it,
+which retires only the *route-level* claim that "a posting someone pasted always
+came from a page" — `Job.source_url` was always nullable and imports routinely
+have none, so no corpus invariant moved. US-3.1 AC1's "paste raw text **or**
+provide a URL plus text" was always looser than the required field.
+
+Recorded here because the obvious next request is "just fetch the link", and the
+answer is in (1): following an apply URL is scraping, whatever the calling
+feature is. Changing that needs this ADR amended and the `requirements.md` §3.2
+line revisited, not a quiet exception. Note also that a fetch would fail on
+LinkedIn, Indeed and Naukri regardless — auth walls and JS rendering — so it
+would need the paste fallback anyway.
 - *Reusing `DATASET_IMPORT` for fetched rows.* Cheaper by one migration, and it forfeits per-provider
   removal — see (5).
 - *A scheduled refresh.* There is no scheduler; the queue is Phase 10 (ADR-008, ADR-018). A cron
