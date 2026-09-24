@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 from fastapi import APIRouter, BackgroundTasks, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import (
@@ -25,13 +25,14 @@ from app.api.deps import (
 from app.core.exceptions import InvalidStateTransitionError, ResourceNotFoundError
 from app.core.ids import uuid7
 from app.core.logging import get_logger
+from app.models.application import Application
 from app.models.interview import (
     Interview,
     InterviewAnswer,
     InterviewQuestion,
     InterviewScore,
 )
-from app.models.job import Job
+from app.models.job import Company, Job
 from app.schemas.common import ErrorResponse
 from app.schemas.interview import (
     AnswerSubmit,
@@ -106,17 +107,59 @@ async def create_interview(
     The job is checked *now* rather than in the background, so a bad id fails
     with a precise status instead of being queued and failing where nobody is
     looking.
+
+    **No relationship to the job is required, deliberately.** Jobs are a shared
+    corpus and `GET /jobs/{id}` is open to any authenticated caller, so
+    demanding one would break "interview against a job I just found in browse"
+    while protecting nothing -- `target_job_id` reveals only that a job exists,
+    which the job endpoint already tells you.
     """
+    application_id: uuid.UUID | None = None
     if payload.target_job_id is not None:
-        job = await session.scalar(select(Job.id).where(Job.id == payload.target_job_id))
-        if job is None:
+        # One query answers both questions: does the job exist, and has this
+        # caller applied to it. An OUTER join, because a job nobody applied to
+        # still starts an interview -- which is every interview started from a
+        # freshly pasted posting.
+        #
+        # `Application.user_id == user.id` sits in the ON clause rather than the
+        # WHERE, so the outer join still yields the job row for a stranger's
+        # job. That predicate is the entire security check here: without it, a
+        # caller would link somebody else's application to their own interview,
+        # which is a cross-user foreign key and a membership oracle over the
+        # applications table.
+        #
+        # `.first()` is correct rather than lucky: `ux_applications_user_job` is
+        # unique on (user_id, job_id) where not deleted, so the join can match
+        # at most one row.
+        row = (
+            await session.execute(
+                select(Job.id, Application.id)
+                .outerjoin(
+                    Application,
+                    and_(
+                        Application.job_id == Job.id,
+                        Application.user_id == user.id,
+                        Application.deleted_at.is_(None),
+                    ),
+                )
+                .where(Job.id == payload.target_job_id)
+            )
+        ).first()
+        if row is None:
             raise ResourceNotFoundError("Job")
+        application_id = row[1]
 
     interview = Interview(
         id=uuid7(),
         user_id=user.id,
         target_role=payload.target_role.strip(),
         target_job_id=payload.target_job_id,
+        # Derived, never accepted from the client. A supplied `application_id`
+        # would need its own ownership check and could disagree with
+        # `target_job_id` about which job this interview is for; deriving it
+        # makes both problems unrepresentable. The column has existed unused
+        # since 0021 for exactly this.
+        application_id=application_id,
         question_budget=payload.question_budget,
     )
     session.add(interview)
@@ -133,6 +176,7 @@ async def create_interview(
         user_id=str(user.id),
         role=interview.target_role,
         has_job=payload.target_job_id is not None,
+        has_application=application_id is not None,
     )
     return InterviewCreated(
         interview_id=interview.id,
@@ -185,7 +229,18 @@ async def list_interviews(
         select(func.count(Interview.id)).where(Interview.user_id == user.id)
     )
     rows = await session.execute(
-        select(Interview, answers.label("answered"), average.label("average_score"))
+        select(
+            Interview,
+            answers.label("answered"),
+            average.label("average_score"),
+            Company.name.label("company"),
+        )
+        # Two outer joins rather than loading Job rows: the only fact the row
+        # needs that `target_role` does not already carry is the company name,
+        # and this query already computes its counts in SQL. Outer, because most
+        # interviews have no job at all.
+        .outerjoin(Job, Job.id == Interview.target_job_id)
+        .outerjoin(Company, Company.id == Job.company_id)
         .where(Interview.user_id == user.id)
         # `id` as the tiebreak, not for ordering's sake but for paging's: two
         # interviews created in the same millisecond would otherwise be free to
@@ -215,9 +270,11 @@ async def list_interviews(
                     else None
                 ),
                 topic_source=interview.topic_source,
+                target_job_id=interview.target_job_id,
+                target_company=company,
                 created_at=interview.created_at,
             )
-            for interview, answered, average_score in rows
+            for interview, answered, average_score, company in rows
         ],
         total=total or 0,
     )

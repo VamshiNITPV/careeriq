@@ -186,6 +186,15 @@ class InterviewSummary(BaseModel):
     #: having done badly at it.
     average_score: Decimal | None = None
     topic_source: InterviewTopicSource | None = None
+    #: The posting this was practice for, when there was one.
+    #:
+    #: Two fields rather than an embedded `JobSummary`: that carries eighteen of
+    #: them plus a nested application, which is a lot of payload to render one
+    #: line, and it would contradict this model's own reason for existing. The
+    #: title is not repeated either -- `target_role` already *is* the job title
+    #: on both job-backed paths, and a second copy could only disagree.
+    target_job_id: uuid.UUID | None = None
+    target_company: str | None = None
     created_at: datetime
 
 
