@@ -1,6 +1,15 @@
 export type InterviewStatus = 'CREATED' | 'IN_PROGRESS' | 'COMPLETED' | 'ABANDONED'
 export type QuestionDifficulty = 'EASY' | 'MEDIUM' | 'HARD' | 'EXPERT'
 
+/**
+ * Where an interview's topics came from.
+ *
+ * Three states, because a boolean could only say two and the two it would have
+ * folded together — "from the posting you chose" and "from what the role
+ * generally demands" — are the two a candidate would most want told apart.
+ */
+export type TopicSource = 'THIS_JOB' | 'ROLE_DEMAND' | 'GENERIC'
+
 /** The five the answer is marked on, in the order they are shown. */
 export const DIMENSIONS = [
   'technical',
@@ -78,6 +87,13 @@ export interface Interview {
   questions_asked: number
   question_budget: number
   questions: InterviewQuestion[]
+  /**
+   * What the **latest** question's topics were built from, and how many postings
+   * that read. Null until the first question exists — which is a real state, not
+   * a missing value, and must never be rendered as a claim.
+   */
+  topic_source: TopicSource | null
+  topic_postings: number | null
   created_at: string
   /**
    * Why no question arrived, when none has.
@@ -100,6 +116,10 @@ export interface InterviewSummary {
   answered: number
   /** Null when nothing is marked yet — never 0, which would read as having done badly. */
   average_score: string | null
+  topic_source: TopicSource | null
+  /** The posting this was practice for, when there was one. */
+  target_job_id: string | null
+  target_company: string | null
   created_at: string
 }
 

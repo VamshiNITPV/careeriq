@@ -87,8 +87,13 @@ export const jobService = {
     description: string
     title?: string
     company?: string
-    /** Required: this becomes the "Apply for this job" link on the detail page. */
-    source_url: string
+    /**
+     * Optional since 9.6. It becomes the "Apply for this job" link where there
+     * is one; the Add-a-job form still requires it client-side, because the rows
+     * that page writes get an Apply button. A posting pasted to rehearse against
+     * often has no link at all.
+     */
+    source_url?: string
   }): Promise<JobSubmitResponse> {
     return api.post<JobSubmitResponse>('/jobs', input)
   },

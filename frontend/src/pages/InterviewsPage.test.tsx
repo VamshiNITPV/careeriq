@@ -23,6 +23,9 @@ function summary(overrides: Partial<InterviewSummary> = {}): InterviewSummary {
     question_budget: 10,
     answered: 2,
     average_score: '0.720',
+    topic_source: 'ROLE_DEMAND',
+    target_job_id: null,
+    target_company: null,
     created_at: '2026-09-23T10:00:00Z',
     ...overrides,
   }

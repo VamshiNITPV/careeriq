@@ -60,6 +60,8 @@ function interview(overrides: Partial<Interview> = {}): Interview {
     questions_asked: 1,
     question_budget: 10,
     questions: [question()],
+    topic_source: 'ROLE_DEMAND',
+    topic_postings: 12,
     created_at: '2026-09-23T10:00:00Z',
     summary_feedback: null,
     ...overrides,

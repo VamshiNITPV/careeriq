@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
+import { StartInterview } from '@/components/interview/StartInterview'
 import { Alert } from '@/components/ui/Alert'
-import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
-import { Input } from '@/components/ui/Input'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { PILL_SHAPE } from '@/components/ui/cardStyles'
 import { Spinner } from '@/components/ui/Spinner'
@@ -35,10 +34,19 @@ function InterviewRow({ interview }: { interview: InterviewSummary }) {
         className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4 transition-colors hover:bg-slate-50 sm:px-7"
       >
         <div className="min-w-0 flex-1">
-          <p className="truncate font-medium text-slate-900">{interview.target_role}</p>
+          <p className="truncate font-medium text-slate-900">
+            {interview.target_role}
+            {/* The company, not the title again: `target_role` already *is* the
+                job title on both job-backed paths, so repeating it would only
+                give two strings that can disagree. */}
+            {interview.target_company && (
+              <span className="font-normal text-slate-500"> · {interview.target_company}</span>
+            )}
+          </p>
           <p className="mt-0.5 text-sm text-slate-500">
             {interview.answered} of {interview.question_budget} answered
             {interview.questions_asked > interview.answered && ' · one waiting for you'}
+            {interview.target_job_id && ' · from a posting'}
           </p>
         </div>
         <span className={cn(PILL_SHAPE, status.tone)}>{status.label}</span>
@@ -54,12 +62,8 @@ function InterviewRow({ interview }: { interview: InterviewSummary }) {
 }
 
 export function InterviewsPage() {
-  const navigate = useNavigate()
   const [items, setItems] = useState<InterviewSummary[] | null>(null)
   const [loadError, setLoadError] = useState(false)
-  const [role, setRole] = useState('')
-  const [starting, setStarting] = useState(false)
-  const [startError, setStartError] = useState<string | null>(null)
 
   const load = useCallback(() => {
     interviewService.list().then(
@@ -70,37 +74,15 @@ export function InterviewsPage() {
 
   useEffect(load, [load])
 
-  function start(event: React.FormEvent) {
-    event.preventDefault()
-    const target = role.trim()
-    if (target.length < 2) {
-      setStartError('Tell us the role you are preparing for.')
-      return
-    }
-    setStarting(true)
-    setStartError(null)
-    interviewService.start({ target_role: target }).then(
-      (started) => navigate(`/interviews/${started.interview_id}`),
-      (error: unknown) => {
-        setStarting(false)
-        setStartError(
-          error instanceof Error && error.message
-            ? error.message
-            : "We couldn't start that interview.",
-        )
-      },
-    )
-  }
-
   return (
     <div className="space-y-6">
       <PageHeader
         title="Practise interviews"
         description={
           <>
-            Questions built from what this role's postings actually ask for and from your own
-            resume — not a fixed list. Answers are marked on five things, with the feedback
-            pointing at the words it is about.
+            Paste the posting you are interviewing for and the questions come from what it
+            asks for — not a fixed list, and not the corpus average. Answers are marked on five
+            things, with the feedback pointing at the words it is about.
           </>
         }
       />
@@ -109,34 +91,9 @@ export function InterviewsPage() {
         <h2 id="start-interview" className="text-base font-semibold text-slate-900">
           Start a new one
         </h2>
-        <form onSubmit={start} className="mt-3 flex flex-wrap items-end gap-3">
-          <div className="min-w-56 flex-1">
-            <Input
-              label="Role you are preparing for"
-              value={role}
-              onChange={(event) => setRole(event.target.value)}
-              placeholder="AI Engineer"
-              // Free text rather than a picker: somebody can rehearse for a
-              // role this corpus has never carried a posting for, and making
-              // them choose from a list would fail exactly the person
-              // preparing for something they have not found yet.
-              maxLength={200}
-              disabled={starting}
-            />
-          </div>
-          <Button type="submit" isLoading={starting}>
-            Start
-          </Button>
-        </form>
-        {startError && (
-          <Alert tone="error" className="mt-3">
-            {startError}
-          </Alert>
-        )}
-        <p className="mt-3 text-xs text-slate-500">
-          Ten questions, and it adapts as you go — a strong answer moves on, a weak one stays
-          on the topic and gets easier. You can close the tab and come back.
-        </p>
+        <div className="mt-3">
+          <StartInterview />
+        </div>
       </Card>
 
       <section aria-labelledby="past-interviews" className="space-y-3">
