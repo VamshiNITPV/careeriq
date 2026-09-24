@@ -33,12 +33,15 @@ export function TopicProvenance({
   const count = postings ?? 0
 
   let text: string
+  // The second clause is only said for the two skill-derived sources. GENERIC
+  // topics are a fixed list, and the gap ordering has nothing to act on there.
   if (source === 'THIS_JOB') {
-    text = 'Topics come from what the posting you chose asks for.'
+    text =
+      'Topics come from what the posting you chose asks for, with the things your resume does not cover yet first.'
   } else if (source === 'ROLE_DEMAND') {
     // The number is the evidence. "Based on market demand" with nothing behind
     // it is the kind of claim this line exists to replace.
-    text = `Topics come from what ${count} live posting${count === 1 ? '' : 's'} for this role ask for.`
+    text = `Topics come from what ${count} live posting${count === 1 ? '' : 's'} for this role ask for, with the things your resume does not cover yet first.`
   } else if (count === 0) {
     text =
       'No postings for this role in here yet, so these are general topics — still useful, just not specific to anyone hiring.'

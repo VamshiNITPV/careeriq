@@ -32,7 +32,7 @@ from app.models.enums import (
     SkillRequirement,
 )
 from app.models.job import Job, JobSkill
-from app.models.skill import Skill
+from app.models.skill import CandidateSkill, Skill
 from app.services.interview.blueprint import (
     MAX_TOPICS,
     MIN_JOB_TOPICS,
@@ -42,6 +42,17 @@ from app.services.interview.blueprint import (
 from app.services.interview.policy import GENERIC_TOPICS
 
 ROLE = "Backend Engineer"
+
+
+@pytest.fixture
+async def user_id(registered_user: dict[str, object]) -> uuid.UUID:
+    """The id of a real user row, for CandidateSkill's foreign key.
+
+    `registered_user` returns the response body rather than a model, and the FK
+    on `candidate_skills.user_id` is RESTRICT -- so an invented uuid fails on
+    insert rather than producing a quietly empty held set.
+    """
+    return uuid.UUID(str(registered_user["user"]["id"]))  # type: ignore[index]
 
 
 async def _skill(session: AsyncSession, name: str) -> Skill:
@@ -467,3 +478,196 @@ class TestWhenEverySkillIsRequired:
 
         assert blueprint.source is InterviewTopicSource.THIS_JOB
         assert len(blueprint.topics) == MIN_JOB_TOPICS
+
+
+async def _holds(session: AsyncSession, user_id: uuid.UUID, *skills: Skill) -> None:
+    """Give the candidate these skills, the way the extractor would."""
+    for skill in skills:
+        session.add(CandidateSkill(id=uuid7(), user_id=user_id, skill_id=skill.id))
+    await session.flush()
+
+
+class TestTheGapComesFirst:
+    """Demand says what the job wants; it says nothing about this candidate.
+
+    A list built from demand alone examines six years of somebody's experience as
+    readily as something they have never touched, and the questions worth
+    rehearsing are the ones they would actually struggle with. `skill/gaps.py`
+    already knows which those are, and this reuses its answer rather than forming
+    a second opinion -- so the gap a user was told to close is the gap they get
+    asked about.
+    """
+
+    async def test_a_skill_they_lack_outranks_one_they_have(
+        self, db_session: AsyncSession, user_id: uuid.UUID
+    ) -> None:
+        known = await _skill(db_session, "AAA Known")
+        unknown = await _skill(db_session, "ZZZ Unknown")
+        filler = await _skill(db_session, "MMM Filler")
+        await _holds(db_session, user_id, known)
+
+        target = await _job(
+            db_session,
+            skills=[
+                (known, SkillRequirement.REQUIRED),
+                (unknown, SkillRequirement.REQUIRED),
+                (filler, SkillRequirement.REQUIRED),
+            ],
+        )
+
+        blueprint = await blueprint_for(
+            db_session, role=ROLE, job_id=target.id, user_id=user_id
+        )
+
+        # The one they have is last, despite sorting first by name and being
+        # REQUIRED like the others. Both gaps tie with each other at the same
+        # multiplier, so the name decides between *them* -- which is why the
+        # assertion is about position relative to the known skill rather than
+        # about index 0.
+        assert blueprint.topics[-1] == "AAA Known"
+        assert blueprint.topics.index("ZZZ Unknown") < blueprint.topics.index("AAA Known")
+        assert blueprint.topics.index("MMM Filler") < blueprint.topics.index("AAA Known")
+
+    async def test_the_job_still_decides_what_matters_most(
+        self, db_session: AsyncSession, user_id: uuid.UUID
+    ) -> None:
+        """A preference, not a filter, and this is what keeps it one.
+
+        A PREFERRED skill they lack must still rank below a REQUIRED skill they
+        have. Otherwise the interview drifts off what the employer asked for and
+        onto whatever the candidate happens to be weakest at.
+        """
+        required_known = await _skill(db_session, "Required Known")
+        preferred_unknown = await _skill(db_session, "Preferred Unknown")
+        filler = await _skill(db_session, "Filler")
+        await _holds(db_session, user_id, required_known)
+
+        target = await _job(
+            db_session,
+            skills=[
+                (required_known, SkillRequirement.REQUIRED),
+                (preferred_unknown, SkillRequirement.PREFERRED),
+                (filler, SkillRequirement.REQUIRED),
+            ],
+        )
+
+        blueprint = await blueprint_for(
+            db_session, role=ROLE, job_id=target.id, user_id=user_id
+        )
+
+        assert blueprint.topics.index("Required Known") < blueprint.topics.index(
+            "Preferred Unknown"
+        )
+
+    async def test_a_related_skill_sits_between_the_two(
+        self, db_session: AsyncSession, user_id: uuid.UUID
+    ) -> None:
+        """Their React against the job's JavaScript is neither gap nor strength.
+
+        One taxonomy level, the same partial credit `skill/gaps.py` gives and the
+        ranking's skill dimension gives -- treating a related skill as a total
+        absence overstates the gap.
+        """
+        parent = await _skill(db_session, "Parent Skill")
+        child = Skill(
+            id=uuid7(),
+            name="Child Skill",
+            normalized_name=normalize_skill_text("Child Skill"),
+            category="tool",
+            aliases=[],
+            parent_skill_id=parent.id,
+        )
+        db_session.add(child)
+        await db_session.flush()
+
+        missing = await _skill(db_session, "Plainly Missing")
+        held = await _skill(db_session, "Plainly Held")
+        # The child, so the job's parent is partial credit; and one plain hold.
+        await _holds(db_session, user_id, child, held)
+
+        target = await _job(
+            db_session,
+            skills=[
+                (parent, SkillRequirement.REQUIRED),
+                (missing, SkillRequirement.REQUIRED),
+                (held, SkillRequirement.REQUIRED),
+            ],
+        )
+
+        blueprint = await blueprint_for(
+            db_session, role=ROLE, job_id=target.id, user_id=user_id
+        )
+
+        assert blueprint.topics.index("Plainly Missing") < blueprint.topics.index("Parent Skill")
+        assert blueprint.topics.index("Parent Skill") < blueprint.topics.index("Plainly Held")
+
+    async def test_it_lifts_the_role_aggregate_too(
+        self, db_session: AsyncSession, user_id: uuid.UUID
+    ) -> None:
+        """Why the multiplier is multiplicative.
+
+        A flat bonus big enough to matter against one posting's weight of 1.0 is
+        invisible against a sum over forty-eight, so the same constant would
+        change the targeted path and do nothing here.
+        """
+        known = await _skill(db_session, "AAA Known")
+        unknown = await _skill(db_session, "ZZZ Unknown")
+        await _holds(db_session, user_id, known)
+        for _ in range(MIN_POSTINGS):
+            await _job(
+                db_session,
+                skills=[
+                    (known, SkillRequirement.REQUIRED),
+                    (unknown, SkillRequirement.REQUIRED),
+                ],
+            )
+
+        blueprint = await blueprint_for(db_session, role=ROLE, user_id=user_id)
+
+        assert blueprint.source is InterviewTopicSource.ROLE_DEMAND
+        assert blueprint.topics[0] == "ZZZ Unknown"
+
+    async def test_a_rejected_skill_is_a_gap_again(
+        self, db_session: AsyncSession, user_id: uuid.UUID
+    ) -> None:
+        # The user told us the extractor was wrong about this one. `skill/gaps.py`
+        # reads `is_rejected` the same way, which is the point of sharing it.
+        rejected = await _skill(db_session, "AAA Rejected")
+        db_session.add(
+            CandidateSkill(
+                id=uuid7(), user_id=user_id, skill_id=rejected.id, is_rejected=True
+            )
+        )
+        await db_session.flush()
+        first = await _skill(db_session, "MMM Filler")
+        second = await _skill(db_session, "NNN Filler")
+
+        target = await _job(
+            db_session,
+            skills=[
+                (rejected, SkillRequirement.REQUIRED),
+                (first, SkillRequirement.REQUIRED),
+                (second, SkillRequirement.REQUIRED),
+            ],
+        )
+
+        blueprint = await blueprint_for(
+            db_session, role=ROLE, job_id=target.id, user_id=user_id
+        )
+
+        assert blueprint.topics[0] == "AAA Rejected"
+
+    async def test_without_a_user_the_ordering_is_the_job_alone(
+        self, db_session: AsyncSession
+    ) -> None:
+        # Scripts and the evaluation harness call this with no user. It must not
+        # require one, and without one the result is what it was before the gap.
+        skills = [
+            (await _skill(db_session, f"Plain {n}"), SkillRequirement.REQUIRED)
+            for n in range(MIN_JOB_TOPICS)
+        ]
+        target = await _job(db_session, skills=skills)
+
+        blueprint = await blueprint_for(db_session, role=ROLE, job_id=target.id)
+
+        assert blueprint.topics == ("Plain 0", "Plain 1", "Plain 2")

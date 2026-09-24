@@ -174,7 +174,14 @@ async def _run(
     # market asks for then -- while `topics_covered` keeps the path already
     # walked, so nothing already asked gets asked again.
     blueprint = await blueprint_for(
-        session, role=interview.target_role, job_id=interview.target_job_id
+        session,
+        role=interview.target_role,
+        job_id=interview.target_job_id,
+        # The candidate, so the topics lean towards what they cannot yet do.
+        # Without this the topics were the job's demand in the abstract and could
+        # as easily be six years of their experience as something they have never
+        # touched.
+        user_id=interview.user_id,
     )
 
     # Recorded on every resolution, not frozen at the first.

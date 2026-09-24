@@ -159,6 +159,56 @@ async def _target_job_ids(
     return list((await session.scalars(stmt)).all())
 
 
+async def held_and_related(
+    session: AsyncSession, *, user_id: uuid.UUID
+) -> tuple[set[uuid.UUID], set[uuid.UUID]]:
+    """What this candidate has, and what counts as partial credit for it.
+
+    Extracted so the interview blueprint can ask the same question. Two
+    definitions of "what the candidate holds" would drift, and then the gap the
+    user was told to close would stop being the gap they get asked about --
+    which is the whole reason the interview reads this demand in the first place.
+
+    `related` is one level of the taxonomy in both directions, so a candidate's
+    React counts as partial credit against a job's JavaScript and vice versa. The
+    same rule the ranking's skill dimension applies, and for the same reason:
+    treating a related skill as a total absence overstates the gap.
+    """
+    held = {
+        row[0]
+        for row in (
+            await session.execute(
+                select(CandidateSkill.skill_id).where(
+                    CandidateSkill.user_id == user_id,
+                    CandidateSkill.is_rejected.is_(False),
+                )
+            )
+        ).all()
+    }
+
+    related: set[uuid.UUID] = set()
+    if held:
+        related = {
+            row[0]
+            for row in (
+                await session.execute(
+                    select(Skill.id).where(
+                        or_(
+                            Skill.parent_skill_id.in_(held),
+                            Skill.id.in_(
+                                select(Skill.parent_skill_id).where(
+                                    Skill.id.in_(held), Skill.parent_skill_id.is_not(None)
+                                )
+                            ),
+                        )
+                    )
+                )
+            ).all()
+        }
+
+    return held, related
+
+
 async def compute_gaps(
     session: AsyncSession,
     *,
@@ -210,41 +260,7 @@ async def compute_gaps(
         )
     ).all()
 
-    held = {
-        row[0]
-        for row in (
-            await session.execute(
-                select(CandidateSkill.skill_id).where(
-                    CandidateSkill.user_id == user_id,
-                    CandidateSkill.is_rejected.is_(False),
-                )
-            )
-        ).all()
-    }
-
-    # One level of the taxonomy tree, so a candidate's React counts as partial
-    # credit against a job's JavaScript. The same rule the ranking's skill
-    # dimension applies, and for the same reason: treating a related skill as a
-    # total absence overstates the gap.
-    related: set[uuid.UUID] = set()
-    if held:
-        related = {
-            row[0]
-            for row in (
-                await session.execute(
-                    select(Skill.id).where(
-                        or_(
-                            Skill.parent_skill_id.in_(held),
-                            Skill.id.in_(
-                                select(Skill.parent_skill_id).where(
-                                    Skill.id.in_(held), Skill.parent_skill_id.is_not(None)
-                                )
-                            ),
-                        )
-                    )
-                )
-            ).all()
-        }
+    held, related = await held_and_related(session, user_id=user_id)
 
     total = Decimal(len(job_ids))
     gaps: list[SkillGap] = []

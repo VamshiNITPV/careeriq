@@ -10,6 +10,23 @@ describe('TopicProvenance', () => {
     expect(screen.getByText(/the posting you chose/i)).toBeInTheDocument()
   })
 
+  it('says the gaps come first, for both skill-derived sources', () => {
+    // Added in 9.7: the ordering lifts what the resume does not cover, and a
+    // line describing where topics come from should say so.
+    for (const source of ['THIS_JOB', 'ROLE_DEMAND'] as const) {
+      const { unmount } = render(<TopicProvenance source={source} postings={5} />)
+      expect(screen.getByText(/does not cover yet first/i)).toBeInTheDocument()
+      unmount()
+    }
+  })
+
+  it('does not claim a gap ordering over a generic list', () => {
+    // GENERIC topics are a fixed list, so there is no gap to have acted on.
+    render(<TopicProvenance source="GENERIC" postings={0} />)
+
+    expect(screen.queryByText(/does not cover yet/i)).not.toBeInTheDocument()
+  })
+
   it('counts the postings when the topics came from demand', () => {
     // The number is the evidence. "Based on market demand" with nothing behind
     // it is the claim this line exists to replace.

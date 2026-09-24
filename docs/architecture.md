@@ -697,6 +697,38 @@ way:
   questions already on the row. It is rewritten per question rather than frozen,
   and therefore describes the latest one.
 
+**Amendment, 2026-09-24 (9.7) — and within either source, the gap comes first.**
+
+The two layers above answer "what does this job want". Neither answers "can this
+candidate already do it", so a list built from demand alone examined six years of
+somebody's experience as readily as something they had never touched. The
+questions worth rehearsing are the ones they would actually struggle with.
+
+Each skill's weight is now multiplied by whether the candidate holds it, reusing
+`skill/gaps.py`'s own answer via an extracted `held_and_related` rather than
+forming a second opinion — so the gap a user was told to close is the gap they
+get asked about, and the two features cannot disagree about their weaknesses.
+
+**Multiplicative, not additive.** A flat bonus large enough to matter against one
+posting's weight of 1.0 is invisible against a sum over forty-eight, so the same
+constant would have changed the targeted path and done nothing to the aggregate.
+
+**A preference, not a filter**, and the size is what keeps it one. A REQUIRED
+skill they lack outranks a REQUIRED skill they have; a PREFERRED skill they lack
+still ranks below it. The employer's own emphasis stays primary, and an interview
+does not become an hour on your weakest subject — a real interview asks about
+your strengths too, and rehearsing the answers you are good at is part of the
+point. Partial credit for one taxonomy level sits between the two, the same rule
+the ranking's skill dimension applies.
+
+Verified against the corpus. For a Python/FastAPI backend posting and a candidate
+whose resume is Python, Django, PostgreSQL, Docker, Git and Redis, the topics
+moved from `AWS, Deployment, FastAPI, Performance Optimization, PostgreSQL,
+Python, Database Design, Docker` to `AWS, Deployment, Performance Optimization,
+Database Design, Large Language Models, WebSockets, Anthropic, Authentication` —
+and FastAPI dropped rather than vanished, because its taxonomy parent is Python,
+which she has.
+
 ---
 
 ### ADR-014 — Security posture
