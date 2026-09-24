@@ -142,12 +142,40 @@ async def _run(
         posting_text = await session.scalar(
             select(Job.description_raw).where(Job.id == interview.target_job_id)
         )
+        if not posting_text:
+            # Logged rather than passed over in silence. The candidate picked a
+            # job; if its text contributed nothing they are owed a trace of why,
+            # and `prompts.py` skips an empty posting with no signal at all. The
+            # row can be gone (the FK is SET NULL) or genuinely empty.
+            log.warning(
+                "interview: targeted job has no description",
+                interview_id=str(interview.id),
+                job_id=str(interview.target_job_id),
+            )
 
     # The blueprint is resolved per call rather than stored on the row. The
     # corpus grows, and an interview resumed next week should examine what the
     # market asks for then -- while `topics_covered` keeps the path already
     # walked, so nothing already asked gets asked again.
-    blueprint = await blueprint_for(session, role=interview.target_role)
+    blueprint = await blueprint_for(
+        session, role=interview.target_role, job_id=interview.target_job_id
+    )
+
+    # Recorded on every resolution, not frozen at the first.
+    #
+    # The blueprint is deliberately re-resolved per call (see above), so a
+    # session resumed next month can genuinely be drawing on a larger corpus
+    # than it started with. A frozen column would then describe the first
+    # question while the next one came from somewhere else -- and "from 3
+    # postings" shown beside an interview now reading 40 looks like a bug rather
+    # than history. The field means *what the most recent question was built
+    # from*, and the schema says so.
+    #
+    # One column cannot describe a session that crossed a threshold mid-way.
+    # Per-question provenance would, and is not worth a column until something
+    # renders it.
+    interview.topic_source = blueprint.source
+    interview.topic_postings = blueprint.postings
 
     state = InterviewState(
         current_difficulty=interview.current_difficulty,

@@ -8,7 +8,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.enums import InterviewStatus, QuestionDifficulty
+from app.models.enums import InterviewStatus, InterviewTopicSource, QuestionDifficulty
 
 
 class InterviewCreate(BaseModel):
@@ -137,6 +137,20 @@ class InterviewRead(BaseModel):
     topics_covered: list[str]
     questions_asked: int
     question_budget: int
+    #: Which of the three sources produced the topics of the **latest** question,
+    #: and how many postings it read. Null until the first question exists.
+    #:
+    #: Surfaced so the interface can say what it actually did instead of always
+    #: claiming market demand -- "from this posting", "from 12 postings for this
+    #: role" and "a general list" are three different promises, and two of them
+    #: were being made in the other's name.
+    #:
+    #: Latest rather than first: the blueprint is re-resolved per question, so a
+    #: resumed session can cross a threshold mid-way. One field cannot describe
+    #: both ends of that, and describing the question about to be asked is the
+    #: more useful half.
+    topic_source: InterviewTopicSource | None = None
+    topic_postings: int | None = None
     questions: list[InterviewQuestionRead]
     created_at: datetime
 
@@ -171,6 +185,7 @@ class InterviewSummary(BaseModel):
     #: an interview nobody has answered has no score, and 0.0 would read as
     #: having done badly at it.
     average_score: Decimal | None = None
+    topic_source: InterviewTopicSource | None = None
     created_at: datetime
 
 

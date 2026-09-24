@@ -42,7 +42,7 @@ from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, CreatedAtMixin, TimestampMixin, UUIDPrimaryKeyMixin
-from app.models.enums import InterviewStatus, QuestionDifficulty
+from app.models.enums import InterviewStatus, InterviewTopicSource, QuestionDifficulty
 
 
 def _pg_enum(enum_cls: type, name: str) -> SAEnum:
@@ -131,6 +131,30 @@ class Interview(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     questions_asked: Mapped[int] = mapped_column(
         SmallInteger, nullable=False, default=0, server_default=text("0")
     )
+
+    # ------------------------------------------------- where the topics came from
+    #
+    # Stored rather than recomputed on read, and rewritten on every resolution.
+    #
+    # Stored, because `GET /interviews/{id}` is polled every two seconds for
+    # ninety and a two-query aggregation there would be paid for nothing -- and
+    # because the thresholds and the corpus both move, so a read-time answer can
+    # contradict the questions already on the row.
+    #
+    # Rewritten rather than frozen, because the blueprint is deliberately
+    # re-resolved per question: a session resumed next month may genuinely be
+    # reading a larger corpus than it started with, and a frozen value would
+    # describe the first question while the next came from somewhere else. It
+    # means *what the latest question was built from*.
+    #
+    # Null until the first question exists, which is a real state and not a
+    # missing value -- an interview created a second ago has no topics yet, and
+    # that must be distinguishable from having generic ones.
+    topic_source: Mapped[InterviewTopicSource | None] = mapped_column(
+        _pg_enum(InterviewTopicSource, "interview_topic_source"), nullable=True
+    )
+    #: How many postings the topics were read from. One for a targeted posting.
+    topic_postings: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
 
     # ------------------------------------------------- the report
     #

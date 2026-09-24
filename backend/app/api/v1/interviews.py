@@ -214,6 +214,7 @@ async def list_interviews(
                     if average_score is not None
                     else None
                 ),
+                topic_source=interview.topic_source,
                 created_at=interview.created_at,
             )
             for interview, answered, average_score in rows

@@ -322,3 +322,30 @@ class QuestionDifficulty(StrEnum):
     MEDIUM = "MEDIUM"
     HARD = "HARD"
     EXPERT = "EXPERT"
+
+
+class InterviewTopicSource(StrEnum):
+    """Where an interview's topics came from (US-8.1 AC1).
+
+    Three states, and a boolean could only express two. `blueprint.py` carried
+    `is_generic: bool` and had to fold "from the posting you chose" and "from
+    what the role generally demands" into one value -- which are the two cases a
+    candidate would most want told apart.
+
+    Stored on the row rather than recomputed on read, the same reasoning
+    `interview_scores.next_difficulty` records: the corpus grows, and a
+    transcript read next month should say what its questions were actually built
+    from, not what today's corpus would produce.
+    """
+
+    #: The targeted posting's own skills, weighted REQUIRED over PREFERRED.
+    #: The strongest case, and the only one that can honestly be described as
+    #: questions built for this job.
+    THIS_JOB = "THIS_JOB"
+    #: Aggregated over every live posting whose title matches the role. Real
+    #: market demand, but not this employer's list.
+    ROLE_DEMAND = "ROLE_DEMAND"
+    #: Neither had enough to say. Not an error -- somebody may be rehearsing for
+    #: a role this corpus has never carried a posting for -- but it must never be
+    #: presented as demand-derived.
+    GENERIC = "GENERIC"
