@@ -150,7 +150,24 @@ export function InterviewPage() {
    */
   const awaitingQuestion = !finished && unanswered === null
   const awaitingScore = answered.some((question) => question.answer?.score == null)
-  const pending = state === 'ready' && (awaitingQuestion || awaitingScore)
+
+  /*
+   * A recorded reason stops the wait immediately, and this is the whole point
+   * of the field.
+   *
+   * The server writes `summary_feedback` when it knows the work will not
+   * finish -- no resume, no provider, a reply it could not use -- and clears it
+   * on any success. Its schema docstring says it is "the difference between
+   * 'still thinking' and 'this will never finish'".
+   *
+   * Until this, the page ignored that and rendered the reason only after the
+   * ninety-second timeout, so a failure the server reported on the very first
+   * poll sat behind a spinner for a minute and a half. Somebody starting an
+   * interview with no resume uploaded watched "Writing your next question…"
+   * the entire time, for a question that was never coming.
+   */
+  const stalled = interview?.summary_feedback != null
+  const pending = state === 'ready' && !stalled && (awaitingQuestion || awaitingScore)
 
   useEffect(() => {
     if (!pending) {
@@ -303,7 +320,27 @@ export function InterviewPage() {
         </Card>
       )}
 
-      {timedOut && (
+      {/* Two different failures, and they deserve two different headings.
+          The server saying why is not "taking longer than it should" -- it is
+          finished and it did not work, usually for a reason the reader can act
+          on. Titling it as slowness invites them to keep waiting. */}
+      {stalled && (
+        <Alert
+          tone="warning"
+          // `summary_feedback` is set mid-interview too -- a mark that could not
+          // be produced, a question the model kept failing -- and "could not
+          // start" would be plainly false once there is a transcript above it.
+          title={
+            questions.length === 0
+              ? 'This interview could not start.'
+              : 'This interview cannot go on.'
+          }
+        >
+          <p>{interview.summary_feedback}</p>
+        </Alert>
+      )}
+
+      {timedOut && !stalled && (
         <Alert tone="warning" title="This is taking longer than it should.">
           {interview.summary_feedback ? (
             <p>{interview.summary_feedback}</p>

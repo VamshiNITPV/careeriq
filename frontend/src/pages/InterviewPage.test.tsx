@@ -116,6 +116,77 @@ describe('InterviewPage', () => {
     expect(screen.queryByText(/general topics/i)).not.toBeInTheDocument()
   })
 
+  it('shows a recorded failure at once instead of spinning for ninety seconds', async () => {
+    /*
+     * The bug this replaces: `summary_feedback` was rendered only inside the
+     * timeout branch, so a reason the server wrote before the first poll sat
+     * behind "Writing your next question…" for a minute and a half. Somebody
+     * starting an interview with no resume watched a spinner for a question
+     * that was never coming.
+     *
+     * No fake timers here on purpose -- the point is that this appears without
+     * any time passing at all.
+     */
+    vi.spyOn(interviewService, 'read').mockResolvedValue(
+      interview({
+        questions: [],
+        questions_asked: 0,
+        topic_source: null,
+        topic_postings: null,
+        summary_feedback: 'Upload and process a resume first.',
+      }),
+    )
+
+    renderPage()
+
+    expect(await screen.findByText(/could not start/i)).toBeInTheDocument()
+    expect(screen.getByText('Upload and process a resume first.')).toBeInTheDocument()
+    expect(screen.queryByText(/writing your next question/i)).not.toBeInTheDocument()
+  })
+
+  it('stops polling once the server has said why', async () => {
+    // A reason means the work will not finish. Continuing to ask can only
+    // return what is already on screen.
+    const read = vi.spyOn(interviewService, 'read').mockResolvedValue(
+      interview({ questions: [], summary_feedback: 'The model refused.' }),
+    )
+
+    renderPage()
+    await screen.findByText('The model refused.')
+    const callsSoFar = read.mock.calls.length
+
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    await vi.advanceTimersByTimeAsync(30_000)
+    vi.useRealTimers()
+
+    expect(read.mock.calls.length).toBe(callsSoFar)
+  })
+
+  it('does not say an interview could not start when it plainly did', async () => {
+    // `summary_feedback` is set mid-interview too. With a transcript above it,
+    // "could not start" would be false.
+    vi.spyOn(interviewService, 'read').mockResolvedValue(
+      interview({
+        questions: [
+          question({
+            answer: {
+              answer_text: ANSWER,
+              duration_seconds: null,
+              submitted_at: '2026-09-23T10:05:00Z',
+              score: score(),
+            },
+          }),
+        ],
+        summary_feedback: 'Could not mark that answer.',
+      }),
+    )
+
+    renderPage()
+
+    expect(await screen.findByText(/cannot go on/i)).toBeInTheDocument()
+    expect(screen.queryByText(/could not start/i)).not.toBeInTheDocument()
+  })
+
   it('will not submit an empty answer', async () => {
     vi.spyOn(interviewService, 'read').mockResolvedValue(interview())
     const answer = vi.spyOn(interviewService, 'answer')
@@ -349,25 +420,31 @@ describe('InterviewPage', () => {
     })
   })
 
-  it('stops polling eventually and says why nothing arrived', async () => {
-    // `shouldAdvanceTime` so findBy/waitFor still work: the fake clock has to
-    // be installed *before* render, because the poll's setInterval is created
-    // during it and a clock swapped in afterwards would never drive it.
+  it('gives up eventually when the server never said why', async () => {
+    /*
+     * The timeout branch, and the only case left for it.
+     *
+     * A recorded `summary_feedback` now stops the wait at once, so what this
+     * covers is the other failure: a background task whose process died and
+     * wrote nothing at all. Without a ceiling the page spins forever on it.
+     *
+     * `shouldAdvanceTime` so findBy/waitFor still work, and the fake clock is
+     * installed *before* render because the poll's setInterval is created
+     * during it -- a clock swapped in afterwards would never drive it.
+     */
     vi.useFakeTimers({ shouldAdvanceTime: true })
     vi.spyOn(interviewService, 'read').mockResolvedValue(
-      interview({ questions: [], questions_asked: 0, summary_feedback: 'The model refused.' }),
+      interview({ questions: [], questions_asked: 0, summary_feedback: null }),
     )
 
     renderPage()
     await screen.findByText(/writing your next question/i)
 
-    // Generation runs after the response is sent, so a failure has no request
-    // left to fail on. Without a ceiling this page spins forever on a task
-    // whose process died, which is the failure worth designing against.
     await vi.advanceTimersByTimeAsync(95_000)
 
-    await waitFor(() => expect(screen.getByRole('status')).toBeInTheDocument())
-    expect(screen.getByText('The model refused.')).toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.getByText(/has not said why/i)).toBeInTheDocument(),
+    )
     expect(screen.queryByText(/writing your next question/i)).not.toBeInTheDocument()
   })
 
