@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { InterviewQuestion } from '@/types/interview'
 
 import { QuestionCard } from './QuestionCard'
@@ -77,6 +77,65 @@ describe('QuestionCard', () => {
       renderCard({ grounded_in: 'Reduced p99 latency by 35%' })
 
       expect(screen.queryByText(/a general question for this role/i)).not.toBeInTheDocument()
+    })
+  })
+
+  describe('hearing the question', () => {
+    afterEach(() => {
+      delete (window as unknown as Record<string, unknown>).speechSynthesis
+      delete (window as unknown as Record<string, unknown>).SpeechSynthesisUtterance
+    })
+
+    function installEngine() {
+      const engine = { speak: vi.fn(), cancel: vi.fn(), resume: vi.fn() }
+      ;(window as unknown as Record<string, unknown>).SpeechSynthesisUtterance = class {
+        text: string
+        onend: (() => void) | null = null
+        onerror: (() => void) | null = null
+        constructor(text: string) {
+          this.text = text
+        }
+      }
+      ;(window as unknown as Record<string, unknown>).speechSynthesis = engine
+      return engine
+    }
+
+    it('offers no control where the browser cannot speak', () => {
+      // jsdom has no engine, which is also every browser without one. A disabled
+      // button would invite a click that can never work and explain nothing.
+      renderCard()
+
+      expect(screen.queryByRole('button', { name: /listen/i })).not.toBeInTheDocument()
+    })
+
+    it('reads the question aloud', () => {
+      const engine = installEngine()
+      renderCard()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Listen' }))
+
+      expect(engine.speak).toHaveBeenCalledTimes(1)
+    })
+
+    it('offers to stop once it is reading', () => {
+      // The label carries the state, so it has to change.
+      installEngine()
+      renderCard()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Listen' }))
+
+      expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument()
+    })
+
+    it('keeps the question on screen as text', () => {
+      // Audio *and* text, not audio instead of it. Someone reading along, or
+      // re-reading a clause they missed, needs the words there.
+      installEngine()
+      renderCard()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Listen' }))
+
+      expect(screen.getByText(/how would you migrate a ledger/i)).toBeInTheDocument()
     })
   })
 

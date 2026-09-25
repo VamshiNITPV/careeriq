@@ -1,4 +1,5 @@
 import { PILL_SHAPE } from '@/components/ui/cardStyles'
+import { useSpeech } from '@/hooks/useSpeech'
 import type { InterviewQuestion, QuestionDifficulty } from '@/types/interview'
 import { cn } from '@/utils/cn'
 
@@ -34,6 +35,11 @@ export function QuestionCard({
   number: number
   total: number
 }) {
+  // One engine per card, so each question's button controls only its own
+  // reading -- and starting one cancels whatever else was playing, because the
+  // engine itself is shared by the page.
+  const speech = useSpeech()
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -57,9 +63,30 @@ export function QuestionCard({
         )}
       </div>
 
-      <p className="text-lg leading-relaxed font-medium text-slate-900">
-        {question.question_text}
-      </p>
+      <div className="flex items-start gap-3">
+        <p className="flex-1 text-lg leading-relaxed font-medium text-slate-900">
+          {question.question_text}
+        </p>
+        {/* Beside the question, not under it: the point is to hear *this*, and a
+            control parked at the bottom of a card reads as belonging to the card
+            rather than to the sentence. Hidden entirely where the browser has no
+            speech engine -- a disabled button invites a click that can never
+            work and explains nothing. */}
+        {speech.supported && (
+          <button
+            type="button"
+            onClick={() =>
+              speech.speaking ? speech.stop() : speech.speak(question.question_text)
+            }
+            // The label carries the state rather than aria-pressed: "Stop" says
+            // what the click does, where a pressed "Listen" makes the reader
+            // work out what pressed means.
+            className="shrink-0 rounded-md px-2 py-1 text-sm font-medium text-indigo-700 ring-1 ring-indigo-200 transition-colors hover:bg-indigo-50"
+          >
+            {speech.speaking ? 'Stop' : 'Listen'}
+          </button>
+        )}
+      </div>
 
       {/*
         Three states, not two, and the third was invisible until a live run

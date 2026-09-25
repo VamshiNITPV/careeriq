@@ -69,6 +69,11 @@ Maintains the job corpus, reviews the skill taxonomy, monitors pipeline health a
 - Native mobile apps. The web UI is responsive; that is the extent of mobile support.
 - Multi-language resumes. v1 is English-only.
 - Video or audio interview capture. Mock interviews are text-based in v1.
+  *Note 2026-09-25: the question can now be **read aloud**, which is playback and
+  not capture — nothing records the candidate, and the answer is still typed. The
+  browser's own speech engine does it, so it costs no quota and works when the AI
+  provider is down. The text stays on screen beside it; the audio is an addition,
+  never a replacement.*
 
 ### 3.3 Deferred (candidate for v2)
 
