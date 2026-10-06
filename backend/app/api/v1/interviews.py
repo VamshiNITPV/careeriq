@@ -1,6 +1,6 @@
 """Starting and resuming a mock interview (US-8.1).
 
-Four routes. Creating one answers immediately and generates the first question
+Five routes. Creating one answers immediately and generates the first question
 behind the response; listing gives somebody a way back to a session they left;
 reading one returns the whole transcript so far; answering records what they
 said and sets the rest going.
@@ -26,6 +26,7 @@ from app.core.exceptions import InvalidStateTransitionError, ResourceNotFoundErr
 from app.core.ids import uuid7
 from app.core.logging import get_logger
 from app.models.application import Application
+from app.models.enums import InterviewStatus
 from app.models.interview import (
     Interview,
     InterviewAnswer,
@@ -301,6 +302,98 @@ async def read_interview(
     """
     interview = await _owned(session, interview_id, user.id)
     return InterviewRead.model_validate(interview)
+
+
+@router.post(
+    "/{interview_id}/retry",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=InterviewCreated,
+    summary="Try again for a question that never arrived",
+    responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
+)
+async def retry_interview(
+    interview_id: uuid.UUID,
+    user: CurrentUser,
+    session: DbSession,
+    background: BackgroundTasks,
+    ask_next: InterviewRunnerDep,
+    submit: InterviewAnswerRunnerDep,
+) -> InterviewCreated:
+    """Resume whatever failed, after a failure that was nobody's fault.
+
+    `_fail` has said since 9.1 that "the status stays CREATED, so a retry is
+    still possible". Nothing offered one, so a transient 503 from the model
+    provider killed an interview permanently -- and mid-interview that stranded
+    the whole transcript, answers and marks included, with no way forward but to
+    start over and lose it.
+
+    The common case really is transient: the provider is overloaded for a minute
+    and fine afterwards.
+
+    **Which work to resume depends on where it stopped, and getting this wrong
+    loses an answer.** Two different things fail here, and they are not
+    interchangeable:
+
+    - *An answer exists and was never marked.* Scoring is what failed, so scoring
+      is what runs again -- and `submit_answer` goes on to ask the next question
+      afterwards, so the turn completes. Generating a question instead would
+      leave that answer permanently unmarked and enter the policy at the neutral
+      band rather than reacting to how they actually did. The candidate would see
+      "Not marked yet" against an answer forever, with no further retry offered,
+      because by then nothing looks stuck.
+    - *Everything marked, and no question waiting.* Generation failed, so
+      generation runs again.
+
+    **Refused while an unanswered question is waiting.** Generation appends, so
+    retrying there asks a second one and leaves the candidate two questions deep
+    in a sequence the policy thinks is one. `ux_interview_questions_order` would
+    catch the duplicate on the way in, but relying on a constraint to enforce a
+    rule the route could simply state is how an unexplained 500 reaches somebody.
+    """
+    interview = await _owned(session, interview_id, user.id)
+
+    if interview.status is InterviewStatus.COMPLETED:
+        raise InvalidStateTransitionError("That interview has already finished.")
+
+    waiting = next((q for q in interview.questions if q.answer is None), None)
+    if waiting is not None:
+        raise InvalidStateTransitionError(
+            "There is already a question waiting for your answer."
+        )
+
+    # Oldest first, so a session that somehow stranded two answers works its way
+    # forward rather than marking the newest and leaving a hole behind it.
+    unmarked = next(
+        (
+            question
+            for question in sorted(interview.questions, key=lambda q: q.question_order)
+            if question.answer is not None and question.answer.score is None
+        ),
+        None,
+    )
+
+    # Cleared before the task runs, not after it succeeds. The client polls this
+    # row, and leaving the old reason in place would show the previous failure
+    # beside a spinner for the whole of the next attempt.
+    interview.summary_feedback = None
+    await session.commit()
+
+    if unmarked is not None:
+        background.add_task(submit, unmarked.id, unmarked.answer.answer_text)
+    else:
+        background.add_task(ask_next, interview.id)
+
+    log.info(
+        "interview retried",
+        interview_id=str(interview_id),
+        questions_asked=interview.questions_asked,
+        resumed="scoring" if unmarked is not None else "question",
+    )
+    return InterviewCreated(
+        interview_id=interview_id,
+        status=interview.status,
+        poll_url=f"/api/v1/interviews/{interview_id}",
+    )
 
 
 @router.post(

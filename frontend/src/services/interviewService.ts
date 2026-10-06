@@ -22,6 +22,17 @@ export const interviewService = {
     return api.get<InterviewListResponse>('/interviews')
   },
 
+  /**
+   * Ask again after a failure that was nobody's fault.
+   *
+   * Refused with a 409 while a question is already waiting, because generation
+   * appends and a second one would leave you two questions deep in a sequence
+   * the policy believes is one.
+   */
+  retry(interviewId: string): Promise<InterviewStarted> {
+    return api.post<InterviewStarted>(`/interviews/${interviewId}/retry`, {})
+  },
+
   /** The session and its whole transcript. Also the poll target. */
   read(interviewId: string): Promise<Interview> {
     return api.get<Interview>(`/interviews/${interviewId}`)

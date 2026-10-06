@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -185,6 +185,161 @@ describe('InterviewPage', () => {
 
     expect(await screen.findByText(/cannot go on/i)).toBeInTheDocument()
     expect(screen.queryByText(/could not start/i)).not.toBeInTheDocument()
+  })
+
+  describe('speaking an answer', () => {
+    let engines: { onresult: ((event: unknown) => void) | null; abort: ReturnType<typeof vi.fn> }[]
+
+    function installRecogniser() {
+      engines = []
+      ;(window as unknown as Record<string, unknown>).SpeechRecognition = function (
+        this: Record<string, unknown>,
+      ) {
+        this.continuous = false
+        this.interimResults = false
+        this.lang = ''
+        this.start = vi.fn()
+        this.stop = vi.fn()
+        this.abort = vi.fn()
+        this.onresult = null
+        this.onerror = null
+        this.onend = null
+        engines.push(this as never)
+      }
+    }
+
+    function say(text: string) {
+      const entry = [{ transcript: text }] as unknown as ArrayLike<{ transcript: string }> & {
+        isFinal: boolean
+      }
+      entry.isFinal = true
+      engines.at(-1)?.onresult?.({ resultIndex: 0, results: [entry] })
+    }
+
+    afterEach(() => {
+      delete (window as unknown as Record<string, unknown>).SpeechRecognition
+    })
+
+    it('offers no microphone where the browser has none', async () => {
+      // jsdom, and Firefox, which has no recogniser at all.
+      vi.spyOn(interviewService, 'read').mockResolvedValue(interview())
+
+      renderPage()
+      await screen.findByRole('textbox', { name: /your answer/i })
+
+      expect(screen.queryByRole('button', { name: /speak your answer/i })).not.toBeInTheDocument()
+    })
+
+    it('puts what was said into the box, so it can be corrected', async () => {
+      /*
+       * The point of the whole feature. Recognition mangles exactly the
+       * vocabulary an interview answer is made of -- "FastAPI", "p99",
+       * "idempotent" -- and the answer is then marked on technical
+       * correctness. It has to land somewhere editable.
+       */
+      const user = userEvent.setup()
+      installRecogniser()
+      vi.spyOn(interviewService, 'read').mockResolvedValue(interview())
+
+      renderPage()
+      await user.click(await screen.findByRole('button', { name: /speak your answer/i }))
+      act(() => say('I would use dual writes.'))
+
+      expect(screen.getByRole('textbox', { name: /your answer/i })).toHaveValue(
+        'I would use dual writes.',
+      )
+    })
+
+    it('appends to what was already typed rather than replacing it', async () => {
+      // Somebody types a sentence, speaks the next, then fixes a mangled word.
+      // Replacing would throw away the first.
+      const user = userEvent.setup()
+      installRecogniser()
+      vi.spyOn(interviewService, 'read').mockResolvedValue(interview())
+
+      renderPage()
+      const box = await screen.findByRole('textbox', { name: /your answer/i })
+      await user.type(box, 'First I would check the plan.')
+      await user.click(screen.getByRole('button', { name: /speak your answer/i }))
+      act(() => say('Then I would add an index.'))
+
+      expect(box).toHaveValue('First I would check the plan. Then I would add an index.')
+    })
+
+    it('offers to stop once it is listening', async () => {
+      const user = userEvent.setup()
+      installRecogniser()
+      vi.spyOn(interviewService, 'read').mockResolvedValue(interview())
+
+      renderPage()
+      await user.click(await screen.findByRole('button', { name: /speak your answer/i }))
+
+      expect(screen.getByRole('button', { name: /stop speaking/i })).toBeInTheDocument()
+    })
+  })
+
+  describe('trying again', () => {
+    const failed = () =>
+      interview({
+        questions: [],
+        questions_asked: 0,
+        topic_source: null,
+        topic_postings: null,
+        summary_feedback: 'The AI provider could not be reached just now.',
+      })
+
+    it('offers a retry on a recorded failure', async () => {
+      // A provider outage is usually over in a minute. Before this the only way
+      // forward was starting again, which mid-interview meant abandoning every
+      // answer already given and marked.
+      vi.spyOn(interviewService, 'read').mockResolvedValue(failed())
+
+      renderPage()
+
+      expect(await screen.findByRole('button', { name: /try again/i })).toBeInTheDocument()
+    })
+
+    it('asks the server to try, then reloads', async () => {
+      const user = userEvent.setup()
+      const read = vi.spyOn(interviewService, 'read').mockResolvedValue(failed())
+      const retry = vi
+        .spyOn(interviewService, 'retry')
+        .mockResolvedValue({ interview_id: 'i1', status: 'CREATED', poll_url: '/x' })
+
+      renderPage()
+      await user.click(await screen.findByRole('button', { name: /try again/i }))
+
+      await waitFor(() => expect(retry).toHaveBeenCalledWith('i1'))
+      // Reloaded, so the cleared reason and any new question are picked up
+      // without waiting for the next poll.
+      await waitFor(() => expect(read.mock.calls.length).toBeGreaterThan(1))
+    })
+
+    it('says so when the retry itself fails', async () => {
+      const user = userEvent.setup()
+      vi.spyOn(interviewService, 'read').mockResolvedValue(failed())
+      vi.spyOn(interviewService, 'retry').mockRejectedValue(
+        new Error('There is already a question waiting for your answer.'),
+      )
+
+      renderPage()
+      await user.click(await screen.findByRole('button', { name: /try again/i }))
+
+      expect(
+        await screen.findByText(/already a question waiting/i),
+      ).toBeInTheDocument()
+    })
+
+    it('offers no retry while a question is waiting to be answered', async () => {
+      // The server refuses it with a 409, so offering the button would promise
+      // something that cannot happen.
+      vi.spyOn(interviewService, 'read').mockResolvedValue(interview())
+
+      renderPage()
+      await screen.findByRole('textbox', { name: /your answer/i })
+
+      expect(screen.queryByRole('button', { name: /try again/i })).not.toBeInTheDocument()
+    })
   })
 
   it('will not submit an empty answer', async () => {

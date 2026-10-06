@@ -75,6 +75,17 @@ Maintains the job corpus, reviews the skill taxonomy, monitors pipeline health a
   provider is down. The text stays on screen beside it; the audio is an addition,
   never a replacement.*
 
+  *Note 2026-10-06: the answer can now be **dictated**, and this is the closer
+  call. Nothing records and nothing is stored as audio — what reaches the server
+  is the same text a keyboard would have produced, so the interview remains
+  text-based, which is what this line protects. The microphone is an input method
+  rather than a recording. Two facts stated rather than buried: in Chrome the
+  audio is sent to Google to be transcribed, so it does leave the machine; and
+  recognition is poor at exactly the vocabulary an interview answer is made of,
+  so dictated text lands in the editable box and is never submitted directly. A
+  real run produced "askory the job students" for "a scoring job starts in the
+  background", which is the argument for that last rule rather than a hypothetical.*
+
 ### 3.3 Deferred (candidate for v2)
 
 - Learned ranking model trained on real outcome data, replacing the hand-tuned weight formula.

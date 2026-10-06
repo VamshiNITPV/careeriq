@@ -88,6 +88,8 @@ from sqlalchemy.pool import NullPool  # noqa: E402
 from app.api.deps import (  # noqa: E402
     get_analysis_runner,
     get_embeddings_provider,
+    get_interview_answer_runner,
+    get_interview_runner,
     get_jobs_provider,
     get_notification_service,
     get_pipeline_runner,
@@ -251,12 +253,25 @@ def emails() -> CapturingEmailProvider:
 
 
 @pytest.fixture
+def background_calls() -> list[tuple]:
+    """What the app queued to run after a response, in order.
+
+    Background work is swallowed in tests -- the real runners open their own
+    session and cannot see an uncommitted transaction -- so without this there is
+    no way to tell a route that queued the right task from one that queued the
+    wrong one, or nothing at all.
+    """
+    return []
+
+
+@pytest.fixture
 async def client(
     db_session: AsyncSession,
     emails: CapturingEmailProvider,
     storage: LocalObjectStorage,
     job_provider: FakeJobProvider,
     embedding_provider: FakeEmbeddingProvider,
+    background_calls: list[tuple],
 ) -> AsyncGenerator[AsyncClient]:
     """HTTP client wired to the app, sharing the test's rolled-back session.
 
@@ -310,6 +325,26 @@ async def client(
         return None
 
     app.dependency_overrides[get_analysis_runner] = lambda: no_background_analysis
+
+    # And the same for the interview, which was missed when it was added -- the
+    # real runners were reaching the global engine on every interview request,
+    # failing to find rows in an uncommitted transaction, and logging "vanished
+    # before its first question" into the output of tests that had nothing wrong
+    # with them.
+    #
+    # Recorded rather than merely swallowed, because *which* work a route queues
+    # is behaviour. `POST /interviews/{id}/retry` has to resume scoring or
+    # generation depending on where the failure landed, and asserting on its
+    # effect cannot distinguish them here: the task is a no-op, so both choices
+    # look identical from the database.
+    async def record_question(interview_id: uuid.UUID) -> None:
+        background_calls.append(("ask_next_question", interview_id))
+
+    async def record_answer(question_id: uuid.UUID, answer_text: str) -> None:
+        background_calls.append(("submit_answer", question_id, answer_text))
+
+    app.dependency_overrides[get_interview_runner] = lambda: record_question
+    app.dependency_overrides[get_interview_answer_runner] = lambda: record_answer
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http_client:
         yield http_client

@@ -734,6 +734,7 @@ a viable target on noise. The API refuses to present a bare number without its s
 | `POST` | `/interviews` | Start a session. `target_role`, optional `target_job_id`. **`202`** | 9.2 |
 | `GET` | `/interviews/{id}` | State, questions, answers so far. Also the poll target | 9.2 |
 | `POST` | `/interviews/{id}/questions/{qid}/answer` | Submit an answer. **`202`** | 9.3 |
+| `POST` | `/interviews/{id}/retry` | Resume whatever failed. **`202`**, `409` while a question is waiting | 9.8 |
 | `GET` | `/interviews/{id}/next-question` | — | planned |
 | `POST` | `/interviews/{id}/complete` | End early and generate the report | planned |
 | `GET` | `/interviews/{id}/report` | Full report with per-dimension scores | planned |

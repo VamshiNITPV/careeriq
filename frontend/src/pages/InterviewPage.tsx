@@ -10,6 +10,7 @@ import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Spinner } from '@/components/ui/Spinner'
 import { Textarea } from '@/components/ui/Textarea'
+import { useDictation } from '@/hooks/useDictation'
 import { interviewService } from '@/services/interviewService'
 import type { Interview, InterviewQuestion } from '@/types/interview'
 
@@ -119,6 +120,29 @@ export function InterviewPage() {
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [timedOut, setTimedOut] = useState(false)
+  const [retrying, setRetrying] = useState(false)
+  // Its own, not `submitError`: that one renders inside the answer form, and
+  // the whole point of a retry is that there is no form on screen to put it
+  // in -- so a failed retry would have said nothing at all.
+  const [retryError, setRetryError] = useState<string | null>(null)
+
+  /*
+   * Dictated text is *appended*, never substituted.
+   *
+   * Somebody types a sentence, speaks the next, then fixes a word the recogniser
+   * mangled -- all three in one answer. Replacing the box on each final result
+   * would throw away whatever they had typed, and separating them by a space
+   * only where there is already something is what stops a leading gap.
+   */
+  const dictation = useDictation(
+    useCallback((text: string) => {
+      setDraft((current) => {
+        const trimmed = text.trim()
+        if (!trimmed) return current
+        return current ? `${current.trimEnd()} ${trimmed}` : trimmed
+      })
+    }, []),
+  )
   const waitingSince = useRef(Date.now())
   const startedAnswerAt = useRef(Date.now())
 
@@ -195,6 +219,29 @@ export function InterviewPage() {
     // reviewing their own transcript wants to see.
     if (unansweredId !== null) startedAnswerAt.current = Date.now()
   }, [unansweredId])
+
+  function retry() {
+    setRetrying(true)
+    setRetryError(null)
+    interviewService.retry(interviewId).then(
+      () => {
+        setRetrying(false)
+        // The clock restarts with the attempt, so a retry gets its own ninety
+        // seconds rather than inheriting whatever was left of the last one.
+        waitingSince.current = Date.now()
+        setTimedOut(false)
+        load()
+      },
+      (error: unknown) => {
+        setRetrying(false)
+        setRetryError(
+          error instanceof Error && error.message
+            ? error.message
+            : "We couldn't try that again.",
+        )
+      },
+    )
+  }
 
   function submit(event: React.FormEvent) {
     event.preventDefault()
@@ -290,6 +337,40 @@ export function InterviewPage() {
               disabled={submitting}
               hint="Say it the way you would out loud. Rambling is marked separately from being right."
             />
+
+            {/* Hidden where the browser has no recogniser -- Firefox has none at
+                all -- rather than disabled, for the reason the Listen button is:
+                a control that can never work explains nothing. */}
+            {dictation.supported && (
+              <div className="flex flex-wrap items-center gap-3">
+                <Button
+                  type="button"
+                  variant={dictation.listening ? 'danger' : 'secondary'}
+                  size="sm"
+                  onClick={() => (dictation.listening ? dictation.stop() : dictation.start())}
+                  disabled={submitting}
+                >
+                  {dictation.listening ? 'Stop speaking' : 'Speak your answer'}
+                </Button>
+                {dictation.listening && (
+                  <span className="text-xs text-slate-500" role="status">
+                    {/* The interim transcript, shown but never written into the
+                        box. Committing it would rewrite the textarea on every
+                        syllable and fight whatever they were editing. */}
+                    {dictation.interim
+                      ? `“${dictation.interim}”`
+                      : 'Listening — speak, and it will appear above.'}
+                  </span>
+                )}
+                {!dictation.listening && (
+                  <span className="text-xs text-slate-500">
+                    It goes in the box, so you can fix anything it mishears before submitting.
+                  </span>
+                )}
+              </div>
+            )}
+            {dictation.error && <Alert tone="warning">{dictation.error}</Alert>}
+
             {submitError && <Alert tone="error">{submitError}</Alert>}
             <div className="flex items-center gap-3">
               <Button type="submit" isLoading={submitting} disabled={draft.trim().length === 0}>
@@ -337,19 +418,43 @@ export function InterviewPage() {
           }
         >
           <p>{interview.summary_feedback}</p>
+          {/* A provider outage is usually over in a minute, and before this the
+              only way forward was starting again -- which mid-interview meant
+              abandoning every answer already given and marked. */}
+          <Button
+            variant="secondary"
+            size="sm"
+            className="mt-3"
+            onClick={retry}
+            isLoading={retrying}
+          >
+            Try again
+          </Button>
+          {retryError && <p className="mt-2 text-sm font-medium">{retryError}</p>}
         </Alert>
       )}
 
       {timedOut && !stalled && (
         <Alert tone="warning" title="This is taking longer than it should.">
-          {interview.summary_feedback ? (
-            <p>{interview.summary_feedback}</p>
-          ) : (
-            <p>
-              Nothing has arrived for a while and the server has not said why. Anything you have
-              already answered is saved. Reloading is safe.
-            </p>
-          )}
+          {/* No `summary_feedback` branch here any more: `!stalled` means there
+              is none, so the other half of that ternary was unreachable. This
+              is the silent failure -- a background task whose process died
+              without recording anything, which is the case the timeout exists
+              for at all. */}
+          <p>
+            Nothing has arrived for a while and the server has not said why. Anything you have
+            already answered is saved.
+          </p>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="mt-3"
+            onClick={retry}
+            isLoading={retrying}
+          >
+            Try again
+          </Button>
+          {retryError && <p className="mt-2 text-sm font-medium">{retryError}</p>}
         </Alert>
       )}
     </div>
